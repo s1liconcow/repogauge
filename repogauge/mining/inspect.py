@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from configparser import ConfigParser
 from pathlib import Path
 from typing import Any, Dict, List
 import re
 
+from repogauge.mining.signature import REPO_VERSION_UNKNOWN, build_environment_signature
 from repogauge.exec import run_command
 from repogauge.utils.git import get_default_branch, get_repo_root
+
+try:
+    import tomllib
+except Exception:  # pragma: no cover
+    import tomli as tomllib  # type: ignore[import-not-found]
 
 
 def _as_sorted_unique(values: list[str]) -> list[str]:
@@ -21,6 +28,75 @@ def _safe_read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def _extract_toml_value(path: Path, sections: list[str], key: str) -> str | None:
+    try:
+        payload = tomllib.loads(_safe_read_text(path))
+    except Exception:
+        return None
+
+    cursor: Any = payload
+    for section in sections:
+        if not isinstance(cursor, dict) or section not in cursor:
+            return None
+        cursor = cursor.get(section)
+    if not isinstance(cursor, dict):
+        return None
+
+    value = cursor.get(key)
+    if isinstance(value, str):
+        cleaned = value.strip().strip('"\'')
+        return cleaned if cleaned else None
+    return None
+
+
+def _extract_setup_cfg_version(path: Path) -> str | None:
+    parser = ConfigParser()
+    try:
+        parser.read(path, encoding="utf-8")
+    except Exception:
+        return None
+    if parser.has_option("metadata", "version"):
+        value = parser.get("metadata", "version")
+        if value.strip():
+            return value.strip()
+    return None
+
+
+def _extract_setup_py_version(path: Path) -> str | None:
+    content = _safe_read_text(path)
+    if not content:
+        return None
+    match = re.search(r"version\s*=\s*(['\"])([^'\"]+)\1", content)
+    if match:
+        return match.group(2).strip()
+    return None
+
+
+def _detect_package_version(repo_root: Path) -> str:
+    pyproject = repo_root / "pyproject.toml"
+    if pyproject.exists():
+        value = _extract_toml_value(pyproject, ["tool", "poetry"], "version")
+        if not value:
+            value = _extract_toml_value(pyproject, ["project"], "version")
+        if value:
+            return value
+
+    setup_cfg = repo_root / "setup.cfg"
+    if setup_cfg.exists():
+        value = _extract_setup_cfg_version(setup_cfg)
+        if value:
+            return value
+
+    setup_py = repo_root / "setup.py"
+    if setup_py.exists():
+        value = _extract_setup_py_version(setup_py)
+        if value:
+            return value
+
+    return REPO_VERSION_UNKNOWN
+
 
 def _parse_version_tokens(raw: str) -> list[str]:
     found = re.findall(r"\b3\.\d+(?:\.\d+)?\b", raw)
@@ -241,6 +317,7 @@ def inspect_repository(path: str | Path) -> Dict[str, Any]:
 
     package_managers, install_hints, package_hints = _detect_package_and_install_hints(repo_root_resolved)
     test_commands = _detect_test_runner_hints(repo_root_resolved)
+    repo_version = _detect_package_version(repo_root_resolved)
 
     python_versions: list[str] = []
     if (repo_root_resolved / ".python-version").exists():
@@ -261,10 +338,10 @@ def inspect_repository(path: str | Path) -> Dict[str, Any]:
             python_versions=python_versions,
         )
     )
-
-    return {
+    profile = {
         "repo_name": repo_name,
         "repo_root": str(repo_root_resolved),
+        "repo_version": repo_version,
         "default_branch": default_branch,
         "commit_range": {
             "from": f"{default_branch}~100",
@@ -285,3 +362,7 @@ def inspect_repository(path: str | Path) -> Dict[str, Any]:
         "test_paths": _detect_test_paths(repo_root_resolved),
         "profile_warnings": warnings,
     }
+    profile["environment_signature"] = build_environment_signature(profile)
+    profile["version"] = profile["environment_signature"]["version"]
+
+    return profile
