@@ -23,6 +23,7 @@ done
 MINE_OUT="$OUT_DIR/mine"
 REVIEW_OUT="$OUT_DIR/review"
 EXPORT_OUT="$OUT_DIR/export"
+EVAL_OUT="$OUT_DIR/eval"
 
 echo "==> mine: scanning up to $MAX_COMMITS commits"
 repogauge mine "$REPO_ROOT" \
@@ -42,6 +43,11 @@ repogauge export "$REVIEW_OUT/reviewed.jsonl" \
     --out "$EXPORT_OUT" \
     --llm-mode off
 
+echo "==> eval: running gold evaluation"
+repogauge eval "$EXPORT_OUT" \
+    --gold \
+    --out "$EVAL_OUT"
+
 echo ""
 echo "Artifacts written to $OUT_DIR:"
 echo "  mine/repo_profile.json"
@@ -50,3 +56,4 @@ echo "  review/reviewed.jsonl"
 echo "  review/review.html"
 echo "  export/dataset/dataset.jsonl"
 echo "  export/dataset/predictions.gold.jsonl"
+echo "  eval/validation.jsonl"
