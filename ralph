@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+set -euo pipefail
+readonly BASE_PROMPT="\$launch-worker - Be sure all tests pass and to review your work with fresh eyes before commit and push. This is running non-interactively, you have my approval for all commands, please do not prompt the user."
+readonly DEFAULT_STATE_DIR=".ralph"
+readonly ASSIGNMENTS_FILE_NAME="agent-identities.tsv"
+readonly LOCK_DIR_NAME="agent-identities.lock"
+
+require_command() {
+  local cmd="$1"
+
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    printf 'Missing required command: %s\n' "$cmd" >&2
+    exit 1
+  fi
+}
+
+count_open_beads() {
+  br list --status=open --limit 0 --format json | jq 'length'
+}
+
+state_dir() {
+  printf '%s\n' "${RALPH_STATE_DIR:-$DEFAULT_STATE_DIR}"
+}
+
+stop_file() {
+  printf '%s/stop\n' "$(state_dir)"
+}
+
+assignments_file() {
+  printf '%s/%s\n' "$(state_dir)" "$ASSIGNMENTS_FILE_NAME"
+}
+
+lock_dir() {
+  printf '%s/%s\n' "$(state_dir)" "$LOCK_DIR_NAME"
+}
+
+sanitize_agent_key() {
+  local key="$1"
+
+  key="${key//$'\t'/ }"
+  key="${key//$'\n'/ }"
+  key="${key//$'\r'/ }"
+  printf '%s\n' "$key"
+}
+
+detect_agent_key() {
+  local tty_path=""
+
+  if [[ -n "${RALPH_AGENT_KEY:-}" ]]; then
+    sanitize_agent_key "env:${RALPH_AGENT_KEY}"
+    return
+  fi
+
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    sanitize_agent_key "tmux:${TMUX_PANE}"
+    return
+  fi
+
+  if tty_path="$(tty 2>/dev/null)" && [[ "$tty_path" != "not a tty" ]]; then
+    sanitize_agent_key "tty:${tty_path}"
+    return
+  fi
+
+  sanitize_agent_key "cwd:$(pwd -P)"
+}
+
+number_to_words() {
+  local number="$1"
+  local -a ones=(
+    zero one two three four five six seven eight nine
+    ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen
+  )
+  local -a tens=(zero ten twenty thirty forty fifty sixty seventy eighty ninety)
+  local quotient=0
+  local remainder=0
+
+  if (( number < 20 )); then
+    printf '%s\n' "${ones[number]}"
+    return
+  fi
+
+  if (( number < 100 )); then
+    quotient=$((number / 10))
+    remainder=$((number % 10))
+    if (( remainder == 0 )); then
+      printf '%s\n' "${tens[quotient]}"
+    else
+      printf '%s-%s\n' "${tens[quotient]}" "${ones[remainder]}"
+    fi
+    return
+  fi
+
+  quotient=$((number / 100))
+  remainder=$((number % 100))
+  if (( remainder == 0 )); then
+    printf '%s-hundred\n' "${ones[quotient]}"
+  else
+    printf '%s-hundred-%s\n' "${ones[quotient]}" "$(number_to_words "$remainder")"
+  fi
+}
+
+agent_name_for_slot() {
+  local slot="$1"
+  printf 'alpha-%s\n' "$(number_to_words "$slot")"
+}
+
+with_assignment_lock() (
+  local lock_path
+  lock_path="$(lock_dir)"
+
+  mkdir -p "$(state_dir)"
+
+  while ! mkdir "$lock_path" 2>/dev/null; do
+    sleep 0.1
+  done
+
+  trap 'rmdir "$lock_path"' EXIT
+  "$@"
+)
+
+lookup_agent_assignment() {
+  local agent_key="$1"
+  local assignment_file
+
+  assignment_file="$(assignments_file)"
+  [[ -f "$assignment_file" ]] || return 0
+
+  awk -F '\t' -v key="$agent_key" '$1 == key { print $3; exit }' "$assignment_file"
+}
+
+next_agent_slot() {
+  local assignment_file
+  local max_slot=0
+  local slot=0
+
+  assignment_file="$(assignments_file)"
+  [[ -f "$assignment_file" ]] || {
+    printf '1\n'
+    return
+  }
+
+  while IFS=$'\t' read -r _ slot _; do
+    [[ -n "$slot" ]] || continue
+    if (( slot > max_slot )); then
+      max_slot="$slot"
+    fi
+  done <"$assignment_file"
+
+  printf '%d\n' "$((max_slot + 1))"
+}
+
+assign_agent_name_locked() {
+  local agent_key="$1"
+  local assignment_file
+  local existing_name=""
+  local slot=0
+  local assigned_name=""
+
+  assignment_file="$(assignments_file)"
+  mkdir -p "$(dirname "$assignment_file")"
+  touch "$assignment_file"
+
+  existing_name="$(lookup_agent_assignment "$agent_key")"
+  if [[ -n "$existing_name" ]]; then
+    printf '%s\n' "$existing_name"
+    return
+  fi
+
+  slot="$(next_agent_slot)"
+  assigned_name="$(agent_name_for_slot "$slot")"
+  printf '%s\t%s\t%s\n' "$agent_key" "$slot" "$assigned_name" >>"$assignment_file"
+  printf '%s\n' "$assigned_name"
+}
+
+assigned_agent_name() {
+  local agent_key=""
+
+  agent_key="$(detect_agent_key)"
+  with_assignment_lock assign_agent_name_locked "$agent_key"
+}
+
+build_prompt() {
+  local agent_name="$1"
+
+  printf '%s %s\n' \
+    "$BASE_PROMPT" \
+    "Use the deterministic agent identity \`$agent_name\` for this run. If this worker restarts, keep using \`$agent_name\`. Save the registration token in \`.ralph/$agent_name.token\` for further use; it is only a local agent-registration token."
+}
+
+main() {
+  local open_count=0
+  local iteration=0
+  local agent_name=""
+  local prompt=""
+
+  require_command br
+  require_command jq
+  require_command codex
+
+  agent_name="$(assigned_agent_name)"
+  prompt="$(build_prompt "$agent_name")"
+  printf 'Assigned agent identity: %s\n' "$agent_name"
+
+  while true; do
+    open_count="$(count_open_beads)"
+    if [[ "$open_count" -eq 0 ]]; then
+      printf 'No open beads remain.\n'
+      break
+    fi
+
+    if [[ -f "$(stop_file)" ]]; then
+      printf 'Stop file found at %s, stopping..\n' "$(stop_file)"
+      break
+    fi
+
+    iteration=$((iteration + 1))
+    printf 'Iteration %d: %d open bead(s) remain. Running codex as %s...\n' "$iteration" "$open_count" "$agent_name"
+    codex exec --skip-git-repo-check "$prompt"
+  done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
