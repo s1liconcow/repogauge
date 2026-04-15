@@ -82,11 +82,18 @@ class TestCliSurface(unittest.TestCase):
             self.assertIn("commands", payload["test_runner_hints"])
             scan_path = out / "scan.jsonl"
             self.assertTrue(scan_path.exists())
+            candidates_path = out / "candidates.jsonl"
+            self.assertTrue(candidates_path.exists())
             scan_payloads = [
                 json.loads(line)
                 for line in scan_path.read_text(encoding="utf-8").splitlines()
             ]
+            candidates_payloads = [
+                json.loads(line)
+                for line in candidates_path.read_text(encoding="utf-8").splitlines()
+            ]
             self.assertEqual(len(scan_payloads), 0)
+            self.assertEqual(len(candidates_payloads), 0)
 
 
 if __name__ == "__main__":

@@ -38,7 +38,10 @@ def test_scan_captures_commit_shape_metadata(tmp_path: Path) -> None:
     assert newest.state == "discovered"
     assert newest.metadata["n_prod_files"] >= 1
     assert newest.metadata["n_test_files"] >= 1
+    assert newest.metadata["decision_band"] in {"shortlist", "review", "reject"}
+    assert isinstance(newest.metadata["score_breakdown"], list)
     assert "total_changed_lines" in newest.metadata
+    assert "heuristic_score" not in newest.__dict__ or newest.heuristic_score >= 0.0
     assert newest.changed_lines >= 0
     assert newest.metadata["n_hunks"] >= 1
     assert isinstance(newest.files_touched, list)

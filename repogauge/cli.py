@@ -190,6 +190,10 @@ def _run_command(namespace: argparse.Namespace) -> int:
         scan_path = out_root / "scan.jsonl"
         scan_path.write_text("".join(json.dumps(row.to_dict(), sort_keys=True) + "\n" for row in scan_rows), encoding="utf-8")
         manifest.artifact_paths["scan"] = str(scan_path)
+
+        candidates_path = out_root / "candidates.jsonl"
+        candidates_path.write_text("".join(json.dumps(row.to_dict(), sort_keys=True) + "\n" for row in scan_rows), encoding="utf-8")
+        manifest.artifact_paths["candidates"] = str(candidates_path)
         manifest.mark_step(
             "scan",
             ManifestStepStatus.SUCCEEDED,

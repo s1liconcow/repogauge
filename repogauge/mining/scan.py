@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from collections import Counter
 from pathlib import Path
-
 from repogauge.config import ScanRow
 from repogauge.exec import run_command
+from repogauge.mining.score import score_scan_commit
 from repogauge.mining.file_roles import classify_files
 from repogauge.utils.git import get_default_branch, get_repo_root, extract_commit_diff, list_commit_parents
 
@@ -148,7 +148,11 @@ def _classify_file_counts(files_touched: list[str]) -> dict[str, int]:
     return {
         "prod": counts["prod"],
         "test": counts["test"],
-        "config": counts["config_build"] + counts["test_support"],
+        "config_build": counts["config_build"],
+        "test_support": counts["test_support"],
+        "docs": counts["docs"],
+        "generated_vendor": counts["generated_vendor"],
+        "unknown": counts["unknown"],
     }
 
 
@@ -185,10 +189,32 @@ def _build_scan_row(
         "has_rename_only": has_rename_only,
         "n_prod_files": file_counts["prod"],
         "n_test_files": file_counts["test"],
-        "n_config_files": file_counts["config"],
+        "n_config_build_files": file_counts["config_build"],
+        "n_test_support_files": file_counts["test_support"],
+        "n_docs_files": file_counts["docs"],
+        "n_generated_vendor_files": file_counts["generated_vendor"],
+        "n_unknown_files": file_counts["unknown"],
         "n_hunks": n_hunks,
         "total_changed_lines": changed_lines,
     }
+    scoring = score_scan_commit(
+        commit_subject=subject,
+        commit_body=body,
+        diff=diff,
+        metadata=metadata,
+    )
+    state = "discovered"
+    if scoring.decision_band == "shortlist":
+        state = "shortlist"
+    elif scoring.decision_band == "reject":
+        state = "rejected"
+
+    metadata.update(
+        {
+            "score_breakdown": scoring.score_breakdown,
+            "decision_band": scoring.decision_band,
+        }
+    )
 
     return ScanRow(
         id=f"{repo.replace('/', '__')}-rg-{commit[:12]}",
@@ -198,8 +224,8 @@ def _build_scan_row(
         diff=diff,
         files_touched=files_touched,
         changed_lines=changed_lines,
-        heuristic_score=0.0,
-        state="discovered",
+        heuristic_score=scoring.score,
+        state=state,
         metadata=metadata,
     )
 
