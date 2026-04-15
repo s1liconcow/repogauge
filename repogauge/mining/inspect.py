@@ -99,16 +99,36 @@ def _detect_package_version(repo_root: Path) -> str:
 
 
 def _parse_version_tokens(raw: str) -> list[str]:
-    found = re.findall(r"\b3\.\d+(?:\.\d+)?\b", raw)
-    normalized = []
-    for value in found:
-        major, minor, *rest = value.split(".")
-        normalized.append(f"{major}.{minor}")
-    return sorted(set(normalized))
+    values: set[str] = set()
+    for chunk in re.split(r"[\s,]+", raw.replace(";", " ")):
+        value = chunk.strip()
+        if not value:
+            continue
+        if value.lower().startswith("py") and value[2:].isdigit() and len(value) >= 4:
+            py = value[2:]
+            if len(py) == 3:
+                values.add(f"3.{py[1:]}")
+                continue
+
+        match = re.match(r"(?P<op>>=|<=|>|<|==|=|~=)?\s*(?P<ver>3\.\d+(?:\.\d+)?)", value)
+        if not match:
+            continue
+        op = match.group("op") or "=="
+        if op in {"<", "<="}:
+            continue
+        major, minor, *_rest = match.group("ver").split(".")
+        values.add(f"{major}.{minor}")
+    return sorted(values)
 
 
 def _parse_requires_python(raw: str) -> list[str]:
-    return _parse_version_tokens(raw.replace(",", " "))
+    python_lines = re.findall(r"(?m)^\s*(?:python|requires-python)\s*=\s*['\"]([^'\"]+)['\"]", raw)
+    if not python_lines:
+        return _parse_version_tokens(raw.replace(",", " "))
+    versions: list[str] = []
+    for line in python_lines:
+        versions.extend(_parse_version_tokens(line))
+    return sorted(set(versions))
 
 
 def _detect_repo_name(repo_root: Path, warnings: list[dict]) -> str:

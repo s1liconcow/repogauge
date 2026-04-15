@@ -30,7 +30,7 @@ def _to_pkg_label(managers: list[str]) -> str:
 def _to_python_label(versions: list[str]) -> str:
     if not versions:
         return "pyunknown"
-    return "+".join(f"py{v.replace('.', '')}" for v in versions)
+    return "_".join(f"py{v.replace('.', '')}" for v in versions)
 
 
 def _dependency_hash(parts: dict[str, Any]) -> str:
