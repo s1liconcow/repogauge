@@ -25,6 +25,8 @@ VERBOSE_HELP = "Enable verbose output."
 
 from .manifest import Manifest, ManifestStepStatus
 from .logging_utils import log_event
+from .mining.inspect import inspect_repository
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RepoGauge CLI")
@@ -56,7 +58,7 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
 
 def _run_command(namespace: argparse.Namespace) -> int:
     command = namespace.command
-    out_root = Path(namespace.out or Path(".repogauge") / command).resolve()
+    out_root = Path(namespace.out or Path(".") / ".repogauge" / command).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
     manifest_path = out_root / "manifest.json"
@@ -103,6 +105,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
     )
 
     if namespace.dry_run:
+        manifest.mark_step("inspect", ManifestStepStatus.SKIPPED)
         manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
         manifest.finish(status="succeeded", metadata={"reason": "dry_run"})
         manifest.mark_step("finish", ManifestStepStatus.SUCCEEDED)
@@ -116,21 +119,49 @@ def _run_command(namespace: argparse.Namespace) -> int:
             },
             events_path,
         )
-    else:
-        # Scaffold implementations are intentionally explicit no-ops.
-        manifest.mark_step("execute", ManifestStepStatus.SUCCEEDED, started_at=command_timestamp)
-        manifest.mark_step("finish", ManifestStepStatus.SUCCEEDED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
-        manifest.finish(status="succeeded", metadata={"reason": "scaffolded", "path": namespace.path})
-        manifest.write(manifest_path)
-        log_event(
-            {
-                "event": "command.finish",
-                "command": command,
-                "status": manifest.status,
-                "timestamp": manifest.ended_at,
-            },
-            events_path,
-        )
+        return 0
+
+    if command == "mine":
+        manifest.mark_step("inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp)
+        try:
+            profile = inspect_repository(namespace.path or ".")
+        except Exception as exc:  # pragma: no cover - defensive for unsupported paths
+            manifest.mark_step("inspect", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(status="failed", metadata={"reason": "inspect_failed", "error": str(exc)})
+            manifest.mark_step("finish", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            return 1
+
+        repo_profile_path = out_root / "repo_profile.json"
+        repo_profile_path.write_text(json.dumps(profile, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        manifest.artifact_paths["repo_profile"] = str(repo_profile_path)
+        manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+
+    # Scaffold implementations are intentionally explicit no-ops for unimplemented commands.
+    manifest.mark_step("execute", ManifestStepStatus.SUCCEEDED, started_at=command_timestamp)
+    manifest.mark_step("finish", ManifestStepStatus.SUCCEEDED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+    manifest.finish(status="succeeded", metadata={"reason": "scaffolded", "path": namespace.path})
+    manifest.write(manifest_path)
+    log_event(
+        {
+            "event": "command.finish",
+            "command": command,
+            "status": manifest.status,
+            "timestamp": manifest.ended_at,
+        },
+        events_path,
+    )
 
     return 0
 

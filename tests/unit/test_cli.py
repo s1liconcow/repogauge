@@ -6,6 +6,7 @@ from pathlib import Path
 
 from repogauge.cli import _build_parser
 from repogauge.cli import main
+from repogauge.exec import run_command
 
 
 class TestCliSurface(unittest.TestCase):
@@ -54,6 +55,27 @@ class TestCliSurface(unittest.TestCase):
             payload = json.loads(manifest_path.read_text(encoding="utf-8").strip().splitlines()[-1])
             self.assertEqual(payload["status"], "succeeded")
             self.assertIn("resume", payload["step_statuses"])
+
+    def test_mine_writes_repo_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            repo = Path(workspace) / "repo"
+            repo.mkdir()
+            run_command(["git", "init", "-b", "main"], cwd=str(repo))
+            run_command(["git", "config", "user.name", "ci"], cwd=str(repo))
+            run_command(["git", "config", "user.email", "ci@example.com"], cwd=str(repo))
+            run_command(["git", "remote", "add", "origin", "git@github.com:example/demo.git"], cwd=str(repo))
+            (repo / "pyproject.toml").write_text("[tool.poetry]\\nname = 'demo'\\nversion='0.1'\\n", encoding="utf-8")
+            (repo / "pytest.ini").write_text("[pytest]\\n", encoding="utf-8")
+
+            out = Path(workspace) / "mine_out"
+            result = main(["mine", str(repo), "--out", str(out)])
+            self.assertEqual(result, 0)
+
+            profile_path = out / "repo_profile.json"
+            payload = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["repo_name"], "example/demo")
+            self.assertEqual(payload["python_hints"]["package_style"], "unknown")
+            self.assertIn("commands", payload["test_runner_hints"])
 
 
 if __name__ == "__main__":
