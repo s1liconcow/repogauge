@@ -278,7 +278,7 @@ def run_review(*, candidates_path: Path, out_root: Path, decisions_path: Path | 
                 candidate_id=candidate_id,
                 repo=repo,
                 reviewer_notes=notes,
-                state=state if state in {STATE_ACCEPTED.value, STATE_REJECTED.value} else STATE_REJECTED.value,
+                state=state,
                 reason=reason,
                 metadata=metadata,
             ).to_dict(),
@@ -304,4 +304,3 @@ def run_review(*, candidates_path: Path, out_root: Path, decisions_path: Path | 
         "rejected": rejected,
         "open": open_count,
     }
-
