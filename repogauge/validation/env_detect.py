@@ -46,6 +46,13 @@ def _coerce_list(value: Any) -> list[str]:
     return []
 
 
+def _version_tuple(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return (999,)
+
+
 def _choose_python_version(versions: list[str], provenance: list[str]) -> tuple[str, float]:
     if not versions:
         provenance.append("python_version:default-3.11")
@@ -55,8 +62,8 @@ def _choose_python_version(versions: list[str], provenance: list[str]) -> tuple[
     if len(normalized) > 1:
         provenance.append("python_version:conflict")
         provenance.append("python_version:chose-minimum")
-        # Deterministic tie-break: keep the first stable ordered value.
-        return normalized[0], 0.6
+        # Deterministic tie-break: pick the minimum by semantic version ordering.
+        return min(normalized, key=_version_tuple), 0.6
 
     provenance.append(f"python_version:{normalized[0]}")
     return normalized[0], 1.0
@@ -124,8 +131,16 @@ def _build_install_commands(
     return ["pip install -e ."], build, 0.5, "fallback"
 
 
+_SELF_MANAGING_INSTALL_PREFIXES = ("poetry install", "uv sync", "pipenv install")
+
+
 def _augment_for_pytest(install: list[str], test_cmd_base: str, provenance: list[str], confidence: float) -> tuple[list[str], float]:
     if test_cmd_base not in {"pytest", "python -m pytest"}:
+        return install, confidence
+
+    # Package managers like poetry, uv, and pipenv install dev dependencies
+    # (including pytest) automatically; no separate pip install step is needed.
+    if any(cmd.startswith(p) for cmd in install for p in _SELF_MANAGING_INSTALL_PREFIXES):
         return install, confidence
 
     has_pytest_hint = any("pytest" in command for command in install)

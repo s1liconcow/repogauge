@@ -104,6 +104,7 @@ def _to_dataset_rows(materialized_rows: Sequence[dict[str, Any]]) -> tuple[list[
         commit = _coerce_str(row.get("commit"))
         base_commit = _coerce_str(row.get("base_commit"))
         patch = _coerce_patch(row.get("patch"))
+        prod_patch = _coerce_patch(row.get("prod_patch")) or patch
         test_patch = _coerce_patch(row.get("test_patch"))
         problem_statement = _coerce_str(row.get("problem_statement"))
         candidate_id = _coerce_instance_id(row)
@@ -121,7 +122,7 @@ def _to_dataset_rows(materialized_rows: Sequence[dict[str, Any]]) -> tuple[list[
             base_commit=base_commit,
             problem_statement=problem_statement,
             version=_coerce_version(row),
-            patch=patch,
+            patch=prod_patch,
             test_patch=test_patch,
             FAIL_TO_PASS=fail_to_pass,
             PASS_TO_PASS=pass_to_pass,
@@ -138,7 +139,7 @@ def _to_dataset_rows(materialized_rows: Sequence[dict[str, Any]]) -> tuple[list[
         prediction_row = PredictionRow(
             instance_id=candidate_id,
             model_name_or_path="gold",
-            model_patch=patch,
+            model_patch=prod_patch,
             prompt_hash=None,
             solver_id=_coerce_str_or_none(metadata_value.get("solver_id")),
             metadata={

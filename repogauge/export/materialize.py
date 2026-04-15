@@ -110,7 +110,12 @@ def _materialize_candidate(
 ) -> Tuple[Optional[MaterializedItem], Optional[MaterializedItem]]:
     candidate_id = str(row.get("id") or row.get("candidate_id") or "")
     state = row.get("state")
-    commit = str(row.get("commit") or row.get("source_commit") or "").strip()
+    commit = str(
+        row.get("commit")
+        or row.get("source_commit")
+        or row.get("metadata", {}).get("source_commit")
+        or ""
+    ).strip()
     repo = str(row.get("repo") or "unknown")
 
     if not candidate_id:

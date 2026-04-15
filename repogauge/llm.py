@@ -183,8 +183,8 @@ def _coerce_records(payload: Any) -> tuple[LlmModelSpec, list[TriageSuggestion]]
         model_payload = payload.get("model")
         model = parse_model_spec(
             model_payload,
-            default_name=_coerce_string(payload.get("model_name")) or "local-default",
-            default_provider=_coerce_string(payload.get("provider")) or "local",
+            default_name=_coerce_string(payload.get("model_name")) or "",
+            default_provider=_coerce_string(payload.get("provider")) or "",
             default_prompt_version=_coerce_string(payload.get("prompt_version")) or default_prompt_version,
         )
         candidates_payload = payload.get("candidates")
@@ -216,8 +216,8 @@ def _coerce_records(payload: Any) -> tuple[LlmModelSpec, list[TriageSuggestion]]
     if isinstance(payload, list):
         model = parse_model_spec(
             None,
-            default_name="local-default",
-            default_provider="local",
+            default_name="",
+            default_provider="",
             default_prompt_version=default_prompt_version,
         )
         records = []
@@ -231,8 +231,8 @@ def _coerce_records(payload: Any) -> tuple[LlmModelSpec, list[TriageSuggestion]]
 
     model = parse_model_spec(
         None,
-        default_name="local-default",
-        default_provider="local",
+        default_name="",
+        default_provider="",
         default_prompt_version=default_prompt_version,
     )
     return model, []
@@ -244,9 +244,9 @@ def parse_triage_payload(payload: Any, *, default_name: str, default_provider: s
     for suggestion in records:
         if suggestion.candidate_id not in hints:
             hints[suggestion.candidate_id] = suggestion
-    if default_name and (not model.model_name or model.model_name == "local-default"):
+    if default_name and not model.model_name:
         model.model_name = default_name
-    if default_provider and (not model.provider or model.provider == "local"):
+    if default_provider and not model.provider:
         model.provider = default_provider
     return model, hints
 

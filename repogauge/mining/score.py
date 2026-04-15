@@ -257,12 +257,14 @@ def _apply_penalties(
             "reason": "No test file changes were detected.",
         })
 
-    if _row_metadata_int(metadata, "n_hunks") > 14 or _row_metadata_int(metadata, "total_changed_lines") > 900:
+    n_hunks = _row_metadata_int(metadata, "n_hunks")
+    changed_lines = _row_metadata_int(metadata, "total_changed_lines")
+    if n_hunks > 14 or changed_lines > 900:
         score += -3
         score_breakdown.append({
             "component": "large_refactor",
             "weight": -3,
-            "reason": "Large refactor-like patch shape.",
+            "reason": f"Large refactor-like patch shape (n_hunks={n_hunks}, changed_lines={changed_lines}; thresholds: >14 hunks or >900 lines).",
         })
 
     return score, score_breakdown

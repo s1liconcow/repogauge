@@ -16,3 +16,8 @@ repogauge = "repogauge.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["repogauge*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

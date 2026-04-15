@@ -221,6 +221,25 @@ def _load_llm_artifacts(
     return cache_hints, source_hints, triage_model
 
 
+def _render_score_breakdown(score_breakdown: list[dict[str, Any]], score: float) -> list[str]:
+    from repogauge.mining.score import AUTO_SHORTLIST_THRESHOLD, REVIEW_THRESHOLD
+
+    lines: list[str] = []
+    if not score_breakdown:
+        return lines
+    band_label = (
+        f"shortlist (≥{AUTO_SHORTLIST_THRESHOLD})" if score >= AUTO_SHORTLIST_THRESHOLD
+        else f"review (≥{REVIEW_THRESHOLD})" if score >= REVIEW_THRESHOLD
+        else f"reject (<{REVIEW_THRESHOLD})"
+    )
+    lines.append(f"- Score breakdown: **{score:.2f}** → {band_label}")
+    for entry in score_breakdown:
+        weight = entry.get("weight", 0)
+        sign = "+" if weight >= 0 else ""
+        lines.append(f"  - `{sign}{weight}` **{entry.get('component', '?')}**: {entry.get('reason', '')}")
+    return lines
+
+
 def _render_markdown(records: list[dict[str, Any]]) -> str:
     lines: list[str] = [
         "# RepoGauge Review Artifact",
@@ -250,6 +269,8 @@ def _render_markdown(records: list[dict[str, Any]]) -> str:
         issue_refs = row["issue_refs"]
         if issue_refs:
             lines.append(f"- Linked references: {', '.join(issue_refs)}")
+        score_breakdown = row.get("reviewed_record", {}).get("metadata", {}).get("score_breakdown", [])
+        lines.extend(_render_score_breakdown(score_breakdown, row["heuristic_score"]))
         lines.append("- Files by role:")
         for role, files in row["file_roles"].items():
             if not files:
@@ -262,6 +283,8 @@ def _render_markdown(records: list[dict[str, Any]]) -> str:
 
 
 def _render_html(records: list[dict[str, Any]]) -> str:
+    from repogauge.mining.score import AUTO_SHORTLIST_THRESHOLD, REVIEW_THRESHOLD
+
     lines = [
         "<!doctype html><html><head>",
         "<meta charset='utf-8'/>",
@@ -271,12 +294,18 @@ def _render_html(records: list[dict[str, Any]]) -> str:
         "table{border-collapse:collapse;width:100%;margin-top:1rem;}",
         "th,td{border:1px solid #ddd;padding:0.5rem;vertical-align:top;text-align:left;}",
         "th{background:#f4f4f5;}",
+        ".breakdown{font-size:0.85em;color:#555;margin-top:0.3rem;}",
+        ".breakdown li{list-style:none;padding:0;}",
+        ".pos{color:#2a7a2a;} .neg{color:#b03030;}",
+        ".band-shortlist{color:#1a6b1a;font-weight:bold;}",
+        ".band-review{color:#7a5a00;font-weight:bold;}",
+        ".band-reject{color:#b03030;font-weight:bold;}",
         "</style></head><body>",
         "<h1>RepoGauge Review Artifact</h1>",
         f"<p>Generated: {datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}Z</p>",
         f"<p>Candidates: {len(records)}</p>",
         "<table>",
-        "<thead><tr><th>ID</th><th>Repo</th><th>Commit</th><th>Heuristic score</th><th>Decision</th><th>Reason</th><th>Files</th></tr></thead>",
+        "<thead><tr><th>ID</th><th>Repo</th><th>Commit</th><th>Score / breakdown</th><th>Decision</th><th>Reason</th><th>Files</th></tr></thead>",
         "<tbody>",
     ]
 
@@ -284,12 +313,36 @@ def _render_html(records: list[dict[str, Any]]) -> str:
         file_rows = []
         for role, files in row["file_roles"].items():
             file_rows.append(f"<strong>{role}</strong>: {', '.join(files)}")
+
+        score = row["heuristic_score"]
+        if score >= AUTO_SHORTLIST_THRESHOLD:
+            band_css, band_label = "band-shortlist", f"shortlist (≥{AUTO_SHORTLIST_THRESHOLD})"
+        elif score >= REVIEW_THRESHOLD:
+            band_css, band_label = "band-review", f"review (≥{REVIEW_THRESHOLD})"
+        else:
+            band_css, band_label = "band-reject", f"reject (&lt;{REVIEW_THRESHOLD})"
+
+        score_breakdown = row.get("reviewed_record", {}).get("metadata", {}).get("score_breakdown", [])
+        breakdown_html = ""
+        if score_breakdown:
+            items = []
+            for entry in score_breakdown:
+                w = entry.get("weight", 0)
+                sign = "+" if w >= 0 else ""
+                css = "pos" if w >= 0 else "neg"
+                items.append(
+                    f"<li><span class='{css}'>{sign}{w}</span> "
+                    f"<strong>{entry.get('component','?')}</strong>: "
+                    f"{entry.get('reason','')}</li>"
+                )
+            breakdown_html = f"<ul class='breakdown'>{''.join(items)}</ul>"
+
         lines.append(
             "<tr>"
             f"<td>{row['id']}</td>"
             f"<td>{row['repo']}</td>"
             f"<td><code>{row['commit']}</code></td>"
-            f"<td>{row['heuristic_score']:.2f}</td>"
+            f"<td><span class='{band_css}'>{score:.2f} → {band_label}</span>{breakdown_html}</td>"
             f"<td>{row['state']}</td>"
             f"<td>{row['reason'] or '&mdash;'}</td>"
             f"<td>{'<br/>'.join(file_rows) if file_rows else '&mdash;'}</td>"

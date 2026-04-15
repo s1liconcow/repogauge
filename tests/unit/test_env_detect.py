@@ -15,7 +15,7 @@ def test_build_environment_plan_prefers_poetry_and_pytest() -> None:
     plan = build_environment_plan(profile)
 
     assert plan.python_version == "3.11"
-    assert plan.install == ["poetry install", "pip install pytest"]
+    assert plan.install == ["poetry install"]
     assert plan.pre_install == []
     assert plan.build == []
     assert plan.test_cmd_base == "pytest"

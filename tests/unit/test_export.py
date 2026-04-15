@@ -178,7 +178,7 @@ class TestExportCommand(unittest.TestCase):
             self.assertEqual(len(prediction_rows), 1)
             self.assertEqual(dataset_rows[0]["instance_id"], materialized_rows[0]["candidate_id"])
             self.assertEqual(prediction_rows[0]["instance_id"], materialized_rows[0]["candidate_id"])
-            self.assertEqual(prediction_rows[0]["model_patch"], materialized_rows[0]["patch"])
+            self.assertEqual(prediction_rows[0]["model_patch"], materialized_rows[0]["prod_patch"])
             self.assertEqual(prediction_rows[0]["model_name_or_path"], "gold")
 
     def test_run_export_converts_materialized_rows(self) -> None:
