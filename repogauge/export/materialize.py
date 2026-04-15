@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from repogauge.mining.synthesize import synthesize_problem_statement
 from repogauge.export.split_patch import PatchSplitError, split_prod_and_test
 from repogauge.utils.git import extract_commit_diff, get_repo_root, list_commit_parents
 
@@ -21,9 +22,10 @@ class MaterializedItem:
     repo: str
     commit: str
     base_commit: str
-    patch: str
-    test_patch: str
-    prod_patch: str
+    problem_statement: str = ""
+    patch: str = ""
+    test_patch: str = ""
+    prod_patch: str = ""
     status: str = "ready"
     reason: Optional[str] = None
     metadata: Dict[str, Any] | None = None
@@ -34,6 +36,7 @@ class MaterializedItem:
             "repo": self.repo,
             "commit": self.commit,
             "base_commit": self.base_commit,
+            "problem_statement": self.problem_statement,
             "status": self.status,
             "reason": self.reason,
             "patch": self.patch,
@@ -250,11 +253,22 @@ def _materialize_candidate(
         )
 
     materialized_metadata = _extract_candidate_metadata(row, patch, base_commit)
+    problem_statement, statement_source, statement_ref = synthesize_problem_statement(
+        row=row,
+        patch=patch,
+    )
+    materialized_metadata.update(
+        {
+            "problem_statement_source": statement_source,
+            "problem_statement_source_ref": statement_ref,
+        }
+    )
     item = MaterializedItem(
         candidate_id=candidate_id,
         repo=repo,
         commit=commit,
         base_commit=base_commit,
+        problem_statement=problem_statement,
         patch=patch,
         test_patch=test_patch,
         prod_patch=prod_patch,

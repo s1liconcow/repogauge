@@ -81,7 +81,55 @@ class TestMaterialize(unittest.TestCase):
             self.assertTrue(item["patch"])
             self.assertTrue(item["prod_patch"])
             self.assertTrue(item["test_patch"])
+            self.assertIn("problem_statement", item)
+            self.assertTrue(item["problem_statement"])
             self.assertEqual(item["metadata"]["materialization"]["base_commit"], commit_root)
+            self.assertEqual(item["metadata"]["problem_statement_source"], "commit")
+
+    def test_materialize_uses_issue_text_for_problem_statement(self) -> None:
+        with TemporaryDirectory() as workspace:
+            tmp_root = Path(workspace)
+            repo = _init_repo(tmp_root / "repo")
+            _commit_file(
+                repo=repo,
+                message="Base",
+                files={
+                    "src/core.py": "def value():\n    return 1\n",
+                    "tests/test_core.py": "def test_value():\n    assert value() == 1\n",
+                },
+            )
+            commit_prod = _commit_file(
+                repo=repo,
+                message="Fix issue",
+                files={
+                    "src/core.py": "def value():\n    return 2\n",
+                    "tests/test_core.py": "def test_value():\n    assert value() == 2\n",
+                },
+            )
+
+            reviewed = _write_reviewed(
+                tmp_root / "reviewed.jsonl",
+                [
+                    {
+                        "id": "owner__repo-rg-issue",
+                        "repo": "owner/repo",
+                        "commit": commit_prod,
+                        "state": "accepted",
+                        "metadata": {
+                            "parent_count": 1,
+                            "issue_title": "Regression in value",
+                            "issue_body": "value() returns wrong result for odd inputs",
+                            "issue_refs": ["1234"],
+                        },
+                    }
+                ],
+            )
+            summary = run_materialization(reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo)
+
+            self.assertEqual(summary["ready_count"], 1)
+            item = _load_records(tmp_root / "out" / "materialized.jsonl")[0]
+            self.assertEqual(item["metadata"]["problem_statement_source"], "linked_issue")
+            self.assertIn("Regression in value", item["problem_statement"])
 
     def test_materialize_rejects_non_single_parent_candidate(self) -> None:
         with TemporaryDirectory() as workspace:
