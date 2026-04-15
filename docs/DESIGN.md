@@ -1,5 +1,25 @@
 Here’s the v1 I would ship:
 
+## v1 scope and boundaries
+
+The concrete MVP architecture and non-goals are frozen in:
+
+- [docs/ADRs/0001-mvp-architecture.md](docs/ADRs/0001-mvp-architecture.md)
+
+### What v1 is
+
+- Python-only.
+- Local repository first.
+- Deterministic commit mining, validation, and harness-compatible export.
+- Dataset + generated adapter for arbitrary repo evaluation.
+
+### What v1 is not
+
+- Multi-language support.
+- Synthetic test generation.
+- Multi-commit PR reconstruction.
+- Remote/default model access (local mode is sufficient).
+
 A **Python-first, local-first mining tool** that turns one repo into a **private SWE-bench-style dataset plus a tiny generated harness adapter**. That adapter is the important part: the current SWE-bench harness is Docker-based, the main local entry point is `swebench.harness.run_evaluation`, and it can load a local JSON/JSONL/Parquet dataset path plus a predictions file. But for unseen repos, the harness code still looks up repo/version/language/parser in internal maps like `MAP_REPO_VERSION_TO_SPECS`, `MAP_REPO_TO_EXT`, and `MAP_REPO_TO_PARSER`, so a dataset file by itself is not enough for arbitrary repositories. ([SWE-bench][1])
 
 The official dataset shape you want to target already exists: instances carry fields like `instance_id`, `repo`, `base_commit`, `problem_statement`, `version`, `patch`, `test_patch`, `FAIL_TO_PASS`, and `PASS_TO_PASS`; predictions are JSONL objects with `instance_id`, `model_name_or_path`, and `model_patch`. The harness also accepts `FAIL_TO_PASS` and `PASS_TO_PASS` as arrays or JSON-encoded strings, which makes local export simpler. ([SWE-bench][3])
@@ -1081,4 +1101,3 @@ The next useful thing to do is turn this into a concrete `matrix.yaml` schema pl
 [6]: https://platform.moonshot.ai/docs/guide/kimi-k2-5-quickstart "Kimi K2.5 - Kimi API Platform"
 [7]: https://developers.openai.com/api/reference/resources/responses/methods/create/ "Create a model response | OpenAI API Reference"
 [8]: https://developers.openai.com/codex/config-advanced "Advanced Configuration – Codex | OpenAI Developers"
-
