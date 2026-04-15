@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from repogauge.review import run_review
-from repogauge.export import run_materialization
+from repogauge.export import run_export, run_materialization
 
 OUT_DIR_HELP = "Path where artifacts are written (created when needed)."
 CONFIG_HELP = "Configuration file path. Values are merged over project defaults."
@@ -196,6 +196,9 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 llm_model_name=namespace.llm_model if hasattr(namespace, "llm_model") else None,
                 llm_provider=namespace.llm_provider if hasattr(namespace, "llm_provider") else None,
             )
+            for warning in review_summary.get("warnings", []):
+                if warning:
+                    print(f"warning: {warning}", file=sys.stderr)
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
             manifest.mark_step(
                 "execute",
@@ -376,13 +379,21 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 out_root=out_root,
                 repo_root=repo_root,
             )
+            dataset_summary = run_export(
+                materialized_path=export_summary["materialized_path"],
+                out_root=out_root,
+            )
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
             manifest.artifact_paths["materialized"] = export_summary["materialized_path"]
             manifest.artifact_paths["materialization_rejections"] = export_summary["rejected_path"]
+            manifest.artifact_paths["dataset"] = dataset_summary["dataset_path"]
+            manifest.artifact_paths["predictions"] = dataset_summary["predictions_path"]
             manifest.metadata["export"] = {
                 "ready_count": export_summary["ready_count"],
                 "rejected_count": export_summary["rejected_count"],
                 "total_count": export_summary["total_count"],
+                "dataset_count": dataset_summary["dataset_count"],
+                "prediction_count": dataset_summary["prediction_count"],
             }
             manifest.mark_step(
                 "execute",

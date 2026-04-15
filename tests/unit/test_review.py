@@ -57,6 +57,23 @@ def _write_triage_hints(path: Path, candidate_id: str, payload: dict) -> None:
     path.write_text(json.dumps(triage_payload), encoding="utf-8")
 
 
+def _write_triage_hints_with_provider(path: Path, candidate_id: str, payload: dict, *, provider: str) -> None:
+    triage_payload = {
+        "model": {
+            "model_name": "advisor-unit-1",
+            "provider": provider,
+            "prompt_version": "review/v1",
+        },
+        "candidates": [
+            {
+                "candidate_id": candidate_id,
+                **payload,
+            }
+        ],
+    }
+    path.write_text(json.dumps(triage_payload), encoding="utf-8")
+
+
 class TestReviewCommand(unittest.TestCase):
     def test_review_command_generates_artifacts_and_defaults(self) -> None:
         with TemporaryDirectory() as workspace:
@@ -157,6 +174,71 @@ class TestReviewCommand(unittest.TestCase):
             self.assertEqual(by_id[candidate_ids[1]]["metadata"]["source_subject"], "Manual statement for review")
             self.assertEqual(advisory["problem_statement"], "Manual statement for review")
             self.assertTrue((root / "triage_cache.json").exists())
+
+    def test_review_rejects_remote_provider_in_local_only_mode(self) -> None:
+        with TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            candidates_path = root / "candidates.jsonl"
+            candidate_ids = _write_candidates(candidates_path)
+            triage_path = root / "triage.json"
+            _write_triage_hints_with_provider(
+                triage_path,
+                candidate_ids[0],
+                {"state": "accepted", "reason": "Should not be allowed"},
+                provider="openai",
+            )
+
+            exit_code = main(
+                [
+                    "review",
+                    str(candidates_path),
+                    "--llm-mode",
+                    "local_only",
+                    "--triage-hints",
+                    str(triage_path),
+                    "--llm-model",
+                    "advisor-unit-1",
+                    "--llm-provider",
+                    "openai",
+                ]
+            )
+            self.assertEqual(exit_code, 1)
+            self.assertFalse((root / "reviewed.jsonl").exists())
+
+    def test_review_allows_remote_provider_in_allow_remote_mode(self) -> None:
+        with TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            candidates_path = root / "candidates.jsonl"
+            candidate_ids = _write_candidates(candidates_path)
+            triage_path = root / "triage.json"
+            _write_triage_hints_with_provider(
+                triage_path,
+                candidate_ids[0],
+                {"state": "accepted", "reason": "Remote advisor included"},
+                provider="openai",
+            )
+
+            exit_code = main(
+                [
+                    "review",
+                    str(candidates_path),
+                    "--llm-mode",
+                    "allow_remote",
+                    "--triage-hints",
+                    str(triage_path),
+                    "--llm-model",
+                    "advisor-unit-1",
+                    "--llm-provider",
+                    "openai",
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+
+            reviewed = root / "reviewed.jsonl"
+            reviewed_rows = [json.loads(line) for line in reviewed.read_text(encoding="utf-8").splitlines() if line]
+            self.assertEqual(len(reviewed_rows), 2)
+            model_info = reviewed_rows[0]["metadata"]["llm_advisory"]["model"]
+            self.assertEqual(model_info["provider"], "openai")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ LLM_ALLOW_REMOTE = "allow_remote"
 TRIAGE_CACHE_FILENAME = "triage_cache.json"
 TRIAGE_DEFAULT_MODEL_NAME = "local-policy"
 TRIAGE_DEFAULT_PROVIDER = "local"
+LOCAL_ONLY_PROVIDERS = {"local", "local-only", "offline", "builtin", "built-in", "internal"}
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -124,6 +125,37 @@ def _coerce_llm_mode(value: Any) -> str:
     if mode not in {LLM_OFF, LLM_LOCAL_ONLY, LLM_ALLOW_REMOTE}:
         return LLM_OFF
     return mode
+
+
+def _normalize_provider(value: Any) -> str:
+    provider = str(value or TRIAGE_DEFAULT_PROVIDER).strip().lower()
+    if not provider:
+        return TRIAGE_DEFAULT_PROVIDER
+    return provider.replace("_", "-")
+
+
+def _provider_requires_remote_gate(mode: str, provider: str) -> bool:
+    normalized = _normalize_provider(provider)
+    return mode == LLM_LOCAL_ONLY and normalized not in LOCAL_ONLY_PROVIDERS
+
+
+def _llm_policy_warning(mode: str, provider: str) -> str | None:
+    normalized = _normalize_provider(provider)
+    if mode != LLM_ALLOW_REMOTE:
+        return None
+    if normalized in LOCAL_ONLY_PROVIDERS:
+        return None
+    return (
+        "Running with --llm-mode allow_remote enables advisory triage metadata that may"
+        " include remote provider references in artifacts."
+    )
+
+
+def _validate_llm_policy(mode: str, model: LlmModelSpec) -> None:
+    if _provider_requires_remote_gate(mode, model.provider):
+        raise ValueError(
+            f"remote provider '{model.provider}' requires --llm-mode allow_remote"
+        )
 
 
 def _merge_file_roles(files_by_role: dict[str, list[str]], suggested: dict[str, list[str]]) -> dict[str, list[str]]:
@@ -318,6 +350,9 @@ def run_review(
             llm_model_name=llm_model_name,
             llm_provider=llm_provider,
         )
+    triage_model.provider = _normalize_provider(triage_model.provider)
+    _validate_llm_policy(mode, triage_model)
+    policy_warning = _llm_policy_warning(mode, triage_model.provider)
     triage_hints = {**triage_cache, **triage_source}
 
     prepared_rows = []
@@ -431,4 +466,5 @@ def run_review(
         "accepted": accepted,
         "rejected": rejected,
         "open": open_count,
+        "warnings": [policy_warning] if policy_warning else [],
     }
