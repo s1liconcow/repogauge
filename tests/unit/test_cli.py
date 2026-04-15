@@ -30,6 +30,8 @@ class TestCliSurface(unittest.TestCase):
         self.assertEqual(namespace.commit_range, "HEAD~5..HEAD")
         self.assertEqual(namespace.max_commits, 10)
         self.assertTrue(namespace.exclude_merges)
+        namespace = self.parser.parse_args(["review", "./candidates.jsonl", "--decisions", "./decisions.jsonl"])
+        self.assertEqual(namespace.decisions, "./decisions.jsonl")
 
     def test_command_emits_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

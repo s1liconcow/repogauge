@@ -15,6 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from repogauge.review import run_review
 
 OUT_DIR_HELP = "Path where artifacts are written (created when needed)."
 CONFIG_HELP = "Configuration file path. Values are merged over project defaults."
@@ -46,6 +47,8 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--dry-run", action="store_true", help=DRY_RUN_HELP)
         cmd.add_argument("--llm-mode", help=LLM_MODE_HELP, choices=["off", "local_only", "allow_remote"])
         cmd.add_argument("--verbose", action="store_true", help=VERBOSE_HELP)
+        if name == "review":
+            cmd.add_argument("--decisions", help="Optional JSON/JSONL file with scripted review decisions.")
         if name == "mine":
             cmd.add_argument("--commit-range", help=COMMIT_RANGE_HELP)
             cmd.add_argument("--max-commits", default=100, type=int, help=MAX_COMMITS_HELP)
@@ -128,6 +131,80 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 "command": command,
                 "status": manifest.status,
                 "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+            },
+            events_path,
+        )
+        return 0
+
+    if command == "review":
+        if not namespace.path:
+            manifest.mark_step("inspect", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(status="failed", metadata={"reason": "missing_review_input"})
+            manifest.mark_step("finish", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": "missing review input path",
+                },
+                events_path,
+            )
+            return 1
+
+        source = Path(namespace.path).resolve()
+        candidates_path = source
+        if source.is_dir():
+            candidates_path = source / "candidates.jsonl"
+
+        out_root = Path(namespace.out or str(source.parent)).resolve() if source.is_file() else source.resolve()
+        manifest.mark_step("inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp)
+        try:
+            review_summary = run_review(
+                candidates_path=candidates_path,
+                out_root=out_root,
+                decisions_path=Path(namespace.decisions).resolve() if namespace.decisions else None,
+            )
+            manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+            manifest.mark_step(
+                "execute",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+            )
+            manifest.artifact_paths["reviewed"] = review_summary["reviewed_path"]
+            manifest.artifact_paths["review_markdown"] = review_summary["markdown_path"]
+            manifest.artifact_paths["review_html"] = review_summary["html_path"]
+            manifest.metadata["review"] = review_summary
+        except Exception as exc:
+            manifest.mark_step("inspect", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(status="failed", metadata={"reason": "review_failed", "error": str(exc)})
+            manifest.mark_step("finish", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            return 1
+
+        manifest.mark_step("finish", ManifestStepStatus.SUCCEEDED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+        manifest.finish(status="succeeded", metadata={"reason": "review_complete", "path": namespace.path})
+        manifest.write(manifest_path)
+        log_event(
+            {
+                "event": "command.finish",
+                "command": command,
+                "status": manifest.status,
+                "timestamp": manifest.ended_at,
             },
             events_path,
         )
