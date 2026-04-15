@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from repogauge.mining.file_roles import classify_file
 from repogauge.utils.git import extract_commit_diff, get_repo_root, list_commit_parents

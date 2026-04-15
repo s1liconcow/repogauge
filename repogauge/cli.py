@@ -14,8 +14,8 @@ import platform
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-
 from repogauge.review import run_review
+from repogauge.export import run_materialization
 
 OUT_DIR_HELP = "Path where artifacts are written (created when needed)."
 CONFIG_HELP = "Configuration file path. Values are merged over project defaults."
@@ -69,6 +69,24 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
         "llm_mode": namespace.llm_mode or "",
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _resolve_repo_root(path_value: str | Path) -> Path:
+    path = Path(path_value).resolve()
+    if path.is_file():
+        path = path.parent
+    if (path / ".git").exists():
+        return path
+    try:
+        from repogauge.utils.git import get_repo_root
+
+        return Path(get_repo_root(path))
+    except Exception:
+        pass
+    for ancestor in path.parents:
+        if (ancestor / ".git").exists():
+            return ancestor
+    raise RuntimeError(f"cannot resolve repository root from {path_value}")
 
 
 def _run_command(namespace: argparse.Namespace) -> int:
@@ -282,6 +300,115 @@ def _run_command(namespace: argparse.Namespace) -> int:
             "max_commits": namespace.max_commits,
             "include_merges": not namespace.exclude_merges,
         }
+        manifest.mark_step(
+            "execute",
+            ManifestStepStatus.SUCCEEDED,
+            ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+        )
+        manifest.mark_step("finish", ManifestStepStatus.SUCCEEDED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+        manifest.finish(status="succeeded", metadata={"reason": "scan_complete", "path": namespace.path})
+        manifest.write(manifest_path)
+        log_event(
+            {
+                "event": "command.finish",
+                "command": command,
+                "status": manifest.status,
+                "timestamp": manifest.ended_at,
+            },
+            events_path,
+        )
+        return 0
+
+    if command == "export":
+        if not namespace.path:
+            manifest.mark_step("inspect", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(status="failed", metadata={"reason": "missing_export_input"})
+            manifest.mark_step("finish", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": "missing reviewed input path",
+                },
+                events_path,
+            )
+            return 1
+
+        source = Path(namespace.path).resolve()
+        reviewed_path = source / "reviewed.jsonl" if source.is_dir() else source
+        if not reviewed_path.exists():
+            manifest.mark_step("inspect", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(status="failed", metadata={"reason": "missing_reviewed_input", "path": str(reviewed_path)})
+            manifest.mark_step("finish", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": f"reviewed artifact not found: {reviewed_path}",
+                },
+                events_path,
+            )
+            return 1
+
+        manifest.mark_step("inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp)
+        try:
+            repo_root = _resolve_repo_root(source)
+            export_summary = run_materialization(
+                reviewed_path=reviewed_path,
+                out_root=out_root,
+                repo_root=repo_root,
+            )
+            manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+            manifest.artifact_paths["materialized"] = export_summary["materialized_path"]
+            manifest.artifact_paths["materialization_rejections"] = export_summary["rejected_path"]
+            manifest.metadata["export"] = {
+                "ready_count": export_summary["ready_count"],
+                "rejected_count": export_summary["rejected_count"],
+                "total_count": export_summary["total_count"],
+            }
+            manifest.mark_step(
+                "execute",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+            )
+            manifest.mark_step("finish", ManifestStepStatus.SUCCEEDED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.finish(status="succeeded", metadata={"reason": "export_complete", "path": namespace.path})
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                },
+                events_path,
+            )
+            return 0
+        except Exception as exc:
+            manifest.mark_step("inspect", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(status="failed", metadata={"reason": "export_failed", "error": str(exc)})
+            manifest.mark_step("finish", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            return 1
 
     # Scaffold implementations are intentionally explicit no-ops for unimplemented commands.
     manifest.mark_step("execute", ManifestStepStatus.SUCCEEDED, started_at=command_timestamp)
