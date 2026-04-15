@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from repogauge.mining.file_roles import classify_file
+from repogauge.export.split_patch import PatchSplitError, split_prod_and_test
 from repogauge.utils.git import extract_commit_diff, get_repo_root, list_commit_parents
-
-
-DIFF_HEADER_RE = re.compile(r"^diff --git (?:a/)?(.+?) (?:b/)?(.+)$")
 
 
 class MaterializationError(RuntimeError):
@@ -57,54 +53,6 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def _parse_diff_headers(diff: str) -> Tuple[List[str], List[str], Dict[str, List[str]]]:
-    prod_chunks: list[str] = []
-    test_chunks: list[str] = []
-    touched: Dict[str, List[str]] = {"prod": [], "test": [], "unknown": []}
-
-    current_bucket: Optional[str] = None
-
-    for line in diff.splitlines(keepends=True):
-        match = DIFF_HEADER_RE.match(line)
-        if match:
-            # Prefer the b/ path from the diff header when present.
-            file_path = match.group(2).strip()
-            role = classify_file(file_path).role
-            if role == "test":
-                current_bucket = "test"
-            elif role in {"prod", "config_build", "docs", "generated_vendor", "unknown", "test_support"}:
-                current_bucket = "prod"
-            else:
-                current_bucket = "prod"
-
-            bucket_name = current_bucket if current_bucket in {"test", "prod"} else "unknown"
-            if file_path not in touched[bucket_name]:
-                touched[bucket_name].append(file_path)
-
-            if bucket_name == "test":
-                test_chunks.append(line)
-            else:
-                prod_chunks.append(line)
-            continue
-
-        if current_bucket == "test":
-            test_chunks.append(line)
-        elif current_bucket == "prod":
-            prod_chunks.append(line)
-        else:
-            prod_chunks.append(line)
-
-    return prod_chunks, test_chunks, touched
-
-
-def _split_patch(diff: str) -> Tuple[str, str, Dict[str, List[str]]]:
-    prod_chunks, test_chunks, touched = _parse_diff_headers(diff)
-    return "".join(prod_chunks), "".join(test_chunks), {
-        "prod_files": touched["prod"],
-        "test_files": touched["test"],
-    }
-
-
 def _coerce_accepted_state(value: Any) -> bool:
     if hasattr(value, "value") and isinstance(getattr(value, "value"), str):
         value = getattr(value, "value")
@@ -138,7 +86,7 @@ def _resolve_base_commit(repo_root: Path, commit: str, row: Dict[str, Any]) -> s
 
 def _extract_candidate_metadata(row: Dict[str, Any], patch: str, base_commit: str) -> Dict[str, Any]:
     metadata = dict(row.get("metadata", {}))
-    split_prod, split_test, split_meta = _split_patch(patch)
+    split_prod, split_test, split_meta = split_prod_and_test(patch)
     metadata.update(
         {
             "materialization": {
@@ -258,7 +206,21 @@ def _materialize_candidate(
             metadata={"reason": "patch extraction returned no content"},
         )
 
-    prod_patch, test_patch, split_meta = _split_patch(patch)
+    try:
+        prod_patch, test_patch, split_meta = split_prod_and_test(patch)
+    except PatchSplitError as exc:
+        return None, MaterializedItem(
+            candidate_id=candidate_id,
+            repo=repo,
+            commit=commit,
+            base_commit=base_commit,
+            patch=patch,
+            test_patch="",
+            prod_patch="",
+            status="rejected",
+            reason="unsupported_rename_split",
+            metadata={"reason": str(exc), "split_error": type(exc).__name__},
+        )
     if not prod_patch.strip():
         return None, MaterializedItem(
             candidate_id=candidate_id,
