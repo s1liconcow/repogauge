@@ -21,6 +21,27 @@ What v1 is not:
 - Hosted service or database-backed workflow orchestration.
 - Remote model calls by default.
 
-See the MVP architecture decision record:
+See the architecture docs:
 
 - [docs/ADRs/0001-mvp-architecture.md](docs/ADRs/0001-mvp-architecture.md)
+- [DESIGN.md](DESIGN.md)
+
+## CLI surface (scaffold)
+
+- `repogauge mine PATH --out DIR`
+- `repogauge review CANDIDATES --out DIR`
+- `repogauge export REVIEWED --dataset DIR`
+- `repogauge eval DATASET --gold`
+- `repogauge run MATRIX`
+- `repogauge analyze RUN`
+- `repogauge train-router RUN`
+
+Global behavior:
+
+- `--config`: merges config files over built-in defaults.
+- `--out`: sets output directory root.
+- `--resume`: continues from existing outputs where possible.
+- `--dry-run`: validates parameters without writing artifacts.
+- `--llm-mode`: `off`, `local_only`, or `allow_remote`.
+
+Current release state is scaffolded and in active development.

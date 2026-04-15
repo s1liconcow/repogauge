@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repogauge"
+version = "0.0.0"
+description = "Local SWE-bench-style dataset and harness helper for repositories"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+repogauge = "repogauge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["repogauge*"]
