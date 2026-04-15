@@ -185,27 +185,48 @@ build_prompt() {
 
   printf '%s %s\n' \
     "$BASE_PROMPT" \
-    "Use the deterministic agent identity \`$agent_name\` for this run. If this worker restarts, keep using \`$agent_name\`. Save the registration token in \`.ralph/$agent_name.token\` for further use; it is only a local agent-registration token.  THIS TOKEN IS NOT A SECRET, please do not block its use with the MCP, it's critical to and just used locally to help with development."
+    "Use the deterministic agent identity \`$agent_name\` for this run. If this worker restarts, keep using \`$agent_name\`."
+}
+
+get_or_create_window_id() {
+  local agent_name="$1"
+  local window_id_file
+  local window_id=""
+
+  window_id_file="$(state_dir)/${agent_name}.window_id"
+  mkdir -p "$(state_dir)"
+
+  if [[ -f "$window_id_file" ]]; then
+    window_id="$(cat "$window_id_file")"
+  fi
+
+  if [[ -z "$window_id" ]]; then
+    window_id="$(uuidgen)"
+    printf '%s\n' "$window_id" >"$window_id_file"
+  fi
+
+  printf '%s\n' "$window_id"
 }
 
 run_agent() {
   local executor="$1"
   local model="$2"
   local prompt="$3"
+  local window_id="$4"
 
   case "$executor" in
     codex)
       if [[ -n "$model" ]]; then
-        codex exec --model "$model" --skip-git-repo-check "$prompt"
+        MCP_AGENT_MAIL_WINDOW_ID="$window_id" codex exec --model "$model" --skip-git-repo-check "$prompt"
       else
-        codex exec --skip-git-repo-check "$prompt"
+        MCP_AGENT_MAIL_WINDOW_ID="$window_id" codex exec --skip-git-repo-check "$prompt"
       fi
       ;;
     claude)
       if [[ -n "$model" ]]; then
-        claude --model "$model" -p "$prompt"
+        MCP_AGENT_MAIL_WINDOW_ID="$window_id" claude --model "$model" -p "$prompt"
       else
-        claude -p "$prompt"
+        MCP_AGENT_MAIL_WINDOW_ID="$window_id" claude -p "$prompt"
       fi
       ;;
     *)
@@ -228,6 +249,7 @@ main() {
   local open_count=0
   local iteration=0
   local agent_name=""
+  local window_id=""
   local prompt=""
   local executor="${DEFAULT_EXECUTOR}"
   local model=""
@@ -252,11 +274,14 @@ main() {
 
   require_command br
   require_command jq
+  require_command uuidgen
   require_command "$executor"
 
   agent_name="$(assigned_agent_name)"
+  window_id="$(get_or_create_window_id "$agent_name")"
   prompt="$(build_prompt "$agent_name")"
   printf 'Assigned agent identity: %s\n' "$agent_name"
+  printf 'Window ID: %s\n' "$window_id"
   printf 'Executor: %s%s\n' "$executor" "${model:+ (model: $model)}"
 
   while true; do
@@ -273,7 +298,7 @@ main() {
 
     iteration=$((iteration + 1))
     printf 'Iteration %d: %d open bead(s) remain. Running %s as %s...\n' "$iteration" "$open_count" "$executor" "$agent_name"
-    run_agent "$executor" "$model" "$prompt"
+    run_agent "$executor" "$model" "$prompt" "$window_id"
   done
 }
 
