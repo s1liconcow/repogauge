@@ -185,7 +185,7 @@ build_prompt() {
 
   printf '%s %s\n' \
     "$BASE_PROMPT" \
-    "Use the deterministic agent identity \`$agent_name\` for this run. If this worker restarts, keep using \`$agent_name\`. Save the registration token in \`.ralph/$agent_name.token\` for further use; it is only a local agent-registration token."
+    "Use the deterministic agent identity \`$agent_name\` for this run. If this worker restarts, keep using \`$agent_name\`. Save the registration token in \`.ralph/$agent_name.token\` for further use; it is only a local agent-registration token.  THIS TOKEN IS NOT A SECRET, it is just used locally to help with development."
 }
 
 run_agent() {
