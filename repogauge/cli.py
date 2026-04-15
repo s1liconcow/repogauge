@@ -26,6 +26,11 @@ VERBOSE_HELP = "Enable verbose output."
 from .manifest import Manifest, ManifestStepStatus
 from .logging_utils import log_event
 from .mining.inspect import inspect_repository
+from .mining.scan import scan_repository
+
+COMMIT_RANGE_HELP = "Commit range to scan (for example HEAD~50..HEAD)."
+MAX_COMMITS_HELP = "Maximum number of commits to inspect."
+EXCLUDE_MERGES_HELP = "Skip merge commits during scanning."
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -41,6 +46,10 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--dry-run", action="store_true", help=DRY_RUN_HELP)
         cmd.add_argument("--llm-mode", help=LLM_MODE_HELP, choices=["off", "local_only", "allow_remote"])
         cmd.add_argument("--verbose", action="store_true", help=VERBOSE_HELP)
+        if name == "mine":
+            cmd.add_argument("--commit-range", help=COMMIT_RANGE_HELP)
+            cmd.add_argument("--max-commits", default=100, type=int, help=MAX_COMMITS_HELP)
+            cmd.add_argument("--exclude-merges", action="store_true", help=EXCLUDE_MERGES_HELP)
 
     return parser
 
@@ -50,6 +59,9 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
         "command": command,
         "path": namespace.path or "",
         "config": namespace.config or "",
+        "commit_range": namespace.commit_range if command == "mine" else "",
+        "max_commits": namespace.max_commits if command == "mine" else 0,
+        "exclude_merges": namespace.exclude_merges if command == "mine" else False,
         "dry_run": bool(namespace.dry_run),
         "llm_mode": namespace.llm_mode or "",
     }
@@ -147,6 +159,48 @@ def _run_command(namespace: argparse.Namespace) -> int:
         repo_profile_path.write_text(json.dumps(profile, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         manifest.artifact_paths["repo_profile"] = str(repo_profile_path)
         manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+
+        manifest.mark_step("scan", ManifestStepStatus.RUNNING, started_at=command_timestamp)
+        try:
+            scan_rows = scan_repository(
+                namespace.path or ".",
+                repo_name=profile["repo_name"],
+                max_count=int(namespace.max_commits),
+                commit_range=namespace.commit_range,
+                include_merges=not namespace.exclude_merges,
+            )
+        except Exception as exc:
+            manifest.mark_step("scan", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(status="failed", metadata={"reason": "scan_failed", "error": str(exc)})
+            manifest.mark_step("finish", ManifestStepStatus.FAILED, ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            return 1
+
+        scan_path = out_root / "scan.jsonl"
+        scan_path.write_text("".join(json.dumps(row.to_dict(), sort_keys=True) + "\n" for row in scan_rows), encoding="utf-8")
+        manifest.artifact_paths["scan"] = str(scan_path)
+        manifest.mark_step(
+            "scan",
+            ManifestStepStatus.SUCCEEDED,
+            ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+        )
+        manifest.metadata["scan"] = {
+            "scan_count": len(scan_rows),
+            "commit_range": namespace.commit_range,
+            "max_commits": namespace.max_commits,
+            "include_merges": not namespace.exclude_merges,
+        }
 
     # Scaffold implementations are intentionally explicit no-ops for unimplemented commands.
     manifest.mark_step("execute", ManifestStepStatus.SUCCEEDED, started_at=command_timestamp)

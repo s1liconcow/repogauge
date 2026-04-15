@@ -26,6 +26,10 @@ class TestCliSurface(unittest.TestCase):
         self.assertTrue(namespace.resume)
         self.assertTrue(namespace.verbose)
         self.assertEqual(namespace.llm_mode, "off")
+        namespace = self.parser.parse_args(["mine", "./repo", "--commit-range", "HEAD~5..HEAD", "--max-commits", "10", "--exclude-merges"])
+        self.assertEqual(namespace.commit_range, "HEAD~5..HEAD")
+        self.assertEqual(namespace.max_commits, 10)
+        self.assertTrue(namespace.exclude_merges)
 
     def test_command_emits_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
@@ -76,6 +80,13 @@ class TestCliSurface(unittest.TestCase):
             self.assertEqual(payload["repo_name"], "example/demo")
             self.assertEqual(payload["python_hints"]["package_style"], "unknown")
             self.assertIn("commands", payload["test_runner_hints"])
+            scan_path = out / "scan.jsonl"
+            self.assertTrue(scan_path.exists())
+            scan_payloads = [
+                json.loads(line)
+                for line in scan_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(scan_payloads), 0)
 
 
 if __name__ == "__main__":
