@@ -49,6 +49,9 @@ def _build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--verbose", action="store_true", help=VERBOSE_HELP)
         if name == "review":
             cmd.add_argument("--decisions", help="Optional JSON/JSONL file with scripted review decisions.")
+            cmd.add_argument("--triage-hints", help="Optional structured JSON/JSONL file with advisory triage hints.")
+            cmd.add_argument("--llm-model", help="Model identifier for advisory triage outputs.")
+            cmd.add_argument("--llm-provider", help="LLM provider for advisory triage.")
         if name == "mine":
             cmd.add_argument("--commit-range", help=COMMIT_RANGE_HELP)
             cmd.add_argument("--max-commits", default=100, type=int, help=MAX_COMMITS_HELP)
@@ -67,6 +70,9 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
         "exclude_merges": namespace.exclude_merges if command == "mine" else False,
         "dry_run": bool(namespace.dry_run),
         "llm_mode": namespace.llm_mode or "",
+        "llm_model": getattr(namespace, "llm_model", ""),
+        "llm_provider": getattr(namespace, "llm_provider", ""),
+        "triage_hints": getattr(namespace, "triage_hints", ""),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -185,6 +191,10 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 candidates_path=candidates_path,
                 out_root=out_root,
                 decisions_path=Path(namespace.decisions).resolve() if namespace.decisions else None,
+                llm_mode=namespace.llm_mode,
+                triage_hints_path=Path(namespace.triage_hints).resolve() if namespace.triage_hints else None,
+                llm_model_name=namespace.llm_model if hasattr(namespace, "llm_model") else None,
+                llm_provider=namespace.llm_provider if hasattr(namespace, "llm_provider") else None,
             )
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
             manifest.mark_step(

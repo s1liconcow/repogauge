@@ -32,6 +32,10 @@ class TestCliSurface(unittest.TestCase):
         self.assertTrue(namespace.exclude_merges)
         namespace = self.parser.parse_args(["review", "./candidates.jsonl", "--decisions", "./decisions.jsonl"])
         self.assertEqual(namespace.decisions, "./decisions.jsonl")
+        namespace = self.parser.parse_args(["review", "./candidates.jsonl", "--triage-hints", "./triage.jsonl", "--llm-model", "local-unit", "--llm-provider", "local"])
+        self.assertEqual(namespace.triage_hints, "./triage.jsonl")
+        self.assertEqual(namespace.llm_model, "local-unit")
+        self.assertEqual(namespace.llm_provider, "local")
 
     def test_command_emits_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

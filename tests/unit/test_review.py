@@ -40,6 +40,23 @@ def _write_candidates(path: Path) -> list[str]:
     return ["owner__repo-rg-a111", "owner__repo-rg-b222"]
 
 
+def _write_triage_hints(path: Path, candidate_id: str, payload: dict) -> None:
+    triage_payload = {
+        "model": {
+            "model_name": "advisor-unit-1",
+            "provider": "local",
+            "prompt_version": "review/v1",
+        },
+        "candidates": [
+            {
+                "candidate_id": candidate_id,
+                **payload,
+            }
+        ],
+    }
+    path.write_text(json.dumps(triage_payload), encoding="utf-8")
+
+
 class TestReviewCommand(unittest.TestCase):
     def test_review_command_generates_artifacts_and_defaults(self) -> None:
         with TemporaryDirectory() as workspace:
@@ -96,6 +113,50 @@ class TestReviewCommand(unittest.TestCase):
             self.assertEqual(accepted["state"], "accepted")
             self.assertEqual(accepted["reason"], "manual include")
             self.assertTrue(accepted["metadata"]["force_include"])
+
+    def test_review_command_accepts_advisory_triage_without_overriding_state(self) -> None:
+        with TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            candidates_path = root / "candidates.jsonl"
+            candidate_ids = _write_candidates(candidates_path)
+            triage_path = root / "triage.json"
+            _write_triage_hints(
+                triage_path,
+                candidate_ids[1],
+                {
+                    "state": "accepted",
+                    "reason": "Model recommends include",
+                    "reviewer_notes": "Looks like a real fix",
+                    "suggested_problem_statement": "Manual statement for review",
+                },
+            )
+
+            exit_code = main(
+                [
+                    "review",
+                    str(candidates_path),
+                    "--llm-mode",
+                    "local_only",
+                    "--triage-hints",
+                    str(triage_path),
+                    "--llm-model",
+                    "advisor-unit-1",
+                    "--llm-provider",
+                    "local",
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+
+            reviewed = root / "reviewed.jsonl"
+            reviewed_rows = [json.loads(line) for line in reviewed.read_text(encoding="utf-8").splitlines() if line]
+            by_id = {row["candidate_id"]: row for row in reviewed_rows}
+            self.assertEqual(by_id[candidate_ids[1]]["state"], "rejected")
+            advisory = by_id[candidate_ids[1]]["metadata"]["llm_advisory"]
+            self.assertTrue(advisory["enabled"])
+            self.assertEqual(advisory["suggested_state"], "accepted")
+            self.assertEqual(by_id[candidate_ids[1]]["metadata"]["source_subject"], "Manual statement for review")
+            self.assertEqual(advisory["problem_statement"], "Manual statement for review")
+            self.assertTrue((root / "triage_cache.json").exists())
 
 
 if __name__ == "__main__":

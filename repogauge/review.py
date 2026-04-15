@@ -11,10 +11,19 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from repogauge.config import ContractState, ReviewedCandidate
 from repogauge.mining.file_roles import classify_files
+from repogauge.llm import LlmModelSpec, TriageSuggestion, load_triage_payload, write_triage_payload
 
 STATE_ACCEPTED = ContractState.ACCEPTED
 STATE_REJECTED = ContractState.REJECTED
 STATE_OPEN = ContractState.OPEN
+
+LLM_OFF = "off"
+LLM_LOCAL_ONLY = "local_only"
+LLM_ALLOW_REMOTE = "allow_remote"
+
+TRIAGE_CACHE_FILENAME = "triage_cache.json"
+TRIAGE_DEFAULT_MODEL_NAME = "local-policy"
+TRIAGE_DEFAULT_PROVIDER = "local"
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -108,6 +117,76 @@ def _extract_issue_refs(text: str) -> list[str]:
     if not text:
         return []
     return sorted(set(re.findall(r"(?:#|GH-)(\d+)", text, flags=re.IGNORECASE)))
+
+
+def _coerce_llm_mode(value: Any) -> str:
+    mode = str(value or LLM_OFF).lower()
+    if mode not in {LLM_OFF, LLM_LOCAL_ONLY, LLM_ALLOW_REMOTE}:
+        return LLM_OFF
+    return mode
+
+
+def _merge_file_roles(files_by_role: dict[str, list[str]], suggested: dict[str, list[str]]) -> dict[str, list[str]]:
+    merged = {role: sorted(set(paths)) for role, paths in files_by_role.items()}
+    for role, paths in suggested.items():
+        existing = merged.setdefault(role, [])
+        for path in paths:
+            if path and path not in existing:
+                existing.append(path)
+        merged[role] = sorted(set(existing))
+    return merged
+
+
+def _default_triage_suggestion(row: dict[str, Any], candidate_id: str) -> TriageSuggestion:
+    files = [str(value) for value in row.get("files_touched", [])]
+    file_roles = _file_roles(files)
+    subject = _candidate_subject(row)
+    return TriageSuggestion(
+        candidate_id=candidate_id,
+        state=None,
+        reason="Local deterministic triage fallback",
+        reviewer_notes="Generated offline from scan metadata.",
+        suggested_problem_statement=subject,
+        suggested_file_roles=file_roles,
+        confidence=1.0,
+    )
+
+
+def _load_llm_artifacts(
+    *,
+    out_root: Path,
+    llm_mode: str,
+    triage_hints_path: Path | None,
+    llm_model_name: str | None,
+    llm_provider: str | None,
+) -> tuple[dict[str, TriageSuggestion], dict[str, TriageSuggestion], LlmModelSpec]:
+    model = LlmModelSpec(
+        model_name=llm_model_name or TRIAGE_DEFAULT_MODEL_NAME,
+        provider=llm_provider or TRIAGE_DEFAULT_PROVIDER,
+        prompt_version="triage/v1",
+    )
+    source_hints: dict[str, TriageSuggestion] = {}
+    cache_hints: dict[str, TriageSuggestion] = {}
+    triage_model = model
+    if llm_mode == LLM_OFF:
+        return cache_hints, source_hints, model
+
+    cache_path = out_root / TRIAGE_CACHE_FILENAME
+    triage_model, cache_hints = load_triage_payload(
+        cache_path,
+        default_name=model.model_name,
+        default_provider=model.provider,
+    )
+
+    if triage_hints_path is not None:
+        source_model, source_hints = load_triage_payload(
+            triage_hints_path,
+            default_name=llm_model_name or triage_model.model_name,
+            default_provider=llm_provider or triage_model.provider,
+        )
+        if source_model and source_model.model_name:
+            triage_model = source_model
+    return cache_hints, source_hints, triage_model
 
 
 def _render_markdown(records: list[dict[str, Any]]) -> str:
@@ -214,12 +293,33 @@ def _run_decision(row: dict[str, Any], decision: Optional[dict[str, Any]]) -> tu
     return STATE_REJECTED.value, "Auto-rejected (not in shortlist)", "No manual decision provided"
 
 
-def run_review(*, candidates_path: Path, out_root: Path, decisions_path: Path | None = None) -> dict[str, str | int]:
+def run_review(
+    *,
+    candidates_path: Path,
+    out_root: Path,
+    decisions_path: Path | None = None,
+    llm_mode: str | None = None,
+    triage_hints_path: Path | None = None,
+    llm_model_name: str | None = None,
+    llm_provider: str | None = None,
+) -> dict[str, str | int]:
     rows = _read_jsonl(candidates_path)
     if not rows:
         raise ValueError("no candidate rows to review")
 
     decisions = _load_decisions(decisions_path)
+    mode = _coerce_llm_mode(llm_mode)
+    triage_cache, triage_source, triage_model = ({}, {}, LlmModelSpec(model_name=llm_model_name or TRIAGE_DEFAULT_MODEL_NAME, provider=llm_provider or TRIAGE_DEFAULT_PROVIDER, prompt_version="triage/v1"))
+    if mode != LLM_OFF:
+        triage_cache, triage_source, triage_model = _load_llm_artifacts(
+            out_root=out_root,
+            llm_mode=mode,
+            triage_hints_path=triage_hints_path,
+            llm_model_name=llm_model_name,
+            llm_provider=llm_provider,
+        )
+    triage_hints = {**triage_cache, **triage_source}
+
     prepared_rows = []
     accepted = rejected = open_count = 0
 
@@ -232,6 +332,17 @@ def run_review(*, candidates_path: Path, out_root: Path, decisions_path: Path | 
         files = [str(value) for value in row.get("files_touched", [])]
         decision = decisions.get(candidate_id)
         force_include = bool(decision.get("force_include")) if decision else False
+
+        triage_hint = triage_hints.get(candidate_id)
+        if triage_hint is None and mode != LLM_OFF:
+            triage_hint = _default_triage_suggestion(row, candidate_id)
+            triage_hints[candidate_id] = triage_hint
+
+        if triage_hint and triage_hint.suggested_problem_statement:
+            subject = triage_hint.suggested_problem_statement
+            if not body:
+                body = triage_hint.suggested_problem_statement
+
         state, reason, notes = _run_decision(row, decision)
         if state == STATE_OPEN.value:
             open_count += 1
@@ -243,6 +354,9 @@ def run_review(*, candidates_path: Path, out_root: Path, decisions_path: Path | 
         score = _coerce_score(row)
         decision_band = _extract_decision_band(row)
         file_roles = _file_roles(files)
+        if triage_hint and triage_hint.suggested_file_roles:
+            file_roles = _merge_file_roles(file_roles, triage_hint.suggested_file_roles)
+
         metadata = dict(row.get("metadata", {}))
         metadata.update(
             {
@@ -257,6 +371,17 @@ def run_review(*, candidates_path: Path, out_root: Path, decisions_path: Path | 
                 "source_commit": commit,
                 "source_subject": subject,
                 "source_body": body,
+                "llm_advisory": {
+                    "enabled": mode != LLM_OFF,
+                    "model": triage_model.to_dict(),
+                    "suggested_state": triage_hint.state if triage_hint else None,
+                    "applied": triage_hint is not None,
+                    "reason": triage_hint.reason if triage_hint else None,
+                    "reviewer_notes": triage_hint.reviewer_notes if triage_hint else None,
+                    "problem_statement": triage_hint.suggested_problem_statement if triage_hint else None,
+                    "file_roles_hint": triage_hint.suggested_file_roles if triage_hint else None,
+                    "confidence": triage_hint.confidence if triage_hint else None,
+                },
             }
         )
         prepared_row = {
@@ -286,6 +411,9 @@ def run_review(*, candidates_path: Path, out_root: Path, decisions_path: Path | 
         prepared_rows.append(prepared_row)
 
     out_root.mkdir(parents=True, exist_ok=True)
+    if mode != LLM_OFF:
+        write_triage_payload(out_root / TRIAGE_CACHE_FILENAME, triage_model, triage_hints)
+
     reviewed_path = out_root / "reviewed.jsonl"
     reviewed_path.write_text("".join(json.dumps(row["reviewed_record"], sort_keys=True) + "\n" for row in prepared_rows), encoding="utf-8")
 
