@@ -49,6 +49,10 @@ def test_inspect_detects_poetry_pytest_and_remote(tmp_path: Path) -> None:
     assert profile["profile_warnings"] == []
     assert profile["environment_signature"]["repo_version"] == "0.1.0"
     assert profile["environment_signature"]["signature"] == profile["version"]
+    assert profile["environment_plan"]["python_version"] == "3.11"
+    assert profile["environment_plan"]["install"] == ["poetry install"]
+    assert profile["environment_plan"]["test_cmd_base"] == "pytest"
+    assert profile["environment_plan"]["strategy_name"] == "poetry:pytest"
 
 
 def test_inspect_tox_only_generates_fallback_hints(tmp_path: Path) -> None:
@@ -63,6 +67,9 @@ def test_inspect_tox_only_generates_fallback_hints(tmp_path: Path) -> None:
     assert any(item["type"] == "missing_package_manager" for item in profile["profile_warnings"])
     assert profile["repo_version"] == "repover_unknown"
     assert profile["environment_signature"]["repo_version"] == "repover_unknown"
+    assert profile["environment_plan"]["python_version"] == "3.11"
+    assert profile["environment_plan"]["install"] == ["pip install -e ."]
+    assert profile["environment_plan"]["test_cmd_base"] == "tox"
 
 
 def test_inspect_flags_python_version_conflict(tmp_path: Path) -> None:

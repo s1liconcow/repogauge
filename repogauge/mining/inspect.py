@@ -8,6 +8,7 @@ import re
 from repogauge.mining.signature import REPO_VERSION_UNKNOWN, build_environment_signature
 from repogauge.exec import run_command
 from repogauge.utils.git import get_default_branch, get_repo_root
+from repogauge.validation.env_detect import build_environment_plan
 
 try:
     import tomllib
@@ -383,6 +384,7 @@ def inspect_repository(path: str | Path) -> Dict[str, Any]:
         "profile_warnings": warnings,
     }
     profile["environment_signature"] = build_environment_signature(profile)
+    profile["environment_plan"] = build_environment_plan(profile).to_dict()
     profile["version"] = profile["environment_signature"]["version"]
 
     return profile
