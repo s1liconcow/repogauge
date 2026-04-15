@@ -4,6 +4,7 @@ readonly BASE_PROMPT="\$launch-worker - Be sure all tests pass and to review you
 readonly DEFAULT_STATE_DIR=".ralph"
 readonly ASSIGNMENTS_FILE_NAME="agent-identities.tsv"
 readonly LOCK_DIR_NAME="agent-identities.lock"
+readonly DEFAULT_EXECUTOR="codex"
 
 require_command() {
   local cmd="$1"
@@ -187,19 +188,76 @@ build_prompt() {
     "Use the deterministic agent identity \`$agent_name\` for this run. If this worker restarts, keep using \`$agent_name\`. Save the registration token in \`.ralph/$agent_name.token\` for further use; it is only a local agent-registration token."
 }
 
+run_agent() {
+  local executor="$1"
+  local model="$2"
+  local prompt="$3"
+
+  case "$executor" in
+    codex)
+      if [[ -n "$model" ]]; then
+        codex exec --model "$model" --skip-git-repo-check "$prompt"
+      else
+        codex exec --skip-git-repo-check "$prompt"
+      fi
+      ;;
+    claude)
+      if [[ -n "$model" ]]; then
+        claude --model "$model" -p "$prompt"
+      else
+        claude -p "$prompt"
+      fi
+      ;;
+    *)
+      printf 'Unknown executor: %s (must be codex or claude)\n' "$executor" >&2
+      exit 1
+      ;;
+  esac
+}
+
+usage() {
+  printf 'Usage: %s [--executor codex|claude] [--model MODEL]\n' "$(basename "$0")" >&2
+  printf '\n' >&2
+  printf 'Options:\n' >&2
+  printf '  --executor  Agent executor to use: codex (default) or claude\n' >&2
+  printf '  --model     Model to pass to the executor (e.g. o3, claude-sonnet-4-6)\n' >&2
+  exit 1
+}
+
 main() {
   local open_count=0
   local iteration=0
   local agent_name=""
   local prompt=""
+  local executor="${DEFAULT_EXECUTOR}"
+  local model=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --executor)
+        [[ $# -ge 2 ]] || usage
+        executor="$2"
+        shift 2
+        ;;
+      --model)
+        [[ $# -ge 2 ]] || usage
+        model="$2"
+        shift 2
+        ;;
+      *)
+        usage
+        ;;
+    esac
+  done
 
   require_command br
   require_command jq
-  require_command codex
+  require_command "$executor"
 
   agent_name="$(assigned_agent_name)"
   prompt="$(build_prompt "$agent_name")"
   printf 'Assigned agent identity: %s\n' "$agent_name"
+  printf 'Executor: %s%s\n' "$executor" "${model:+ (model: $model)}"
 
   while true; do
     open_count="$(count_open_beads)"
@@ -214,8 +272,8 @@ main() {
     fi
 
     iteration=$((iteration + 1))
-    printf 'Iteration %d: %d open bead(s) remain. Running codex as %s...\n' "$iteration" "$open_count" "$agent_name"
-    codex exec --skip-git-repo-check "$prompt"
+    printf 'Iteration %d: %d open bead(s) remain. Running %s as %s...\n' "$iteration" "$open_count" "$executor" "$agent_name"
+    run_agent "$executor" "$model" "$prompt"
   done
 }
 
