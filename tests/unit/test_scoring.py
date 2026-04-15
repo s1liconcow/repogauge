@@ -95,6 +95,26 @@ class TestScoring(unittest.TestCase):
         self.assertGreaterEqual(scored.score, 5.0)
         self.assertLess(scored.score, 8.0)
 
+    def test_bead_file_change_gets_context_bonus(self) -> None:
+        scored = score_scan_commit(
+            commit_subject="Landing changes for bead oss_repogauge-rmy - deterministic env plan",
+            commit_body="",
+            diff="",
+            metadata=_metadata(n_prod_files=1, n_test_files=1, n_hunks=3, total_changed_lines=50, has_bead_changes=True),
+        )
+        self.assertTrue(any(item["component"] == "bead_context" for item in scored.score_breakdown))
+        bead_item = next(i for i in scored.score_breakdown if i["component"] == "bead_context")
+        self.assertEqual(bead_item["weight"], 2)
+
+    def test_no_bead_file_change_gets_no_context_bonus(self) -> None:
+        scored = score_scan_commit(
+            commit_subject="Landing changes for bead oss_repogauge-rmy - deterministic env plan",
+            commit_body="",
+            diff="",
+            metadata=_metadata(n_prod_files=1, n_test_files=1, n_hunks=3, total_changed_lines=50),
+        )
+        self.assertFalse(any(item["component"] == "bead_context" for item in scored.score_breakdown))
+
     def test_dependency_only_change_is_rejected(self) -> None:
         scored = score_scan_commit(
             commit_subject="chore: bump deps",

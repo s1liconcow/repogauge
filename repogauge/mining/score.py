@@ -216,6 +216,14 @@ def _apply_positional_scores(
             "reason": "Commit message contains bugfix-like signal.",
         })
 
+    if bool(metadata.get("has_bead_changes")):
+        score += 2
+        score_breakdown.append({
+            "component": "bead_context",
+            "weight": 2,
+            "reason": "Commit touches .beads/ — rich context (design, acceptance criteria) available in .beads/issues.jsonl.",
+        })
+
     if _ISSUE_REFERENCE_RE.search(message):
         score += 2
         score_breakdown.append({

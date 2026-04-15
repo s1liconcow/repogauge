@@ -187,6 +187,7 @@ def _build_scan_row(
         "is_merge": len(parents) > 1,
         "is_revert": is_revert,
         "has_rename_only": has_rename_only,
+        "has_bead_changes": any(f.startswith(".beads/") for f in files_touched),
         "n_prod_files": file_counts["prod"],
         "n_test_files": file_counts["test"],
         "n_config_build_files": file_counts["config_build"],
