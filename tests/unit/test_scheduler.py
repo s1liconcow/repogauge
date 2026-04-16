@@ -6,6 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 import threading
 
+import pytest
+
 from repogauge.runner.planner import PlannedRunJob
 from repogauge.runner.scheduler import (
     SolverAdapter,
@@ -67,6 +69,53 @@ class ReplayAdapter(SolverAdapter):
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
         self.execute_calls.append(request.attempt_id)
+        status = (
+            self._statuses[min(request.attempt_index - 1, len(self._statuses) - 1)]
+            if self._statuses
+            else SolverAttemptState.FAILED
+        )
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=status,
+            model_patch=self._patch if status == SolverAttemptState.SUCCEEDED else None,
+            raw_output=f"{status}-{request.attempt_id}",
+        )
+
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
+        return result
+
+
+class CaptureAdapter(SolverAdapter):
+    """Adapter that records request inputs for assertions."""
+
+    def __init__(self, statuses: list[str], patch: str = "", timed: float = 0.0) -> None:
+        self._statuses = list(statuses)
+        self._patch = patch
+        self._timed = timed
+        self.prepare_requests: list[tuple[tuple[str, str], dict[str, object] | None]] = []
+
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+    ) -> SolverAdapterRequest:
+        row = None if instance_row is None else dict(instance_row)
+        self.prepare_requests.append(((attempt_id, job.job_id), row))
+        return SolverAdapterRequest(
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            job=replace(job, metadata={"attempt_index": attempt_index}),
+            instance_row=instance_row,
+        )
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        if self._timed:
+            time.sleep(self._timed)
         status = (
             self._statuses[min(request.attempt_index - 1, len(self._statuses) - 1)]
             if self._statuses
@@ -214,3 +263,53 @@ def test_provider_parallelism_is_enforced(tmp_path: Path) -> None:
     assert summary.jobs[1].final_status == SolverAttemptState.SUCCEEDED
     assert adapter.max_active == 1
     assert elapsed_ms >= 180
+
+
+def test_scheduler_preserves_dataset_row_in_prepare_request(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0")
+    scheduler = SolverScheduler(config=SolverSchedulerConfig(default_solver_budget=1))
+    adapter = CaptureAdapter([SolverAttemptState.SUCCEEDED])
+    dataset_rows = {
+        "i-1": {"instance_id": "i-1", "repo": "sample/repo", "problem_statement": "fix me"}
+    }
+
+    summary = scheduler.run(
+        [job],
+        adapters={"solver-a": adapter},
+        dataset_rows=dataset_rows,
+    )
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    assert adapter.prepare_requests == [
+        (("run-1:i-1:solver-a:0:attempt-1", "run-1:i-1:solver-a:0"), dataset_rows["i-1"])
+    ]
+
+
+def test_scheduler_applies_solver_budget_and_marks_terminal_state(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-b:0", solver_id="solver-b")
+    scheduler = SolverScheduler(config=SolverSchedulerConfig(default_solver_budget=1))
+    adapter = CaptureAdapter([SolverAttemptState.INVALID_PATCH])
+
+    summary = scheduler.run([job], adapters={"solver-b": adapter})
+    assert summary.jobs[0].final_status == SolverAttemptState.INVALID_PATCH
+    assert summary.jobs[0].attempts == 1
+
+
+def test_scheduler_rate_limit_is_respected(tmp_path: Path) -> None:
+    jobs = [_job(job_id=f"run-1:i-{i}:solver-a:0") for i in range(2)]
+    adapter = CaptureAdapter([SolverAttemptState.SUCCEEDED], timed=0.0)
+    config = SolverSchedulerConfig(
+        max_parallel_jobs=2,
+        provider_rate_limit_per_minute={"mock": 1},
+        default_solver_budget=1,
+    )
+    scheduler = SolverScheduler(config=config)
+    scheduler._rate_limiters["mock"].window_seconds = 0.12
+
+    start = time.perf_counter()
+    summary = scheduler.run(jobs, adapters={"solver-a": adapter})
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    assert summary.jobs[1].final_status == SolverAttemptState.SUCCEEDED
+    assert elapsed_ms >= 100
