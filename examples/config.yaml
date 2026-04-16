@@ -1,0 +1,15 @@
+llm_mode: off
+verbose: false
+
+# This repository currently uses command-line flags as the main configuration
+# input surface for most behavior.
+# Keep this file as a stable placeholder for future scoped overrides such as:
+# - local/remote provider defaults
+# - scheduler limits
+# - judge batch controls
+
+run:
+  out: out/run
+
+eval:
+  timeout: 120

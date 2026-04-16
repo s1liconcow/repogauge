@@ -1,0 +1,19 @@
+run_id: repogauge-mock-smoke
+dataset:
+  path: out/export/dataset/dataset.jsonl
+providers:
+  mock:
+    kind: mock
+execution:
+  repeats: 1
+  seed: 13
+solvers:
+  - id: mock-solver
+    provider: mock
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
+    behavior:
+      mock_statuses:
+        - succeeded

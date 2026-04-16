@@ -124,3 +124,30 @@ uv run python -m pytest tests/e2e/test_self_gauge.py -v
 
 This runs the full mine → review → export pipeline against this repository and
 validates every artifact at each stage.
+
+## Quickstart
+
+Clone the repo (or use a local checkout you already have), install with `uv`, and
+follow the workflow below for a fast offline smoke path.
+
+```bash
+uv sync --group dev
+uv run repogauge mine /path/to/repo --out ./out/mine --llm-mode off
+uv run repogauge review ./out/mine/candidates.jsonl --out ./out/review --llm-mode off
+uv run repogauge export ./out/review/reviewed.jsonl --out ./out/export --llm-mode off
+uv run repogauge eval ./out/export/dataset/dataset.jsonl --gold --llm-mode off
+```
+
+For a runnable matrix run using only local behavior, use the included
+`examples/matrix.yaml` and a dataset from your export step:
+
+```bash
+uv run repogauge run examples/matrix.yaml --dataset ./out/export/dataset/dataset.jsonl --out ./out/run
+```
+
+### Tutorials and examples
+
+- [Mining a repo → review → export](docs/tutorials/mine-review-export.md)
+- [Running a solver matrix](docs/tutorials/run-matrix.md)
+- [Troubleshooting guide](docs/tutorials/troubleshooting.md)
+- [Example matrix + outputs](examples/matrix.yaml)
