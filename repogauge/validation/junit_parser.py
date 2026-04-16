@@ -30,23 +30,49 @@ class JUnitParseError(ValueError):
     """Raised when the JUnit XML cannot be parsed."""
 
 
-def _classname_to_path(classname: str) -> str:
-    """Convert ``tests.unit.test_foo`` → ``tests/unit/test_foo.py``."""
+def _split_classname(classname: str) -> tuple[str, str]:
+    """Split ``tests.unit.test_foo.TestClass`` into (path, class_chain).
+
+    pytest's JUnit classname encodes both the module path and the class
+    hierarchy.  Module components are snake_case; class components are
+    PascalCase (first letter uppercase).  Split at the first uppercase
+    component so the file path and the class name are correctly separated.
+
+    Examples::
+
+        "tests.unit.test_foo"              → ("tests/unit/test_foo.py", "")
+        "tests.unit.test_foo.TestBar"      → ("tests/unit/test_foo.py", "TestBar")
+        "tests.unit.test_foo.TestBar.Inner"→ ("tests/unit/test_foo.py", "TestBar.Inner")
+    """
     parts = classname.split(".")
-    # Heuristic: if any component starts with "test_" or equals "tests",
-    # assume it is a file/directory component and convert dots to slashes.
-    return "/".join(parts) + ".py"
+    class_start = len(parts)
+    for i, part in enumerate(parts):
+        if part and part[0].isupper():
+            class_start = i
+            break
+    path = "/".join(parts[:class_start]) + ".py" if parts[:class_start] else ""
+    class_chain = ".".join(parts[class_start:])
+    return path, class_chain
 
 
 def _canonical_id(classname: str, name: str) -> str:
-    """Build a ``path::name`` or ``path::class::name`` test ID.
+    """Build a canonical pytest node ID from JUnit classname + test name.
+
+    Returns one of::
+
+        path/to/test_file.py::test_name
+        path/to/test_file.py::ClassName::test_name
 
     pytest encodes parametrized cases as ``name[param]``; we preserve that as-is.
     """
-    path_part = _classname_to_path(classname) if classname else ""
-    if path_part:
-        return f"{path_part}::{name}"
-    return name
+    if not classname:
+        return name
+    path, class_chain = _split_classname(classname)
+    if not path:
+        return f"{class_chain}::{name}" if class_chain else name
+    if class_chain:
+        return f"{path}::{class_chain}::{name}"
+    return f"{path}::{name}"
 
 
 def _outcome_of(testcase: ET.Element) -> str:

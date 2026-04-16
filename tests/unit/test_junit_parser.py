@@ -68,6 +68,19 @@ class TestParseJunitXml:
         assert "tests/test_params.py::test_add[1-2-3]" in results
         assert "tests/test_params.py::test_add[0-0-0]" in results
 
+    def test_classname_with_class_produces_three_part_id(self, tmp_path):
+        # pytest encodes class-based tests as module.path.ClassName in classname
+        xml = _write_xml(tmp_path / "results.xml", """\
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuite>
+              <testcase classname="tests.unit.test_foo.TestSuite" name="test_method"/>
+              <testcase classname="tests.unit.test_foo" name="test_standalone"/>
+            </testsuite>
+        """)
+        results = parse_junit_xml(xml)
+        assert "tests/unit/test_foo.py::TestSuite::test_method" in results
+        assert "tests/unit/test_foo.py::test_standalone" in results
+
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(JUnitParseError, match="not found"):
             parse_junit_xml(tmp_path / "nonexistent.xml")
