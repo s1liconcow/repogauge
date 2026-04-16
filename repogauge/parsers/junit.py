@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Dict, Mapping
 
 from repogauge.validation.junit_parser import (
     parse_junit_xml,
