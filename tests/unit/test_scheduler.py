@@ -602,3 +602,47 @@ def test_scheduler_rate_limit_is_respected(tmp_path: Path) -> None:
     assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
     assert summary.jobs[1].final_status == SolverAttemptState.SUCCEEDED
     assert elapsed_ms >= 100
+
+
+def test_scheduler_updates_progress_reporter_with_job_outcomes(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class RecordingProgress:
+        def __init__(self) -> None:
+            self.statuses: list[str] = []
+            self.closed = False
+
+        def update(self, status: str) -> None:
+            self.statuses.append(status)
+
+        def close(self) -> None:
+            self.closed = True
+
+    progress = RecordingProgress()
+    monkeypatch.setattr(
+        "repogauge.runner.scheduler._create_progress_reporter",
+        lambda total: progress,
+    )
+
+    jobs = [
+        _job(job_id="run-1:i-1:solver-a:0", instance_id="i-1", solver_id="solver-a"),
+        _job(job_id="run-1:i-2:solver-b:0", instance_id="i-2", solver_id="solver-b"),
+    ]
+    scheduler = SolverScheduler(config=SolverSchedulerConfig(default_solver_budget=1))
+
+    summary = scheduler.run(
+        jobs,
+        adapters={
+            "solver-a": CaptureAdapter([SolverAttemptState.SUCCEEDED]),
+            "solver-b": CaptureAdapter([SolverAttemptState.INVALID_PATCH]),
+        },
+    )
+
+    assert [job.final_status for job in summary.jobs] == [
+        SolverAttemptState.SUCCEEDED,
+        SolverAttemptState.INVALID_PATCH,
+    ]
+    assert sorted(progress.statuses) == sorted(
+        [SolverAttemptState.SUCCEEDED, SolverAttemptState.INVALID_PATCH]
+    )
+    assert progress.closed is True

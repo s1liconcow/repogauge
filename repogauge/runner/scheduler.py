@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -18,6 +19,11 @@ from repogauge.config import AttemptRow, JobRow
 
 from .planner import PlannedRunJob
 from .features import build_task_feature_bundle
+
+try:
+    from tqdm import tqdm
+except Exception:  # pragma: no cover - fallback when tqdm is unavailable
+    tqdm = None
 
 
 class SolverAttemptState:
@@ -181,6 +187,67 @@ def _coerce_attempt_status(status: str) -> str:
     ):
         return status
     return SolverAttemptState.FAILED
+
+
+class _ProgressReporter:
+    def update(self, status: str) -> None:
+        """Record one completed job."""
+
+    def close(self) -> None:
+        """Flush and close the progress reporter."""
+
+
+class _NullProgressReporter(_ProgressReporter):
+    pass
+
+
+class _TqdmProgressReporter(_ProgressReporter):
+    def __init__(self, total: int) -> None:
+        self._counts: dict[str, int] = {
+            SolverAttemptState.SUCCEEDED: 0,
+            SolverAttemptState.INVALID_PATCH: 0,
+            SolverAttemptState.FAILED: 0,
+            SolverAttemptState.TIMED_OUT: 0,
+            SolverAttemptState.BUDGET_EXCEEDED: 0,
+        }
+        self._bar = tqdm(
+            total=total,
+            desc="Run",
+            unit="job",
+            dynamic_ncols=True,
+            file=sys.stderr,
+            disable=not sys.stderr.isatty(),
+        )
+        self._refresh_postfix()
+
+    def _refresh_postfix(self) -> None:
+        self._bar.set_postfix(
+            {
+                "ok": self._counts[SolverAttemptState.SUCCEEDED],
+                "invalid": self._counts[SolverAttemptState.INVALID_PATCH],
+                "failed": self._counts[SolverAttemptState.FAILED],
+                "timed_out": self._counts[SolverAttemptState.TIMED_OUT],
+                "budget": self._counts[SolverAttemptState.BUDGET_EXCEEDED],
+            }
+        )
+
+    def update(self, status: str) -> None:
+        normalized = _coerce_attempt_status(status)
+        if normalized in self._counts:
+            self._counts[normalized] += 1
+        else:
+            self._counts[SolverAttemptState.FAILED] += 1
+        self._bar.update(1)
+        self._refresh_postfix()
+
+    def close(self) -> None:
+        self._bar.close()
+
+
+def _create_progress_reporter(total: int) -> _ProgressReporter:
+    if total < 1 or tqdm is None:
+        return _NullProgressReporter()
+    return _TqdmProgressReporter(total)
 
 
 def _serialize_job_row(
@@ -371,28 +438,33 @@ class SolverScheduler:
         job_futures = []
         results: list[SolverJobProgress] = []
         dataset_rows = dict(dataset_rows or {})
+        progress = _create_progress_reporter(len(jobs_list))
 
-        with ThreadPoolExecutor(max_workers=self.config.max_parallel_jobs) as pool:
-            for job in jobs_list:
-                adapter = adapters.get(job.solver_id)
-                if adapter is None:
-                    raise SolverSchedulerError(
-                        f"no adapter for solver '{job.solver_id}'"
+        try:
+            with ThreadPoolExecutor(max_workers=self.config.max_parallel_jobs) as pool:
+                for job in jobs_list:
+                    adapter = adapters.get(job.solver_id)
+                    if adapter is None:
+                        raise SolverSchedulerError(
+                            f"no adapter for solver '{job.solver_id}'"
+                        )
+
+                    job_futures.append(
+                        pool.submit(
+                            self._execute_job,
+                            job=job,
+                            adapter=adapter,
+                            dataset_row=dataset_rows.get(job.instance_id),
+                        )
                     )
 
-                job_futures.append(
-                    pool.submit(
-                        self._execute_job,
-                        job=job,
-                        adapter=adapter,
-                        dataset_row=dataset_rows.get(job.instance_id),
-                    )
-                )
-
-            for future in as_completed(job_futures):
-                job_result = future.result()
-                results.append(job_result)
-            self._flush_attempts_parquet()
+                for future in as_completed(job_futures):
+                    job_result = future.result()
+                    results.append(job_result)
+                    progress.update(job_result.final_status)
+                self._flush_attempts_parquet()
+        finally:
+            progress.close()
 
         return SolverScheduleResult(
             jobs=tuple(results),
