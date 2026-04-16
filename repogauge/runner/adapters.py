@@ -501,7 +501,7 @@ class AnthropicAgentSDKAdapter(_BaseConcreteSolverAdapter):
             solver_id=self.solver_id,
             model=self.model,
             attempt_index=request.attempt_index,
-            instance_row=request.instance_row or {},
+            instance_row=instance_row,
         )
         url = urllib.parse.urljoin(self.base_url.rstrip("/") + "/", "v1/messages")
         payload = {
@@ -598,7 +598,7 @@ class OpenAIResponsesAdapter(_BaseConcreteSolverAdapter):
             solver_id=self.solver_id,
             model=self.model,
             attempt_index=request.attempt_index,
-            instance_row=request.instance_row or {},
+            instance_row=instance_row,
         )
         url = urllib.parse.urljoin(self.base_url.rstrip("/") + "/", "responses")
         payload = {
@@ -696,7 +696,7 @@ class OpenAICompatibleAdapter(_BaseConcreteSolverAdapter):
             solver_id=self.solver_id,
             model=self.model,
             attempt_index=request.attempt_index,
-            instance_row=request.instance_row or {},
+            instance_row=instance_row,
         )
         url = urllib.parse.urljoin(
             self.base_url.rstrip("/") + "/",
@@ -843,7 +843,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             solver_id=self.solver_id,
             model=self.model,
             attempt_index=request.attempt_index,
-            instance_row=request.instance_row or {},
+            instance_row=instance_row,
         )
         command = list(self.command)
         command.extend(["exec", "--json", "--model", self.model])
