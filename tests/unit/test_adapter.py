@@ -1,6 +1,7 @@
 """Tests for adapter/spec generation (bead q5b)."""
 
 import json
+import importlib.util
 from pathlib import Path
 
 from repogauge.export.adapter import build_adapter_spec, generate_adapter
@@ -10,6 +11,7 @@ class TestBuildAdapterSpec:
     def test_populates_all_required_fields(self):
         plan = {
             "python_version": "3.11",
+            "version": "1.2.3",
             "pre_install": [],
             "install": ["pip install -e ."],
             "build": [],
@@ -18,9 +20,11 @@ class TestBuildAdapterSpec:
         }
         spec = build_adapter_spec("owner/repo", plan)
         assert spec["repo"] == "owner/repo"
+        assert spec["version"] == "1.2.3"
         assert spec["python_version"] == "3.11"
         assert spec["install"] == ["pip install -e ."]
         assert spec["test_cmd_base"] == "pytest"
+        assert spec["module_name"] == "owner_repo"
         assert spec["parser"] == "junit"
         assert spec["strategy_name"] == "setuptools:pytest"
 
@@ -52,13 +56,20 @@ class TestGenerateAdapter:
         }
         result = generate_adapter("a/b", plan, out_root=tmp_path)
         spec = json.loads(Path(result["specs_path"]).read_text())
-        for key in ("repo", "python_version", "install", "test_cmd_base", "parser"):
+        for key in (
+            "repo",
+            "version",
+            "python_version",
+            "install",
+            "test_cmd_base",
+            "parser",
+            "module_name",
+            "docker_specs",
+        ):
             assert key in spec, f"missing key: {key}"
         assert spec["parser"] == "junit"
 
     def test_adapter_py_is_importable_and_get_spec_returns_dict(self, tmp_path):
-        import importlib.util
-
         plan = {
             "python_version": "3.11",
             "install": ["pip install -e ."],
@@ -72,9 +83,33 @@ class TestGenerateAdapter:
         assert mod.REPO == "owner/proj"
         assert mod.PYTHON_VERSION == "3.11"
         assert mod.PARSER == "junit"
+        assert mod.MODULE_NAME == "owner_proj"
+        assert mod.MAP_REPO_TO_EXT["owner/proj"] == "py"
+        assert mod.registration_context()["repo"] == "owner/proj"
         adapter_spec = mod.get_spec()
         assert isinstance(adapter_spec, dict)
         assert adapter_spec["repo"] == "owner/proj"
+        assert adapter_spec["module_name"] == "owner_proj"
+        assert adapter_spec["version"] == "0.0.0"
+
+    def test_adapter_registration_maps_are_stable(self, tmp_path):
+        plan = {
+            "python_version": "3.11",
+            "install": ["pip install -e ."],
+            "test_cmd_base": "python -m pytest",
+            "version": "v1",
+        }
+        result = generate_adapter("org/my-repo.v2", plan, out_root=tmp_path)
+        spec_path = Path(result["adapter_path"])
+        mod_spec = importlib.util.spec_from_file_location("adapter_stable", spec_path)
+        mod = importlib.util.module_from_spec(mod_spec)
+        mod_spec.loader.exec_module(mod)
+
+        assert "org/my-repo.v2" in mod.MAP_REPO_TO_EXT
+        assert "org/my-repo.v2" in mod.MAP_REPO_TO_PARSER
+        assert mod.MAP_REPO_TO_PARSER["org/my-repo.v2"] == "junit"
+        assert mod.MAP_REPO_VERSION_TO_SPECS["org/my-repo.v2"]["v1"]["parser"] == "junit"
+
 
     def test_generation_is_deterministic(self, tmp_path):
         plan = {
