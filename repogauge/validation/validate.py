@@ -35,6 +35,7 @@ from repogauge.validation.junit_parser import (
     OUTCOME_PASS,
     parse_junit_xml,
 )
+from repogauge.validation.testsel import build_targeted_test_plan
 
 
 # ---------------------------------------------------------------------------
@@ -64,18 +65,6 @@ def _resolve_dataset(path: Path) -> Tuple[Path, Path]:
         dataset = path
         predictions = path.parent / "predictions.gold.jsonl"
     return dataset, predictions
-
-
-def _test_files_from_patch(patch: str) -> List[str]:
-    """Extract file paths that look like test files from a unified diff."""
-    files: List[str] = []
-    for line in patch.splitlines():
-        if line.startswith("+++ b/"):
-            p = line[6:].strip()
-            if p and p.endswith(".py") and ("test" in p.lower() or "spec" in p.lower()):
-                if p not in files:
-                    files.append(p)
-    return files
 
 
 def _resolve_test_cmd(test_cmd_base: str) -> List[str]:
@@ -193,7 +182,10 @@ def _eval_instance(
     test_cmd_base: str = "python -m pytest",
 ) -> Dict[str, Any]:
     """Run two-pass evaluation for one instance.  Returns a result dict."""
-    test_files = _test_files_from_patch(test_patch)
+    targeted_test_cmd, targeted_test_inputs = build_targeted_test_plan(
+        test_cmd_base, test_patch
+    )
+    test_inputs = targeted_test_inputs
 
     with tempfile.TemporaryDirectory(prefix="repogauge-eval-") as tmpdir:
         tmp = Path(tmpdir)
@@ -209,7 +201,7 @@ def _eval_instance(
             xml_b = tmp / "junit_b.xml"
             run_b, log_b = _run_pytest(
                 wt_b.path,
-                test_files=test_files,
+                test_files=test_inputs,
                 junit_xml=xml_b,
                 timeout_seconds=timeout_seconds,
                 test_cmd_base=test_cmd_base,
@@ -218,6 +210,8 @@ def _eval_instance(
             return {
                 "status": "error",
                 "error": f"pass_b failed: {exc}",
+                "targeted_test_cmd": targeted_test_cmd,
+                "targeted_test_inputs": test_inputs,
                 "log_b": log_b,
                 "log_c": "",
                 "run_b": {},
@@ -246,7 +240,7 @@ def _eval_instance(
             xml_c = tmp / "junit_c.xml"
             run_c, log_c = _run_pytest(
                 wt_c.path,
-                test_files=test_files,
+                test_files=test_inputs,
                 junit_xml=xml_c,
                 timeout_seconds=timeout_seconds,
                 test_cmd_base=test_cmd_base,
@@ -255,6 +249,8 @@ def _eval_instance(
             return {
                 "status": "error",
                 "error": f"pass_c failed: {exc}",
+                "targeted_test_cmd": targeted_test_cmd,
+                "targeted_test_inputs": test_inputs,
                 "log_b": log_b,
                 "log_c": log_c,
                 "run_b": run_b,
@@ -278,6 +274,8 @@ def _eval_instance(
         "error": None,
         "log_b": log_b,
         "log_c": log_c,
+        "targeted_test_cmd": targeted_test_cmd,
+        "targeted_test_inputs": test_inputs,
         "run_b": run_b,
         "run_c": run_c,
         "FAIL_TO_PASS": ftp,
@@ -339,6 +337,8 @@ def run_eval(
                     "status": "skipped",
                     "error": "no matching prediction",
                     "resolved": False,
+                    "targeted_test_cmd": "",
+                    "targeted_test_inputs": [],
                     "FAIL_TO_PASS": ds.get("FAIL_TO_PASS", []),
                     "PASS_TO_PASS": ds.get("PASS_TO_PASS", []),
                     "metadata": {},
@@ -368,6 +368,8 @@ def run_eval(
                 "status": outcome["status"],
                 "error": outcome["error"],
                 "resolved": outcome["resolved"],
+                "targeted_test_cmd": outcome["targeted_test_cmd"],
+                "targeted_test_inputs": outcome["targeted_test_inputs"],
                 "FAIL_TO_PASS": outcome["FAIL_TO_PASS"],
                 "PASS_TO_PASS": outcome["PASS_TO_PASS"],
                 "metadata": {
