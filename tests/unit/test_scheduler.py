@@ -6,8 +6,6 @@ from dataclasses import replace
 from pathlib import Path
 import threading
 
-import pytest
-
 from repogauge.runner.planner import PlannedRunJob
 from repogauge.runner.scheduler import (
     SolverAdapter,
