@@ -3,8 +3,10 @@
 import json
 import importlib.util
 from pathlib import Path
+from inspect import isfunction
 
 from repogauge.export.adapter import build_adapter_spec, generate_adapter
+from repogauge.parsers.junit import parse_repogauge_junit
 
 
 class TestBuildAdapterSpec:
@@ -107,7 +109,8 @@ class TestGenerateAdapter:
 
         assert "org/my-repo.v2" in mod.MAP_REPO_TO_EXT
         assert "org/my-repo.v2" in mod.MAP_REPO_TO_PARSER
-        assert mod.MAP_REPO_TO_PARSER["org/my-repo.v2"] == "junit"
+        assert isfunction(mod.MAP_REPO_TO_PARSER["org/my-repo.v2"])
+        assert mod.MAP_REPO_TO_PARSER["org/my-repo.v2"] is parse_repogauge_junit
         assert (
             mod.MAP_REPO_VERSION_TO_SPECS["org/my-repo.v2"]["v1"]["parser"] == "junit"
         )

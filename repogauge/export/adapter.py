@@ -68,6 +68,8 @@ _ADAPTER_TEMPLATE = '''\
 
 from __future__ import annotations
 
+from repogauge.parsers.junit import parse_repogauge_junit
+
 REPO = {repo_repr}
 VERSION = {version_repr}
 MODULE_NAME = {module_name_repr}
@@ -118,6 +120,8 @@ def registration_context() -> dict:
 
 
 def _render_adapter(spec: Dict[str, Any]) -> str:
+    map_repo = repr(spec["repo"])
+    map_repo_to_parser = f"{{{map_repo}: parse_repogauge_junit}}"
     return _ADAPTER_TEMPLATE.format(
         repo=spec["repo"],
         repo_repr=repr(spec["repo"]),
@@ -146,7 +150,7 @@ def _render_adapter(spec: Dict[str, Any]) -> str:
                 }
             }
         ),
-        map_repo_to_parser_repr=repr({spec["repo"]: spec["parser"]}),
+        map_repo_to_parser_repr=map_repo_to_parser,
     )
 
 

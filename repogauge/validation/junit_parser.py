@@ -91,6 +91,40 @@ def _outcome_of(testcase: ET.Element) -> str:
     return OUTCOME_PASS
 
 
+def parse_junit_xml_content(xml_text: str) -> Dict[str, str]:
+    """Parse JUnit XML text and return ``{test_id: outcome}``.
+
+    Outcomes are one of: ``"pass"``, ``"fail"``, ``"error"``, ``"skip"``.
+
+    Raises:
+        JUnitParseError: if XML is empty, malformed, or has no tests.
+    """
+    text = xml_text.strip()
+    if not text:
+        raise JUnitParseError("JUnit XML content is empty")
+
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as exc:
+        raise JUnitParseError(f"malformed JUnit XML content: {exc}") from exc
+
+    suites = root.findall(".//testsuite") or ([root] if root.tag == "testsuite" else [])
+    if not suites:
+        raise JUnitParseError("no <testsuite> elements found in JUnit XML")
+
+    results: Dict[str, str] = {}
+    for suite in suites:
+        for testcase in suite.findall("testcase"):
+            classname = (testcase.get("classname") or "").strip()
+            name = (testcase.get("name") or "").strip()
+            if not name:
+                continue
+            test_id = _canonical_id(classname, name)
+            results[test_id] = _outcome_of(testcase)
+
+    return results
+
+
 def parse_junit_xml(xml_path: Path) -> Dict[str, str]:
     """Parse a pytest JUnit XML file and return ``{test_id: outcome}``.
 
@@ -107,23 +141,6 @@ def parse_junit_xml(xml_path: Path) -> Dict[str, str]:
         raise JUnitParseError(f"JUnit XML is empty: {xml_path}")
 
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError as exc:
+        return parse_junit_xml_content(text)
+    except JUnitParseError as exc:
         raise JUnitParseError(f"malformed JUnit XML at {xml_path}: {exc}") from exc
-
-    # Support both <testsuites><testsuite>… and bare <testsuite>…
-    suites = root.findall(".//testsuite") or ([root] if root.tag == "testsuite" else [])
-    if not suites:
-        raise JUnitParseError(f"no <testsuite> elements found in {xml_path}")
-
-    results: Dict[str, str] = {}
-    for suite in suites:
-        for tc in suite.findall("testcase"):
-            classname = (tc.get("classname") or "").strip()
-            name = (tc.get("name") or "").strip()
-            if not name:
-                continue
-            test_id = _canonical_id(classname, name)
-            results[test_id] = _outcome_of(tc)
-
-    return results
