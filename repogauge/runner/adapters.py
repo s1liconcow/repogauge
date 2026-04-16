@@ -852,6 +852,11 @@ def _coerce_cli_command(config: Mapping[str, Any]) -> _CLIAdapterConfig:
 class CodexCLIAdapter(_BaseConcreteSolverAdapter):
     """Codex CLI adapter driven via non-interactive JSON output."""
 
+    _BATCH_CONFIG_OVERRIDES = (
+        ("notify", "[]"),
+        ("mcp_servers", "{}"),
+    )
+
     def __init__(
         self,
         *,
@@ -885,7 +890,10 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             instance_row=instance_row,
         )
         command = list(self.command)
-        command.extend(["exec", "--json", "--model", self.model])
+        command.append("exec")
+        for key, value in self._BATCH_CONFIG_OVERRIDES:
+            command.extend(["-c", f"{key}={value}"])
+        command.extend(["--json", "--model", self.model])
         command_result = run_command(
             command,
             input_text=prompt,

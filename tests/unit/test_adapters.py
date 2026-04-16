@@ -257,3 +257,40 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.cost_source, "codex_cli.event.cost")
         self.assertEqual(result.usage, {"input_tokens": 5})
         self.assertEqual(result.cost, {"total_cost": 0.5})
+
+    def test_codex_cli_adapter_disables_ambient_codex_config(self) -> None:
+        provider = _provider_for_command("codex")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+            attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        command_result = CommandResult(
+            command=[],
+            returncode=0,
+            stdout='{"message":{"content":"diff --git a/x b/x\\n+ok"}}\n',
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ) as mock_run_command:
+            adapter.execute_attempt(request)
+
+        command = mock_run_command.call_args.args[0]
+        self.assertEqual(
+            command[:7],
+            ["codex", "exec", "-c", "notify=[]", "-c", "mcp_servers={}", "--json"],
+        )
+        self.assertEqual(command[-2:], ["--model", "gpt-5.4"])
