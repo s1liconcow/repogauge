@@ -84,6 +84,8 @@ def _extract_rename_lines(lines: List[str]) -> tuple[Optional[str], Optional[str
 
 
 def _bucket_for_file(path: str, role: str, include_test_support: bool) -> str:
+    if role in {"generated_vendor", "docs"}:
+        return "exclude"
     if role == "test":
         return "test"
     if role == "test_support" and include_test_support:
@@ -168,12 +170,20 @@ def split_prod_and_test(diff: str) -> Tuple[str, str, Dict[str, List[str]]]:
 
     prod_lines: List[str] = []
     test_lines: List[str] = []
-    touched: Dict[str, List[str]] = {"prod": [], "test": [], "test_support": []}
+    touched: Dict[str, List[str]] = {
+        "prod": [],
+        "test": [],
+        "test_support": [],
+        "excluded": [],
+    }
 
     for chunk in file_chunks:
         bucket = _bucket_for_file(
             chunk.path, chunk.role, include_test_support=has_test_file
         )
+        if bucket == "exclude":
+            touched["excluded"].append(chunk.path)
+            continue
         if bucket == "test":
             test_lines.extend(chunk.raw_lines)
             if chunk.role == "test":
@@ -191,6 +201,7 @@ def split_prod_and_test(diff: str) -> Tuple[str, str, Dict[str, List[str]]]:
             "prod_files": touched["prod"],
             "test_files": touched["test"] + touched["test_support"],
             "test_support_files": touched["test_support"],
+            "excluded_files": touched["excluded"],
             "all_touched_files": touched_paths,
         },
     )

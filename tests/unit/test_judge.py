@@ -13,7 +13,9 @@ from repogauge.runner.judge import (
     HarnessEvaluationError,
     JudgeBatchResult,
     JudgeSchedulerConfig,
+    _augment_instance_rows_with_harness_logs,
     _ensure_container_runtime,
+    _harness_run_id,
     _invoke_swebench_harness,
     _register_adapter_maps,
     run_harness_evaluation,
@@ -560,3 +562,50 @@ def test_register_adapter_maps_patches_grading_source_modules() -> None:
         == "python -m pytest"
     )
     assert "owner/repo" in log_parsers_module.MAP_REPO_TO_PARSER
+
+
+def test_augment_instance_rows_with_harness_logs_includes_paths_and_summary(
+    tmp_path: Path,
+) -> None:
+    out_root = tmp_path / "batch_0000_gold_repo_0.0.0"
+    run_id = _harness_run_id(out_root)
+    log_dir = out_root / "logs" / "run_evaluation" / run_id / "gold" / "repo__sample-1"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    run_instance_log = log_dir / "run_instance.log"
+    run_instance_log.write_text(
+        "\n".join(
+            [
+                "2026-04-16 12:41:39,351 - INFO - >>>>> Patch Apply Failed:",
+                "patching file repogauge/validation/validate.py",
+                "Reversed (or previously applied) patch detected!  Assuming -R.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (log_dir / "patch.diff").write_text("diff", encoding="utf-8")
+
+    instance_rows = [
+        {
+            "instance_id": "repo__sample-1",
+            "status": "error",
+            "reason": "harness error",
+            "error": "harness error",
+            "metadata": {},
+        }
+    ]
+    dataset_rows = [{"instance_id": "repo__sample-1"}]
+    prediction_rows = [{"instance_id": "repo__sample-1", "model_name_or_path": "gold"}]
+
+    _augment_instance_rows_with_harness_logs(
+        instance_rows=instance_rows,
+        dataset_rows=dataset_rows,
+        prediction_rows=prediction_rows,
+        out_root=out_root,
+        run_id=run_id,
+    )
+
+    row = instance_rows[0]
+    assert "Patch Apply Failed" in row["reason"]
+    assert str(run_instance_log) in row["error"]
+    assert row["metadata"]["run_instance_log_path"] == str(run_instance_log)
+    assert row["metadata"]["patch_path"] == str(log_dir / "patch.diff")

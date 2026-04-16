@@ -250,6 +250,135 @@ def _safe_batch_key(value: str) -> str:
     return "".join(safe) or "default"
 
 
+def _model_log_segment(prediction_row: Mapping[str, Any]) -> str:
+    return _coerce_text(prediction_row.get("model_name_or_path") or "None").replace(
+        "/", "__"
+    )
+
+
+def _harness_run_id(out_root: Path) -> str:
+    return f"repogauge-{out_root.parent.name}-{out_root.name}"
+
+
+def _instance_log_paths(
+    *,
+    out_root: Path,
+    run_id: str,
+    dataset_row: Mapping[str, Any],
+    prediction_row: Mapping[str, Any],
+) -> dict[str, str]:
+    instance_id = _coerce_text(dataset_row.get("instance_id"))
+    if not instance_id:
+        return {}
+    log_dir = (
+        out_root
+        / "logs"
+        / "run_evaluation"
+        / run_id
+        / _model_log_segment(prediction_row)
+        / instance_id
+    )
+    candidates = {
+        "harness_log_dir": log_dir,
+        "run_instance_log_path": log_dir / "run_instance.log",
+        "test_output_path": log_dir / "test_output.txt",
+        "report_path": log_dir / "report.json",
+        "patch_path": log_dir / "patch.diff",
+        "eval_script_path": log_dir / "eval.sh",
+    }
+    return {
+        key: str(path)
+        for key, path in candidates.items()
+        if key == "harness_log_dir" or path.exists()
+    }
+
+
+def _extract_failure_summary(run_instance_log_path: Path) -> str | None:
+    if not run_instance_log_path.exists():
+        return None
+    text = run_instance_log_path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    markers = (
+        ">>>>> Patch Apply Failed:",
+        "Test timed out after ",
+        "failed to start podman system service",
+        "Failed to apply patch to container:",
+    )
+    for marker in markers:
+        for index, line in enumerate(lines):
+            if marker not in line:
+                continue
+            window = [line.strip()]
+            for follow in lines[index + 1 : index + 7]:
+                stripped = follow.strip()
+                if not stripped:
+                    break
+                if stripped.startswith("202") and " - INFO - " in stripped:
+                    stripped = stripped.split(" - INFO - ", 1)[1].strip()
+                window.append(stripped)
+            return "\n".join(window).strip()
+    for line in reversed(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("202") and " - INFO - " in stripped:
+            stripped = stripped.split(" - INFO - ", 1)[1].strip()
+        return stripped
+    return None
+
+
+def _augment_instance_rows_with_harness_logs(
+    *,
+    instance_rows: list[dict[str, Any]],
+    dataset_rows: list[Dict[str, Any]],
+    prediction_rows: list[Dict[str, Any]],
+    out_root: Path,
+    run_id: str,
+) -> None:
+    dataset_by_id = {
+        _coerce_text(row.get("instance_id")): row
+        for row in dataset_rows
+        if _coerce_text(row.get("instance_id"))
+    }
+    prediction_by_id = {
+        _coerce_text(row.get("instance_id")): row
+        for row in prediction_rows
+        if _coerce_text(row.get("instance_id"))
+    }
+    for row in instance_rows:
+        instance_id = _coerce_text(row.get("instance_id"))
+        dataset_row = dataset_by_id.get(instance_id)
+        prediction_row = prediction_by_id.get(instance_id)
+        if dataset_row is None or prediction_row is None:
+            continue
+        existing_metadata = row.get("metadata")
+        metadata = (
+            dict(existing_metadata) if isinstance(existing_metadata, Mapping) else {}
+        )
+        log_paths = _instance_log_paths(
+            out_root=out_root,
+            run_id=run_id,
+            dataset_row=dataset_row,
+            prediction_row=prediction_row,
+        )
+        metadata.update(log_paths)
+        row["metadata"] = metadata
+        if row.get("status") != "error":
+            continue
+        log_path_text = log_paths.get("run_instance_log_path")
+        if not log_path_text:
+            continue
+        failure_summary = _extract_failure_summary(Path(log_path_text))
+        if not failure_summary:
+            continue
+        row["reason"] = failure_summary
+        row["error"] = (
+            f"{failure_summary}\nSee {log_path_text}"
+            if row.get("error") in {None, "", "harness error"}
+            else row.get("error")
+        )
+
+
 def _prepare_prediction_index(
     predictions_rows: list[Dict[str, Any]],
 ) -> dict[str, Dict[str, Any]]:
@@ -319,6 +448,7 @@ def _run_batch(
         / "judge_batches"
         / f"batch_{batch_index:04d}_{_safe_batch_key(batch_key)}"
     )
+    run_id = _harness_run_id(batch_root)
     dataset_path = batch_root / "dataset.jsonl"
     predictions_path = batch_root / "predictions.jsonl"
     dataset_rows = [dataset_row for dataset_row, _ in rows]
@@ -344,6 +474,13 @@ def _run_batch(
         container_host=container_host,
     )
     instance_rows, metadata = _parse_harness_results(harness_result, dataset_rows)
+    _augment_instance_rows_with_harness_logs(
+        instance_rows=instance_rows,
+        dataset_rows=dataset_rows,
+        prediction_rows=prediction_rows,
+        out_root=batch_root,
+        run_id=run_id,
+    )
 
     if not instance_rows:
         instance_rows = [
@@ -778,7 +915,7 @@ def _invoke_swebench_harness(
     if not instances:
         return {}
 
-    run_id = f"repogauge-{out_root.parent.name}-{out_root.name}"
+    run_id = _harness_run_id(out_root)
     resolved_container_host = _resolve_container_host(
         container_runtime=container_runtime,
         container_host=container_host,

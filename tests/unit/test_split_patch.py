@@ -84,6 +84,42 @@ class TestSplitPatch(unittest.TestCase):
         with self.assertRaises(PatchSplitError):
             split_prod_and_test(diff)
 
+    def test_split_patch_excludes_non_replayable_chunks(self) -> None:
+        diff = "\n".join(
+            [
+                "diff --git a/.beads/issues.jsonl b/.beads/issues.jsonl",
+                "@@ -1 +1 @@",
+                '-{"status":"open"}',
+                '+{"status":"closed"}',
+                "diff --git a/repogauge/validation/__pycache__/validate.cpython-312.pyc b/repogauge/validation/__pycache__/validate.cpython-312.pyc",
+                "deleted file mode 100644",
+                "index a606d97..0000000",
+                "Binary files a/repogauge/validation/__pycache__/validate.cpython-312.pyc and /dev/null differ",
+                "diff --git a/src/core.py b/src/core.py",
+                "@@ -1 +1 @@",
+                "-print('prod_old')",
+                "+print('prod_new')",
+                "diff --git a/tests/test_core.py b/tests/test_core.py",
+                "@@ -1 +1 @@",
+                "-assert old",
+                "+assert new",
+            ]
+        )
+
+        prod_patch, test_patch, meta = split_prod_and_test(diff)
+
+        self.assertNotIn(".beads/issues.jsonl", prod_patch)
+        self.assertNotIn("__pycache__", prod_patch)
+        self.assertIn("src/core.py", prod_patch)
+        self.assertIn("tests/test_core.py", test_patch)
+        self.assertEqual(
+            meta["excluded_files"],
+            [
+                ".beads/issues.jsonl",
+                "repogauge/validation/__pycache__/validate.cpython-312.pyc",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

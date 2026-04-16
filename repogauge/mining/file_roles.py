@@ -45,6 +45,7 @@ def classify_file(path: str | Path) -> FileRoleClassification:
     if any(
         segment
         in {
+            ".beads",
             "__pycache__",
             ".mypy_cache",
             ".pytest_cache",
