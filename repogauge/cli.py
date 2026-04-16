@@ -1133,6 +1133,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             run_manifest_out = run_root / "manifest.json"
             run_jobs_out = run_root / "run_jobs.jsonl"
             attempts_out = run_root / "attempts.jsonl"
+            attempts_parquet_out = run_root / "attempts.parquet"
             run_summary_out = run_root / "run_summary.json"
             write_matrix_copy(matrix_out, Path(matrix.matrix_path))
             write_jobs(jobs, jobs_out)
@@ -1153,6 +1154,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 config=SolverSchedulerConfig(
                     persist_jobs_to=run_jobs_out,
                     persist_attempts_to=attempts_out,
+                    persist_attempts_parquet=attempts_parquet_out,
                 )
             )
             summary = scheduler.run(
@@ -1189,6 +1191,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.artifact_paths["run_manifest"] = str(run_manifest_out)
             manifest.artifact_paths["run_jobs"] = str(run_jobs_out)
             manifest.artifact_paths["attempts"] = str(attempts_out)
+            manifest.artifact_paths["attempts_parquet"] = str(attempts_parquet_out)
             manifest.artifact_paths["run_summary"] = str(run_summary_out)
             manifest.finish(
                 status="succeeded",

@@ -491,6 +491,7 @@ solvers:
             self.assertTrue(run_manifest_path.exists())
             self.assertTrue((run_root / "run_jobs.jsonl").exists())
             self.assertTrue((run_root / "attempts.jsonl").exists())
+            self.assertTrue((run_root / "attempts.parquet").exists())
             self.assertTrue((run_root / "run_summary.json").exists())
 
             rows = [
@@ -513,6 +514,15 @@ solvers:
             self.assertEqual(run_manifest["providers"][0]["provider_id"], "mock")
             self.assertEqual(len(run_manifest["solvers"]), 1)
             self.assertEqual(run_manifest["solvers"][0]["solver_id"], "solver-a")
+
+            manifest_payload = json.loads(
+                (out / "manifest.json").read_text(encoding="utf-8")
+            )
+            artifact_paths = manifest_payload["artifact_paths"]
+            self.assertEqual(
+                artifact_paths["attempts_parquet"],
+                str(run_root / "attempts.parquet"),
+            )
 
             run_summary = json.loads(
                 (run_root / "run_summary.json").read_text(encoding="utf-8")

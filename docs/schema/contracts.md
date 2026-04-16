@@ -179,7 +179,9 @@ All records include `schema_version` and `repo` where applicable.
 - `duration_ms: int`
 - `exit_reason: str`
 - `model_patch: str | null`
+- `usage_source: str`
 - `usage: object`
+- `cost_source: str`
 - `cost: object`
 - `metadata: object`
 

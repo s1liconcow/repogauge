@@ -49,6 +49,7 @@ class SolverSchedulerConfig:
     )
     persist_jobs_to: Path | None = None
     persist_attempts_to: Path | None = None
+    persist_attempts_parquet: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -237,6 +238,56 @@ def _serialize_attempt_row(
     return payload
 
 
+def _coerce_attempt_index(attempt_id: str) -> int:
+    parts = attempt_id.rsplit(":attempt-", 1)
+    if len(parts) != 2:
+        return 1
+    try:
+        return int(parts[-1])
+    except ValueError:
+        return 1
+
+
+def _normalize_attempt_row(
+    *,
+    attempt_id: str,
+    job: PlannedRunJob,
+    row: dict[str, Any],
+    dataset_row: Mapping[str, Any] | None,
+    attempt_started_at: str,
+    attempt_ended_at: str,
+    attempt_state: str,
+) -> dict[str, Any]:
+    normalized = dict(row)
+    normalized.update(
+        {
+            "attempt_index": _coerce_attempt_index(attempt_id),
+            "attempt_started_at": attempt_started_at,
+            "attempt_ended_at": attempt_ended_at,
+            "attempt_state": attempt_state,
+            "run_id": job.run_id,
+            "provider_id": job.provider_id,
+            "patch_length": len(normalized.get("model_patch") or ""),
+            "prompt_policy_hash": job.prompt_policy_hash,
+            "tool_policy_hash": job.tool_policy_hash,
+            "solver_config_hash": job.solver_config_hash,
+            "dataset_path": job.dataset_path,
+            "matrix_path": job.matrix_path,
+            "instance_repo": "",
+            "instance_base_commit": "",
+            "instance_version": "",
+            "exit_reason": normalized.get("exit_reason", ""),
+        }
+    )
+
+    if dataset_row:
+        normalized["instance_repo"] = str(dataset_row.get("repo", ""))
+        normalized["instance_base_commit"] = str(dataset_row.get("base_commit", ""))
+        normalized["instance_version"] = str(dataset_row.get("version", ""))
+        normalized["problem_statement"] = dataset_row.get("problem_statement")
+    return normalized
+
+
 class SolverScheduler:
     """Run solver jobs through an adapter with bounded retries and scheduler controls."""
 
@@ -264,6 +315,34 @@ class SolverScheduler:
             )
         }
         self._writer = _ThreadSafeWriter()
+        self._attempt_rows: list[dict[str, Any]] = []
+        self._attempt_rows_lock = threading.Lock()
+
+    def _flush_attempts_parquet(self) -> None:
+        if self.config.persist_attempts_parquet is None:
+            return
+
+        with self._attempt_rows_lock:
+            rows = tuple(self._attempt_rows)
+            self._attempt_rows.clear()
+
+        if not rows:
+            return
+
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq  # type: ignore
+
+            table = pa.Table.from_pylist(list(rows))
+            self.config.persist_attempts_parquet.parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            pq.write_table(table, str(self.config.persist_attempts_parquet))
+            return
+        except Exception:
+            for row in rows:
+                self._writer.append_jsonl(self.config.persist_attempts_parquet, row)
+            return
 
     def run(
         self,
@@ -301,6 +380,7 @@ class SolverScheduler:
             for future in as_completed(job_futures):
                 job_result = future.result()
                 results.append(job_result)
+            self._flush_attempts_parquet()
 
         return SolverScheduleResult(
             jobs=tuple(results),
@@ -369,8 +449,14 @@ class SolverScheduler:
         elapsed_ms: int,
         result: SolverAdapterResult,
         raw_output: str,
+        dataset_row: Mapping[str, Any] | None,
+        started_at: str,
+        ended_at: str,
     ) -> None:
-        if self.config.persist_attempts_to is None:
+        if (
+            self.config.persist_attempts_to is None
+            and self.config.persist_attempts_parquet is None
+        ):
             return
         payload = _serialize_attempt_row(
             attempt_id=attempt_id,
@@ -386,7 +472,20 @@ class SolverScheduler:
             exit_reason=result.exit_reason,
             metadata=result.metadata,
         )
-        self._writer.append_jsonl(self.config.persist_attempts_to, payload)
+        normalized_payload = _normalize_attempt_row(
+            attempt_id=attempt_id,
+            job=job,
+            row=payload,
+            dataset_row=dataset_row,
+            attempt_started_at=started_at,
+            attempt_ended_at=ended_at,
+            attempt_state=attempt_state,
+        )
+        if self.config.persist_attempts_to is not None:
+            self._writer.append_jsonl(self.config.persist_attempts_to, payload)
+        if self.config.persist_attempts_parquet is not None:
+            with self._attempt_rows_lock:
+                self._attempt_rows.append(normalized_payload)
 
     def _execute_job(
         self,
@@ -501,9 +600,13 @@ class SolverScheduler:
                             metadata=result.metadata,
                         )
 
-            attempt_elapsed_ms = int(
-                (datetime.now(timezone.utc).timestamp() - attempt_started) * 1000
-            )
+            attempt_started_at = datetime.fromtimestamp(
+                attempt_started, tz=timezone.utc
+            ).replace(tzinfo=None)
+            attempt_ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            attempt_elapsed_ms = int((attempt_ended_at - attempt_started_at).total_seconds() * 1000)
+            attempt_started_iso = attempt_started_at.isoformat() + "Z"
+            attempt_ended_iso = attempt_ended_at.isoformat() + "Z"
             attempt_state = _coerce_attempt_status(result.status)
             self._persist_attempt(
                 attempt_id=attempt_id,
@@ -512,6 +615,9 @@ class SolverScheduler:
                 elapsed_ms=attempt_elapsed_ms,
                 result=result,
                 raw_output=result.raw_output,
+                dataset_row=dataset_row,
+                started_at=attempt_started_iso,
+                ended_at=attempt_ended_iso,
             )
 
             if attempt_state == SolverAttemptState.SUCCEEDED:

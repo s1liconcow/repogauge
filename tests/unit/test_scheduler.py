@@ -355,6 +355,42 @@ def test_scheduler_persists_usage_cost_sources_in_attempt_rows(tmp_path: Path) -
     assert attempt_rows[0]["cost_source"] == "response.cost"
 
 
+def test_scheduler_writes_normalized_attempt_parquet_rows(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0")
+    attempts_jsonl = tmp_path / "attempts.jsonl"
+    attempts_parquet = tmp_path / "attempts.parquet"
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_attempts_to=attempts_jsonl,
+            persist_attempts_parquet=attempts_parquet,
+        )
+    )
+    adapter = SourceAwareAdapter(
+        status=SolverAttemptState.SUCCEEDED,
+        usage={"input_tokens": 7},
+        cost={"total_cost": 0.07},
+        usage_source="response.usage",
+        cost_source="response.cost",
+    )
+
+    summary = scheduler.run([job], adapters={"solver-a": adapter})
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    parquet_rows = _read_jsonl(attempts_parquet)
+    assert len(parquet_rows) == 1
+    row = parquet_rows[0]
+    assert row["run_id"] == "run-1"
+    assert row["provider_id"] == "mock"
+    assert row["attempt_index"] == 1
+    assert row["attempt_started_at"]
+    assert row["attempt_ended_at"]
+    assert row["attempt_state"] == SolverAttemptState.SUCCEEDED
+    assert row["prompt_policy_hash"] == "p"
+    assert row["tool_policy_hash"] == "t"
+    assert row["solver_config_hash"] == "s"
+
+
 def test_scheduler_retries_are_budgeted_and_exhausted(tmp_path: Path) -> None:
     job = _job(job_id="run-1:i-1:solver-b:0", solver_id="solver-b")
     scheduler = SolverScheduler(
