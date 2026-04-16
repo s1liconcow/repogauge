@@ -1,11 +1,13 @@
 """Local eval pipeline for SWE-bench-style dataset instances (bead j7y).
 
-For each dataset instance the evaluator runs two passes:
+For each dataset instance the evaluator runs four passes:
 
-  Pass B  base_commit + test_patch                  (establishes which tests fail)
-  Pass C  base_commit + test_patch + pred_patch      (establishes which tests the fix resolves)
+  Run A  base commit sanity check
+  Run B  base_commit + test_patch                  (establishes which tests fail)
+  Run C  base_commit + test_patch + pred_patch      (establishes which tests the fix resolves)
+  Run D  reruns for flake detection
 
-From those two runs:
+From those runs:
   FAIL_TO_PASS  = tests that were fail/error in B and pass in C
   PASS_TO_PASS  = tests that passed in both B and C
   resolved      = all of FAIL_TO_PASS pass in C (or, if FAIL_TO_PASS is empty, any test passes)
@@ -152,6 +154,7 @@ def _run_pytest(
             "command": cmd,
             "returncode": result.returncode,
             "timed_out": result.timed_out,
+            "elapsed_ms": result.elapsed_ms,
             "status": "unknown",
         }
 
@@ -230,6 +233,72 @@ def _is_resolved(
     return bool(ftp)
 
 
+def _run_validation_pass(
+    *,
+    label: str,
+    temp_root: Path,
+    repo_root: Path,
+    base_commit: str,
+    test_patch: str,
+    pred_patch: str,
+    test_files: List[str],
+    timeout_seconds: int,
+    test_cmd_base: str,
+) -> Dict[str, Any]:
+    """Execute one isolated validation run and return outcomes + telemetry."""
+    wt = None
+    outcomes: Dict[str, str] = {}
+    log = ""
+    attempts: List[Dict[str, Any]] = []
+
+    try:
+        wt = create_worktree(repo_root, ref=base_commit)
+        if test_patch.strip():
+            apply_patch_text(wt.path, test_patch)
+        if pred_patch.strip():
+            apply_patch_text(wt.path, pred_patch)
+
+        xml_path = temp_root / f"junit_{label}.xml"
+        outcomes, log, attempts = _run_pytest(
+            wt.path,
+            test_files=test_files,
+            junit_xml=xml_path,
+            timeout_seconds=timeout_seconds,
+            test_cmd_base=test_cmd_base,
+        )
+    except Exception as exc:
+        if isinstance(exc, PytestExecutionError):
+            attempts = exc.attempts
+        return {
+            "status": "failed",
+            "error": f"{label} failed: {exc}",
+            "outcomes": {},
+            "log": log,
+            "attempts": attempts,
+        }
+    finally:
+        if wt is not None:
+            try:
+                wt.remove()
+            except Exception:
+                pass
+
+    return {
+        "status": "passed",
+        "error": None,
+        "outcomes": outcomes,
+        "log": log,
+        "attempts": attempts,
+    }
+
+
+def _is_flaky(
+    run_b: Dict[str, str], run_b_rerun: Dict[str, str], run_c: Dict[str, str], run_c_rerun: Dict[str, str]
+) -> bool:
+    """Return True when reruns are not stable."""
+    return run_b != run_b_rerun or run_c != run_c_rerun
+
+
 # ---------------------------------------------------------------------------
 # Per-instance evaluation
 # ---------------------------------------------------------------------------
@@ -246,7 +315,7 @@ def _eval_instance(
     timeout_seconds: int,
     test_cmd_base: str = "python -m pytest",
 ) -> Dict[str, Any]:
-    """Run two-pass evaluation for one instance.  Returns a result dict."""
+    """Run validation passes for one instance. Returns a result dict."""
     targeted_test_cmd, targeted_test_inputs = build_targeted_test_plan(
         test_cmd_base, test_patch
     )
@@ -255,108 +324,228 @@ def _eval_instance(
     with tempfile.TemporaryDirectory(prefix="repogauge-eval-") as tmpdir:
         tmp = Path(tmpdir)
 
-        # --- Pass B: base + test_patch ----------------------------------------
-        wt_b = None
-        run_b: Dict[str, str] = {}
-        log_b = ""
-        attempts_b: List[Dict[str, Any]] = []
-        try:
-            wt_b = create_worktree(repo_root, ref=base_commit)
-            if test_patch.strip():
-                apply_patch_text(wt_b.path, test_patch)
-            xml_b = tmp / "junit_b.xml"
-            run_b, log_b, attempts_b = _run_pytest(
-                wt_b.path,
-                test_files=test_inputs,
-                junit_xml=xml_b,
-                timeout_seconds=timeout_seconds,
-                test_cmd_base=test_cmd_base,
-            )
-        except Exception as exc:
-            pass_b_attempts = (
-                exc.attempts if isinstance(exc, PytestExecutionError) else []
-            )
-            return {
-                "status": "error",
-                "error": f"pass_b failed: {exc}",
+        run_a = _run_validation_pass(
+            label="a",
+            temp_root=tmp,
+            repo_root=repo_root,
+            base_commit=base_commit,
+            test_patch="",
+            pred_patch="",
+            test_files=test_inputs,
+            timeout_seconds=timeout_seconds,
+            test_cmd_base=targeted_test_cmd,
+        )
+        if run_a["status"] == "failed":
+                return {
+                    "status": "error",
+                    "error": run_a["error"],
                 "targeted_test_cmd": targeted_test_cmd,
                 "targeted_test_inputs": test_inputs,
-                "log_b": log_b,
+                "log_a": run_a["log"],
+                "log_b": "",
                 "log_c": "",
+                "log_b_rerun": "",
+                "log_c_rerun": "",
+                "run_a": run_a["outcomes"],
                 "run_b": {},
                 "run_c": {},
-                "run_b_attempts": pass_b_attempts,
+                "run_b_rerun": {},
+                "run_c_rerun": {},
+                "run_a_attempts": run_a["attempts"],
+                "run_b_attempts": [],
                 "run_c_attempts": [],
+                "run_b_rerun_attempts": [],
+                "run_c_rerun_attempts": [],
+                "flake_runs": 0,
                 "FAIL_TO_PASS": [],
                 "PASS_TO_PASS": [],
                 "resolved": False,
             }
-        finally:
-            if wt_b is not None:
-                try:
-                    wt_b.remove()
-                except Exception:
-                    pass
 
-        # --- Pass C: base + test_patch + pred_patch ----------------------------
-        wt_c = None
-        run_c: Dict[str, str] = {}
-        log_c = ""
-        attempts_c: List[Dict[str, Any]] = []
-        try:
-            wt_c = create_worktree(repo_root, ref=base_commit)
-            if test_patch.strip():
-                apply_patch_text(wt_c.path, test_patch)
-            if pred_patch.strip():
-                apply_patch_text(wt_c.path, pred_patch)
-            xml_c = tmp / "junit_c.xml"
-            run_c, log_c, attempts_c = _run_pytest(
-                wt_c.path,
-                test_files=test_inputs,
-                junit_xml=xml_c,
-                timeout_seconds=timeout_seconds,
-                test_cmd_base=test_cmd_base,
-            )
-        except Exception as exc:
-            pass_c_attempts = (
-                exc.attempts if isinstance(exc, PytestExecutionError) else []
-            )
-            return {
-                "status": "error",
-                "error": f"pass_c failed: {exc}",
+        # --- Pass B: base + test_patch --------------------------------------
+        run_b = _run_validation_pass(
+            label="b",
+            temp_root=tmp,
+            repo_root=repo_root,
+            base_commit=base_commit,
+            test_patch=test_patch,
+            pred_patch="",
+            test_files=test_inputs,
+            timeout_seconds=timeout_seconds,
+            test_cmd_base=targeted_test_cmd,
+        )
+        if run_b["status"] == "failed":
+                return {
+                    "status": "error",
+                    "error": run_b["error"],
                 "targeted_test_cmd": targeted_test_cmd,
                 "targeted_test_inputs": test_inputs,
-                "log_b": log_b,
-                "log_c": log_c,
-                "run_b": run_b,
+                "log_a": run_a["log"],
+                "log_b": run_b["log"],
+                "log_c": "",
+                "log_b_rerun": "",
+                "log_c_rerun": "",
+                "run_a": run_a["outcomes"],
+                "run_b": {},
                 "run_c": {},
-                "run_b_attempts": attempts_b,
-                "run_c_attempts": pass_c_attempts,
+                "run_b_rerun": {},
+                "run_c_rerun": {},
+                "run_a_attempts": run_a["attempts"],
+                "run_b_attempts": run_b["attempts"],
+                "run_c_attempts": [],
+                "run_b_rerun_attempts": [],
+                "run_c_rerun_attempts": [],
+                "flake_runs": 0,
                 "FAIL_TO_PASS": [],
                 "PASS_TO_PASS": [],
                 "resolved": False,
             }
-        finally:
-            if wt_c is not None:
-                try:
-                    wt_c.remove()
-                except Exception:
-                    pass
 
-    ftp, ptp = _derive_test_lists(run_b, run_c, declared_ftp, declared_ptp)
-    resolved = _is_resolved(ftp, run_c, declared_ftp)
+        # --- Pass C: base + test_patch + pred_patch --------------------------
+        run_c = _run_validation_pass(
+            label="c",
+            temp_root=tmp,
+            repo_root=repo_root,
+            base_commit=base_commit,
+            test_patch=test_patch,
+            pred_patch=pred_patch,
+            test_files=test_inputs,
+            timeout_seconds=timeout_seconds,
+            test_cmd_base=targeted_test_cmd,
+        )
+        if run_c["status"] == "failed":
+                return {
+                    "status": "error",
+                    "error": run_c["error"],
+                "targeted_test_cmd": targeted_test_cmd,
+                "targeted_test_inputs": test_inputs,
+                "log_a": run_a["log"],
+                "log_b": run_b["log"],
+                "log_c": run_c["log"],
+                "log_b_rerun": "",
+                "log_c_rerun": "",
+                "run_a": run_a["outcomes"],
+                "run_b": run_b["outcomes"],
+                "run_c": {},
+                "run_b_rerun": {},
+                "run_c_rerun": {},
+                "run_a_attempts": run_a["attempts"],
+                "run_b_attempts": run_b["attempts"],
+                "run_c_attempts": run_c["attempts"],
+                "run_b_rerun_attempts": [],
+                "run_c_rerun_attempts": [],
+                "flake_runs": 0,
+                "FAIL_TO_PASS": [],
+                "PASS_TO_PASS": [],
+                "resolved": False,
+            }
+
+        # --- Pass D: reruns for flake detection ------------------------------
+        run_b_rerun = _run_validation_pass(
+            label="b_rerun",
+            temp_root=tmp,
+            repo_root=repo_root,
+            base_commit=base_commit,
+            test_patch=test_patch,
+            pred_patch="",
+            test_files=test_inputs,
+            timeout_seconds=timeout_seconds,
+            test_cmd_base=targeted_test_cmd,
+        )
+        run_c_rerun = _run_validation_pass(
+            label="c_rerun",
+            temp_root=tmp,
+            repo_root=repo_root,
+            base_commit=base_commit,
+            test_patch=test_patch,
+            pred_patch=pred_patch,
+            test_files=test_inputs,
+            timeout_seconds=timeout_seconds,
+            test_cmd_base=targeted_test_cmd,
+        )
+
+        if run_b_rerun["status"] == "failed" or run_c_rerun["status"] == "failed":
+                return {
+                    "status": "error",
+                    "error": run_b_rerun["error"]
+                    if run_b_rerun["status"] == "failed"
+                    else run_c_rerun["error"],
+                "targeted_test_cmd": targeted_test_cmd,
+                "targeted_test_inputs": test_inputs,
+                "log_a": run_a["log"],
+                "log_b": run_b["log"],
+                "log_c": run_c["log"],
+                "log_b_rerun": run_b_rerun["log"],
+                "log_c_rerun": run_c_rerun["log"],
+                "run_a": run_a["outcomes"],
+                "run_b": run_b["outcomes"],
+                "run_c": run_c["outcomes"],
+                "run_b_rerun": {},
+                "run_c_rerun": {},
+                "run_a_attempts": run_a["attempts"],
+                "run_b_attempts": run_b["attempts"],
+                "run_c_attempts": run_c["attempts"],
+                "run_b_rerun_attempts": run_b_rerun["attempts"],
+                "run_c_rerun_attempts": run_c_rerun["attempts"],
+                "flake_runs": 2,
+                "FAIL_TO_PASS": [],
+                "PASS_TO_PASS": [],
+                "resolved": False,
+            }
+
+        if _is_flaky(run_b["outcomes"], run_b_rerun["outcomes"], run_c["outcomes"], run_c_rerun["outcomes"]):
+                return {
+                    "status": "flaky",
+                    "error": "rerun outcomes changed",
+                "targeted_test_cmd": targeted_test_cmd,
+                "targeted_test_inputs": test_inputs,
+                "log_a": run_a["log"],
+                "log_b": run_b["log"],
+                "log_c": run_c["log"],
+                "log_b_rerun": run_b_rerun["log"],
+                "log_c_rerun": run_c_rerun["log"],
+                "run_a": run_a["outcomes"],
+                "run_b": run_b["outcomes"],
+                "run_c": run_c["outcomes"],
+                "run_b_rerun": run_b_rerun["outcomes"],
+                "run_c_rerun": run_c_rerun["outcomes"],
+                "run_a_attempts": run_a["attempts"],
+                "run_b_attempts": run_b["attempts"],
+                "run_c_attempts": run_c["attempts"],
+                "run_b_rerun_attempts": run_b_rerun["attempts"],
+                "run_c_rerun_attempts": run_c_rerun["attempts"],
+                "flake_runs": 2,
+                "FAIL_TO_PASS": [],
+                "PASS_TO_PASS": [],
+                "resolved": False,
+            }
+
+        ftp, ptp = _derive_test_lists(
+            run_b["outcomes"], run_c["outcomes"], declared_ftp, declared_ptp
+        )
+        resolved = _is_resolved(ftp, run_c["outcomes"], declared_ftp)
 
     return {
         "status": "resolved" if resolved else "not_resolved",
         "error": None,
-        "log_b": log_b,
-        "log_c": log_c,
+        "log_a": run_a["log"],
+        "log_b": run_b["log"],
+        "log_c": run_c["log"],
+        "log_b_rerun": run_b_rerun["log"],
+        "log_c_rerun": run_c_rerun["log"],
         "targeted_test_cmd": targeted_test_cmd,
         "targeted_test_inputs": test_inputs,
-        "run_b": run_b,
-        "run_c": run_c,
-        "run_b_attempts": attempts_b,
-        "run_c_attempts": attempts_c,
+        "run_a": run_a["outcomes"],
+        "run_b": run_b["outcomes"],
+        "run_c": run_c["outcomes"],
+        "run_b_rerun": run_b_rerun["outcomes"],
+        "run_c_rerun": run_c_rerun["outcomes"],
+        "run_a_attempts": run_a["attempts"],
+        "run_b_attempts": run_b["attempts"],
+        "run_c_attempts": run_c["attempts"],
+        "run_b_rerun_attempts": run_b_rerun["attempts"],
+        "run_c_rerun_attempts": run_c_rerun["attempts"],
+        "flake_runs": 2,
         "FAIL_TO_PASS": ftp,
         "PASS_TO_PASS": ptp,
         "resolved": resolved,
@@ -453,12 +642,21 @@ def run_eval(
                 "PASS_TO_PASS": outcome["PASS_TO_PASS"],
                 "metadata": {
                     "base_commit": ds["base_commit"],
+                    "run_a_count": len(outcome["run_a"]),
                     "run_b_count": len(outcome["run_b"]),
                     "run_c_count": len(outcome["run_c"]),
+                    "run_b_rerun_count": len(outcome["run_b_rerun"]),
+                    "run_c_rerun_count": len(outcome["run_c_rerun"]),
+                    "flake_runs": outcome["flake_runs"],
                     "run_b_attempts": outcome["run_b_attempts"],
                     "run_c_attempts": outcome["run_c_attempts"],
+                    "run_a_attempts": outcome["run_a_attempts"],
+                    "run_b_rerun_attempts": outcome["run_b_rerun_attempts"],
+                    "run_c_rerun_attempts": outcome["run_c_rerun_attempts"],
                     "log_b": outcome["log_b"][-2000:],
                     "log_c": outcome["log_c"][-2000:],
+                    "log_b_rerun": outcome["log_b_rerun"][-2000:],
+                    "log_c_rerun": outcome["log_c_rerun"][-2000:],
                 },
             }
         )
