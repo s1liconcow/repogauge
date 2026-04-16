@@ -25,6 +25,7 @@ from .manifest import Manifest, ManifestStepStatus
 from .mining.inspect import inspect_repository
 from .mining.scan import scan_repository
 from repogauge.runner.analyze import (
+    build_analysis_report,
     load_attempt_rows,
     load_instance_result_rows,
     summarize_attempt_metrics,
@@ -1267,6 +1268,29 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 group_by=_parse_group_by(namespace.group_by),
                 expensive_cost_threshold=float(namespace.expensive_cost_threshold),
             )
+            solver_rows = summarize_attempt_metrics(
+                attempts=attempt_rows,
+                instance_results=instance_results,
+                group_by=("solver_id",),
+                expensive_cost_threshold=float(namespace.expensive_cost_threshold),
+            )
+            analysis_report = build_analysis_report(
+                attempts=attempt_rows,
+                instance_results=instance_results,
+                grouped_summaries=summary_rows,
+                solver_summaries=solver_rows,
+                group_by=_parse_group_by(namespace.group_by),
+                expensive_cost_threshold=float(namespace.expensive_cost_threshold),
+                metadata={
+                    "run_root": str(analyze_root),
+                    "group_by": _parse_group_by(namespace.group_by),
+                    "expensive_cost_threshold": namespace.expensive_cost_threshold,
+                    "task_feature_version": TASK_FEATURE_VERSION,
+                    "attempt_rows": len(attempt_rows),
+                    "instance_result_rows": len(instance_results),
+                    "router_training_rows": len(router_rows),
+                },
+            )
 
             summary_path = out_root / "summary.json"
             report_csv_path = out_root / "report.csv"
@@ -1285,6 +1309,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "instance_result_rows": len(instance_results),
                     "router_training_rows": len(router_rows),
                 },
+                report=analysis_report,
             )
             write_summary_csv(
                 report_csv_path,
@@ -1308,6 +1333,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "instance_result_rows": len(instance_results),
                     "router_training_rows": len(router_rows),
                 },
+                report=analysis_report,
             )
             write_router_training_rows(router_train_path, router_rows)
 

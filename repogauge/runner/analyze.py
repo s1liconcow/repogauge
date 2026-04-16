@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter, defaultdict
+from html import escape as html_escape
 import json
-from collections import defaultdict
 from dataclasses import asdict, dataclass
+from itertools import groupby
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -100,6 +102,297 @@ def _safe_cost(values: list[float]) -> float:
     return total
 
 
+def _display_number(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
+def _solver_id_from_row(row: Mapping[str, Any]) -> str:
+    group_values = row.get("group_values")
+    if isinstance(group_values, Mapping):
+        solver_id = _coerce_str(group_values.get("solver_id"))
+        if solver_id:
+            return solver_id
+    return _coerce_str(row.get("solver_id"))
+
+
+def _metric_value_or_inf(value: Any) -> float:
+    if value is None:
+        return float("inf")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+def _solver_ranking_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
+        -_coerce_non_negative_float(row.get("raw_resolution_rate")),
+        -_coerce_non_negative_int(row.get("resolved_instance_count")),
+        _metric_value_or_inf(row.get("cost_per_resolved_issue")),
+        _metric_value_or_inf(row.get("latency_ms_per_resolved_issue")),
+        _coerce_non_negative_float(row.get("total_cost_usd")),
+        _coerce_str(_solver_id_from_row(row)),
+    )
+
+
+def _solver_cost_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
+        _metric_value_or_inf(row.get("cost_per_resolved_issue")),
+        -_coerce_non_negative_float(row.get("raw_resolution_rate")),
+        _metric_value_or_inf(row.get("latency_ms_per_resolved_issue")),
+        _solver_id_from_row(row),
+    )
+
+
+def _dominates(candidate: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
+    candidate_resolution = _coerce_non_negative_float(
+        candidate.get("raw_resolution_rate")
+    )
+    other_resolution = _coerce_non_negative_float(other.get("raw_resolution_rate"))
+    candidate_cost = _metric_value_or_inf(candidate.get("cost_per_resolved_issue"))
+    other_cost = _metric_value_or_inf(other.get("cost_per_resolved_issue"))
+    candidate_latency = _metric_value_or_inf(
+        candidate.get("latency_ms_per_resolved_issue")
+    )
+    other_latency = _metric_value_or_inf(other.get("latency_ms_per_resolved_issue"))
+
+    return (
+        candidate_resolution >= other_resolution
+        and candidate_cost <= other_cost
+        and candidate_latency <= other_latency
+        and (
+            candidate_resolution > other_resolution
+            or candidate_cost < other_cost
+            or candidate_latency < other_latency
+        )
+    )
+
+
+def _build_budget_frontier(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    eligible = [
+        row
+        for row in rows
+        if row.get("cost_per_resolved_issue") is not None
+        and _coerce_non_negative_int(row.get("resolved_instance_count")) > 0
+    ]
+    ordered = sorted(eligible, key=_solver_cost_key)
+    if not ordered:
+        return []
+
+    frontier: list[dict[str, Any]] = []
+    best_row: dict[str, Any] | None = None
+
+    for budget, bucket in groupby(ordered, key=lambda row: _metric_value_or_inf(row.get("cost_per_resolved_issue"))):
+        bucket_rows = list(bucket)
+        for row in bucket_rows:
+            if best_row is None or _solver_ranking_key(row) < _solver_ranking_key(best_row):
+                best_row = row
+        if best_row is None:
+            continue
+        frontier.append(
+            {
+                "budget": budget,
+                "best_solver_id": _solver_id_from_row(best_row),
+                "best_raw_resolution_rate": best_row.get("raw_resolution_rate"),
+                "best_resolved_instance_count": best_row.get(
+                    "resolved_instance_count"
+                ),
+                "best_cost_per_resolved_issue": best_row.get(
+                    "cost_per_resolved_issue"
+                ),
+                "best_latency_ms_per_resolved_issue": best_row.get(
+                    "latency_ms_per_resolved_issue"
+                ),
+                "best_total_cost_usd": best_row.get("total_cost_usd"),
+                "best_total_duration_ms": best_row.get("total_duration_ms"),
+                "affordable_solver_ids": [
+                    _solver_id_from_row(row) for row in bucket_rows
+                ],
+            }
+        )
+
+    return frontier
+
+
+def _build_pareto_frontier(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    frontier: list[dict[str, Any]] = []
+    for row in rows:
+        dominated = False
+        for other in rows:
+            if other is row:
+                continue
+            if _dominates(other, row):
+                dominated = True
+                break
+        if not dominated:
+            frontier.append(row)
+    return sorted(frontier, key=_solver_cost_key)
+
+
+def _build_failure_breakdown(
+    unresolved_rows: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    counts: Counter[str] = Counter()
+    for row in unresolved_rows:
+        reason = _coerce_str(row.get("failure_reason"))
+        if not reason:
+            reason = _coerce_str(row.get("harness_outcome"))
+        if not reason:
+            reason = "unknown"
+        counts[reason] += 1
+
+    total = sum(counts.values())
+    breakdown = [
+        {
+            "reason": reason,
+            "count": count,
+            "share": (_safe_rate(count, total) if total else 0.0),
+        }
+        for reason, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return breakdown
+
+
+def _build_unresolved_samples(
+    unresolved_rows: list[Mapping[str, Any]],
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    ordered = sorted(
+        unresolved_rows,
+        key=lambda row: (
+            -_coerce_non_negative_float(row.get("attempt_cost_usd")),
+            -_coerce_non_negative_int(row.get("duration_ms")),
+            _solver_id_from_row(row),
+            _coerce_str(row.get("instance_id")),
+        ),
+    )
+    samples: list[dict[str, Any]] = []
+    for row in ordered[:limit]:
+        samples.append(
+            {
+                "instance_id": _coerce_str(row.get("instance_id")),
+                "solver_id": _solver_id_from_row(row),
+                "harness_outcome": _coerce_str(row.get("harness_outcome")),
+                "failure_reason": _coerce_str(row.get("failure_reason")),
+                "attempt_state": _coerce_str(row.get("attempt_state")),
+                "duration_ms": _coerce_non_negative_int(row.get("duration_ms")),
+                "attempt_cost_usd": row.get("attempt_cost_usd"),
+                "task_cluster": _coerce_str(row.get("task_cluster")),
+                "problem_statement": _coerce_str(row.get("problem_statement")),
+            }
+        )
+    return samples
+
+
+def _build_solver_summary_payloads(
+    summaries: list[ResolutionMetrics],
+) -> list[dict[str, Any]]:
+    payloads = [_resolution_summary_to_dict(summary) for summary in summaries]
+    return sorted(payloads, key=_solver_ranking_key)
+
+
+def build_analysis_report(
+    *,
+    attempts: list[dict[str, Any]],
+    instance_results: list[dict[str, Any]],
+    grouped_summaries: list[ResolutionMetrics],
+    solver_summaries: list[ResolutionMetrics],
+    group_by: tuple[str, ...],
+    expensive_cost_threshold: float,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the structured payload that feeds the static analysis report."""
+    joined_rows = join_attempt_rows(attempts, instance_results)
+    unresolved_rows = [row for row in joined_rows if not row.get("resolved")]
+    resolved_instances = {
+        _coerce_str(row.get("instance_id"))
+        for row in joined_rows
+        if _coerce_str(row.get("instance_id")) and row.get("resolved")
+    }
+    unique_instances = {
+        _coerce_str(row.get("instance_id"))
+        for row in joined_rows
+        if _coerce_str(row.get("instance_id"))
+    }
+    solver_payloads = _build_solver_summary_payloads(solver_summaries)
+    primary_payloads = [
+        _resolution_summary_to_dict(summary) for summary in grouped_summaries
+    ]
+    best_solver = solver_payloads[0] if solver_payloads else None
+    cheapest_solver = min(
+        solver_payloads,
+        key=_solver_cost_key,
+        default=None,
+    )
+
+    report = {
+        "metadata": metadata or {},
+        "top_line": {
+            "group_by": list(group_by),
+            "group_count": len(primary_payloads),
+            "solver_count": len(solver_payloads),
+            "attempt_rows": len(attempts),
+            "instance_result_rows": len(instance_results),
+            "joined_rows": len(joined_rows),
+            "unique_instance_count": len(unique_instances),
+            "resolved_instance_count": len(resolved_instances),
+            "unresolved_instance_count": len(unique_instances - resolved_instances),
+            "best_solver_id": _solver_id_from_row(best_solver) if best_solver else "",
+            "cheapest_solver_id": (
+                _solver_id_from_row(cheapest_solver) if cheapest_solver else ""
+            ),
+            "expensive_cost_threshold": expensive_cost_threshold,
+        },
+        "grouped_summary": {
+            "group_by": list(group_by),
+            "rows": primary_payloads,
+        },
+        "solver_comparison": {
+            "group_by": ["solver_id"],
+            "rows": solver_payloads,
+        },
+        "budget_frontier": _build_budget_frontier(solver_payloads),
+        "pareto_frontier": _build_pareto_frontier(solver_payloads),
+        "failure_reason_breakdown": _build_failure_breakdown(unresolved_rows),
+        "unresolved_samples": _build_unresolved_samples(unresolved_rows),
+    }
+
+    if best_solver is not None and cheapest_solver is not None:
+        report["marginal_win_analysis"] = {
+            "best_solver_id": _solver_id_from_row(best_solver),
+            "best_solver_raw_resolution_rate": best_solver.get(
+                "raw_resolution_rate"
+            ),
+            "best_solver_cost_per_resolved_issue": best_solver.get(
+                "cost_per_resolved_issue"
+            ),
+            "cheapest_solver_id": _solver_id_from_row(cheapest_solver),
+            "cheapest_solver_raw_resolution_rate": cheapest_solver.get(
+                "raw_resolution_rate"
+            ),
+            "cheapest_solver_cost_per_resolved_issue": cheapest_solver.get(
+                "cost_per_resolved_issue"
+            ),
+            "expensive_cost_threshold": expensive_cost_threshold,
+            "best_solver_expensive_coverage": best_solver.get("expensive_coverage"),
+            "best_solver_exclusive_expensive_win_rate": best_solver.get(
+                "exclusive_expensive_win_rate"
+            ),
+            "best_solver_marginal_cost_per_extra_resolve": best_solver.get(
+                "marginal_cost_per_extra_resolve"
+            ),
+        }
+
+    return report
+
+
 def load_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     """Load newline-delimited JSON rows from a file.
 
@@ -183,12 +476,15 @@ def write_summary_json(
     path: Path,
     summaries: list[ResolutionMetrics],
     metadata: dict[str, Any] | None = None,
+    report: dict[str, Any] | None = None,
 ) -> None:
     """Serialize summary records for API/automation consumption."""
     payload: dict[str, Any] = {
         "summary": [_resolution_summary_to_dict(summary) for summary in summaries],
         "metadata": metadata or {},
     }
+    if report is not None:
+        payload["report"] = report
     path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -261,8 +557,41 @@ def write_summary_html(
     summaries: list[ResolutionMetrics],
     group_by: tuple[str, ...],
     metadata: dict[str, Any] | None = None,
+    report: dict[str, Any] | None = None,
 ) -> None:
-    """Generate a tiny static HTML report."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if report is None:
+        report = {
+            "metadata": metadata or {},
+            "top_line": {
+                "group_by": list(group_by),
+                "group_count": len(summaries),
+                "solver_count": len(summaries),
+                "attempt_rows": 0,
+                "instance_result_rows": 0,
+                "joined_rows": 0,
+                "unique_instance_count": 0,
+                "resolved_instance_count": 0,
+                "unresolved_instance_count": 0,
+                "best_solver_id": "",
+                "cheapest_solver_id": "",
+                "expensive_cost_threshold": 1.0,
+            },
+            "grouped_summary": {
+                "group_by": list(group_by),
+                "rows": [_resolution_summary_to_dict(summary) for summary in summaries],
+            },
+            "solver_comparison": {
+                "group_by": list(group_by),
+                "rows": [_resolution_summary_to_dict(summary) for summary in summaries],
+            },
+            "budget_frontier": [],
+            "pareto_frontier": [],
+            "failure_reason_breakdown": [],
+            "unresolved_samples": [],
+        }
+
     metric_headers = [
         "attempt_count",
         "unique_instance_count",
@@ -279,38 +608,204 @@ def write_summary_html(
         "marginal_cost_per_extra_resolve",
     ]
 
-    rows = [_resolution_summary_to_dict(summary) for summary in summaries]
-    path.parent.mkdir(parents=True, exist_ok=True)
+    def render_grouped_table(
+        title: str,
+        table_rows: list[Mapping[str, Any]],
+        table_group_by: tuple[str, ...] | list[str],
+    ) -> list[str]:
+        headers = list(table_group_by) + metric_headers
+        lines: list[str] = [f"<h2>{html_escape(title)}</h2>"]
+        if not table_rows:
+            lines.append("<p class=\"empty\">No rows.</p>")
+            return lines
+        lines.append("<table>")
+        lines.append("<tr>" + "".join(f"<th>{html_escape(h)}</th>" for h in headers) + "</tr>")
+        for row in table_rows:
+            group_values = row.get("group_values", {})
+            lines.append("<tr>")
+            for column in table_group_by:
+                value = ""
+                if isinstance(group_values, Mapping):
+                    value = _coerce_str(group_values.get(column))
+                lines.append(f"<td>{html_escape(value)}</td>")
+            for header in metric_headers:
+                lines.append(f"<td>{html_escape(_display_number(row.get(header)))}</td>")
+            lines.append("</tr>")
+        lines.append("</table>")
+        return lines
+
+    def render_key_values(items: list[tuple[str, Any]]) -> list[str]:
+        lines = ["<dl class=\"kv\">"]
+        for label, value in items:
+            lines.append(f"<dt>{html_escape(label)}</dt><dd>{html_escape(_display_number(value))}</dd>")
+        lines.append("</dl>")
+        return lines
+
+    budget_frontier = report.get("budget_frontier", [])
+    failure_breakdown = report.get("failure_reason_breakdown", [])
+    unresolved_samples = report.get("unresolved_samples", [])
+    top_line = report.get("top_line", {})
+    grouped_summary = report.get("grouped_summary", {})
+    solver_comparison = report.get("solver_comparison", {})
+    pareto_frontier = report.get("pareto_frontier", [])
 
     lines = [
         '<html><head><meta charset="utf-8"/>',
         "<title>RepoGauge Analysis</title>",
-        "<style>body{font-family:Inter,Arial,sans-serif;max-width:1000px;padding:24px;line-height:1.4}"
-        "table{border-collapse:collapse;width:100%;margin-top:12px}"
-        "th,td{border:1px solid #ccc;padding:6px;font-size:12px;text-align:left}"
-        "th{background:#f5f5f5}",
+        "<style>body{font-family:Inter,Arial,sans-serif;max-width:1100px;padding:24px;line-height:1.4}"
+        "h1,h2{margin-bottom:0.4rem}"
+        "p{max-width:80ch}"
+        "table{border-collapse:collapse;width:100%;margin-top:12px;margin-bottom:24px}"
+        "th,td{border:1px solid #ccc;padding:6px;font-size:12px;text-align:left;vertical-align:top}"
+        "th{background:#f5f5f5}"
+        ".kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;max-width:900px}"
+        ".kv dt{font-weight:700}"
+        ".kv dd{margin:0}"
+        ".empty{color:#666;font-style:italic}",
         "</style>",
         "</head><body>",
     ]
     lines.append("<h1>RepoGauge Analysis Report</h1>")
-    if metadata:
-        lines.append(
-            "<pre>{}</pre>".format(json.dumps(metadata, sort_keys=True, indent=2))
+    lines.append(
+        "<p>The budget table is ordered by increasing cost per resolved issue. "
+        "To answer a budget ceiling question, find the last row with budget <= X "
+        "and read its best solver.</p>"
+    )
+    lines.extend(
+        render_key_values(
+            [
+                ("group_by", ", ".join(top_line.get("group_by", []))),
+                ("group_count", top_line.get("group_count")),
+                ("solver_count", top_line.get("solver_count")),
+                ("attempt_rows", top_line.get("attempt_rows")),
+                ("instance_result_rows", top_line.get("instance_result_rows")),
+                ("unique_instance_count", top_line.get("unique_instance_count")),
+                ("resolved_instance_count", top_line.get("resolved_instance_count")),
+                ("unresolved_instance_count", top_line.get("unresolved_instance_count")),
+                ("best_solver_id", top_line.get("best_solver_id")),
+                ("cheapest_solver_id", top_line.get("cheapest_solver_id")),
+                ("expensive_cost_threshold", top_line.get("expensive_cost_threshold")),
+            ]
         )
-    lines.append("<table>\n")
-    headers = list(group_by) + metric_headers
-    lines.append("<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>")
+    )
 
-    for row in rows:
-        group_values = {item["dimension"]: item["value"] for item in row["group"]}
-        lines.append("<tr>")
-        for column in group_by:
-            lines.append(f"<td>{group_values.get(column, '')}</td>")
-        for header in metric_headers:
-            lines.append(f"<td>{row.get(header)}</td>")
-        lines.append("</tr>")
+    if metadata:
+        lines.append("<h2>Run Metadata</h2>")
+        lines.append(
+            "<pre>{}</pre>".format(html_escape(json.dumps(metadata, sort_keys=True, indent=2)))
+        )
 
-    lines.append("</table>")
+    lines.extend(
+        render_grouped_table(
+            "Requested Summary",
+            grouped_summary.get("rows", []),
+            grouped_summary.get("group_by", group_by),
+        )
+    )
+    lines.extend(
+        render_grouped_table(
+            "Solver Comparison",
+            solver_comparison.get("rows", []),
+            solver_comparison.get("group_by", ["solver_id"]),
+        )
+    )
+
+    lines.append("<h2>Budget Frontier</h2>")
+    if budget_frontier:
+        lines.append(
+            "<p>The <code>best_solver_id</code> column is the best affordable solver at or below each budget ceiling.</p>"
+        )
+        lines.append("<table>")
+        headers = [
+            "budget",
+            "best_solver_id",
+            "best_raw_resolution_rate",
+            "best_resolved_instance_count",
+            "best_cost_per_resolved_issue",
+            "best_latency_ms_per_resolved_issue",
+            "best_total_cost_usd",
+            "best_total_duration_ms",
+        ]
+        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        for row in budget_frontier:
+            lines.append("<tr>")
+            for header in headers:
+                lines.append(f"<td>{html_escape(_display_number(row.get(header)))}</td>")
+            lines.append("</tr>")
+        lines.append("</table>")
+    else:
+        lines.append("<p class=\"empty\">No affordable solver rows with a resolved issue count.</p>")
+
+    lines.append("<h2>Pareto Frontier</h2>")
+    if pareto_frontier:
+        lines.append(
+            "<p>Rows on this frontier are not dominated on resolution, cost, and latency.</p>"
+        )
+        lines.append("<table>")
+        headers = [
+            "solver_id",
+            "raw_resolution_rate",
+            "cost_per_resolved_issue",
+            "latency_ms_per_resolved_issue",
+            "resolved_instance_count",
+        ]
+        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        for row in pareto_frontier:
+            lines.append("<tr>")
+            for header in headers:
+                value = row.get(header, "")
+                if header == "solver_id":
+                    value = _solver_id_from_row(row)
+                lines.append(f"<td>{html_escape(_display_number(value))}</td>")
+            lines.append("</tr>")
+        lines.append("</table>")
+    else:
+        lines.append("<p class=\"empty\">No frontier rows.</p>")
+
+    lines.append("<h2>Failure Reasons</h2>")
+    if failure_breakdown:
+        lines.append("<table>")
+        headers = ["reason", "count", "share"]
+        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        for row in failure_breakdown:
+            lines.append("<tr>")
+            for header in headers:
+                value = row.get(header, "")
+                if header == "share" and isinstance(value, (int, float)):
+                    value = f"{value:.3f}"
+                lines.append(f"<td>{html_escape(_display_number(value))}</td>")
+            lines.append("</tr>")
+        lines.append("</table>")
+    else:
+        lines.append("<p class=\"empty\">No unresolved rows.</p>")
+
+    lines.append("<h2>Unresolved Samples</h2>")
+    if unresolved_samples:
+        lines.append("<table>")
+        headers = [
+            "instance_id",
+            "solver_id",
+            "harness_outcome",
+            "failure_reason",
+            "attempt_state",
+            "duration_ms",
+            "attempt_cost_usd",
+            "task_cluster",
+            "problem_statement",
+        ]
+        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        for row in unresolved_samples:
+            lines.append("<tr>")
+            for header in headers:
+                value = row.get(header, "")
+                if header == "problem_statement" and isinstance(value, str) and len(value) > 220:
+                    value = f"{value[:217]}..."
+                lines.append(f"<td>{html_escape(_display_number(value))}</td>")
+            lines.append("</tr>")
+        lines.append("</table>")
+    else:
+        lines.append("<p class=\"empty\">No unresolved sample rows.</p>")
+
     lines.append("</body></html>")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
