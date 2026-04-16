@@ -336,7 +336,9 @@ class TestAdapters(unittest.TestCase):
             adapter.execute_attempt(request)
 
         command = mock_run_command.call_args.args[0]
-        self.assertEqual(command[:6], ["codex", "exec", "-c", "notify=[]", "-c", "mcp_servers={}"])
+        self.assertEqual(
+            command[:6], ["codex", "exec", "-c", "notify=[]", "-c", "mcp_servers={}"]
+        )
         self.assertIn("--json", command)
         self.assertIn("--ask-for-approval", command)
         self.assertIn("never", command)
