@@ -102,9 +102,7 @@ def test_build_targeted_test_plan_keeps_existing_junitxml_flag() -> None:
         "+import pytest\n"
     )
 
-    cmd, inputs = build_targeted_test_plan(
-        "pytest --junitxml=my-tests.xml", test_patch
-    )
+    cmd, inputs = build_targeted_test_plan("pytest --junitxml=my-tests.xml", test_patch)
 
     assert cmd == "pytest --junitxml=my-tests.xml --tb=no -q"
     assert inputs == ["tests/unit/test_thing.py"]

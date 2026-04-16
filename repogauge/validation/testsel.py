@@ -55,7 +55,9 @@ def _command_has_flag(parts: List[str], flag: str) -> bool:
         return False
     if flag.endswith("="):
         return any(
-            part.startswith(junit_flag) for part in parts for junit_flag in _JUNIT_XML_FLAGS
+            part.startswith(junit_flag)
+            for part in parts
+            for junit_flag in _JUNIT_XML_FLAGS
         )
     return flag in parts
 
