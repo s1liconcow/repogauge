@@ -302,6 +302,85 @@ def _is_flaky(
     return run_b != run_b_rerun or run_c != run_c_rerun
 
 
+def _has_pass_to_pass_regression(
+    run_b: Dict[str, str],
+    run_c: Dict[str, str],
+    declared_ptp: List[str],
+) -> bool:
+    """Return True when any declared PASS_TO_PASS test regresses in Run 3."""
+    if not declared_ptp:
+        return False
+    return any(
+        run_b.get(test_id) == OUTCOME_PASS and run_c.get(test_id) != OUTCOME_PASS
+        for test_id in declared_ptp
+    )
+
+
+def _declared_ftp_not_resolved(
+    run_c: Dict[str, str],
+    declared_ftp: List[str],
+) -> bool:
+    """Return True when any declared FAIL_TO_PASS test still fails in Run 3."""
+    if not declared_ftp:
+        return False
+    return any(run_c.get(test_id) != OUTCOME_PASS for test_id in declared_ftp)
+
+
+def _build_eval_result(
+    *,
+    status: str,
+    error: str | None,
+    reason: str | None,
+    targeted_test_cmd: str,
+    test_inputs: List[str],
+    log_a: str,
+    log_b: str = "",
+    log_c: str = "",
+    log_b_rerun: str = "",
+    log_c_rerun: str = "",
+    run_a: Dict[str, str],
+    run_b: Dict[str, str],
+    run_c: Dict[str, str],
+    run_b_rerun: Dict[str, str],
+    run_c_rerun: Dict[str, str],
+    run_a_attempts: List[Dict[str, Any]],
+    run_b_attempts: List[Dict[str, Any]],
+    run_c_attempts: List[Dict[str, Any]],
+    run_b_rerun_attempts: List[Dict[str, Any]],
+    run_c_rerun_attempts: List[Dict[str, Any]],
+    flake_runs: int,
+    FAIL_TO_PASS: List[str],
+    PASS_TO_PASS: List[str],
+    resolved: bool,
+) -> Dict[str, Any]:
+    return {
+        "status": status,
+        "error": error,
+        "reason": reason,
+        "targeted_test_cmd": targeted_test_cmd,
+        "targeted_test_inputs": test_inputs,
+        "log_a": log_a,
+        "log_b": log_b,
+        "log_c": log_c,
+        "log_b_rerun": log_b_rerun,
+        "log_c_rerun": log_c_rerun,
+        "run_a": run_a,
+        "run_b": run_b,
+        "run_c": run_c,
+        "run_b_rerun": run_b_rerun,
+        "run_c_rerun": run_c_rerun,
+        "run_a_attempts": run_a_attempts,
+        "run_b_attempts": run_b_attempts,
+        "run_c_attempts": run_c_attempts,
+        "run_b_rerun_attempts": run_b_rerun_attempts,
+        "run_c_rerun_attempts": run_c_rerun_attempts,
+        "flake_runs": flake_runs,
+        "FAIL_TO_PASS": FAIL_TO_PASS,
+        "PASS_TO_PASS": PASS_TO_PASS,
+        "resolved": resolved,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Per-instance evaluation
 # ---------------------------------------------------------------------------
@@ -339,31 +418,28 @@ def _eval_instance(
             test_cmd_base=targeted_test_cmd,
         )
         if run_a["status"] == "failed":
-            return {
-                "status": "error",
-                "error": run_a["error"],
-                "targeted_test_cmd": targeted_test_cmd,
-                "targeted_test_inputs": test_inputs,
-                "log_a": run_a["log"],
-                "log_b": "",
-                "log_c": "",
-                "log_b_rerun": "",
-                "log_c_rerun": "",
-                "run_a": run_a["outcomes"],
-                "run_b": {},
-                "run_c": {},
-                "run_b_rerun": {},
-                "run_c_rerun": {},
-                "run_a_attempts": run_a["attempts"],
-                "run_b_attempts": [],
-                "run_c_attempts": [],
-                "run_b_rerun_attempts": [],
-                "run_c_rerun_attempts": [],
-                "flake_runs": 0,
-                "FAIL_TO_PASS": [],
-                "PASS_TO_PASS": [],
-                "resolved": False,
-            }
+            return _build_eval_result(
+                status="error",
+                error=run_a["error"],
+                reason="run_a_failed",
+                targeted_test_cmd=targeted_test_cmd,
+                test_inputs=test_inputs,
+                log_a=run_a["log"],
+                run_a=run_a["outcomes"],
+                run_b={},
+                run_c={},
+                run_b_rerun={},
+                run_c_rerun={},
+                run_a_attempts=run_a["attempts"],
+                run_b_attempts=[],
+                run_c_attempts=[],
+                run_b_rerun_attempts=[],
+                run_c_rerun_attempts=[],
+                flake_runs=0,
+                FAIL_TO_PASS=[],
+                PASS_TO_PASS=[],
+                resolved=False,
+            )
 
         # --- Pass B: base + test_patch --------------------------------------
         run_b = _run_validation_pass(
@@ -378,31 +454,29 @@ def _eval_instance(
             test_cmd_base=targeted_test_cmd,
         )
         if run_b["status"] == "failed":
-            return {
-                "status": "error",
-                "error": run_b["error"],
-                "targeted_test_cmd": targeted_test_cmd,
-                "targeted_test_inputs": test_inputs,
-                "log_a": run_a["log"],
-                "log_b": run_b["log"],
-                "log_c": "",
-                "log_b_rerun": "",
-                "log_c_rerun": "",
-                "run_a": run_a["outcomes"],
-                "run_b": {},
-                "run_c": {},
-                "run_b_rerun": {},
-                "run_c_rerun": {},
-                "run_a_attempts": run_a["attempts"],
-                "run_b_attempts": run_b["attempts"],
-                "run_c_attempts": [],
-                "run_b_rerun_attempts": [],
-                "run_c_rerun_attempts": [],
-                "flake_runs": 0,
-                "FAIL_TO_PASS": [],
-                "PASS_TO_PASS": [],
-                "resolved": False,
-            }
+            return _build_eval_result(
+                status="error",
+                error=run_b["error"],
+                reason="run_b_failed",
+                targeted_test_cmd=targeted_test_cmd,
+                test_inputs=test_inputs,
+                log_a=run_a["log"],
+                log_b=run_b["log"],
+                run_a=run_a["outcomes"],
+                run_b=run_b["outcomes"],
+                run_c={},
+                run_b_rerun={},
+                run_c_rerun={},
+                run_a_attempts=run_a["attempts"],
+                run_b_attempts=run_b["attempts"],
+                run_c_attempts=[],
+                run_b_rerun_attempts=[],
+                run_c_rerun_attempts=[],
+                flake_runs=0,
+                FAIL_TO_PASS=[],
+                PASS_TO_PASS=[],
+                resolved=False,
+            )
 
         # --- Pass C: base + test_patch + pred_patch --------------------------
         run_c = _run_validation_pass(
@@ -417,31 +491,30 @@ def _eval_instance(
             test_cmd_base=targeted_test_cmd,
         )
         if run_c["status"] == "failed":
-            return {
-                "status": "error",
-                "error": run_c["error"],
-                "targeted_test_cmd": targeted_test_cmd,
-                "targeted_test_inputs": test_inputs,
-                "log_a": run_a["log"],
-                "log_b": run_b["log"],
-                "log_c": run_c["log"],
-                "log_b_rerun": "",
-                "log_c_rerun": "",
-                "run_a": run_a["outcomes"],
-                "run_b": run_b["outcomes"],
-                "run_c": {},
-                "run_b_rerun": {},
-                "run_c_rerun": {},
-                "run_a_attempts": run_a["attempts"],
-                "run_b_attempts": run_b["attempts"],
-                "run_c_attempts": run_c["attempts"],
-                "run_b_rerun_attempts": [],
-                "run_c_rerun_attempts": [],
-                "flake_runs": 0,
-                "FAIL_TO_PASS": [],
-                "PASS_TO_PASS": [],
-                "resolved": False,
-            }
+            return _build_eval_result(
+                status="error",
+                error=run_c["error"],
+                reason="run_c_failed",
+                targeted_test_cmd=targeted_test_cmd,
+                test_inputs=test_inputs,
+                log_a=run_a["log"],
+                log_b=run_b["log"],
+                log_c=run_c["log"],
+                run_a=run_a["outcomes"],
+                run_b=run_b["outcomes"],
+                run_c={},
+                run_b_rerun={},
+                run_c_rerun={},
+                run_a_attempts=run_a["attempts"],
+                run_b_attempts=run_b["attempts"],
+                run_c_attempts=run_c["attempts"],
+                run_b_rerun_attempts=[],
+                run_c_rerun_attempts=[],
+                flake_runs=0,
+                FAIL_TO_PASS=[],
+                PASS_TO_PASS=[],
+                resolved=False,
+            )
 
         # --- Pass D: reruns for flake detection ------------------------------
         run_b_rerun = _run_validation_pass(
@@ -468,33 +541,42 @@ def _eval_instance(
         )
 
         if run_b_rerun["status"] == "failed" or run_c_rerun["status"] == "failed":
-            return {
-                "status": "error",
-                "error": run_b_rerun["error"]
+            rerun_error = (
+                run_b_rerun["error"]
                 if run_b_rerun["status"] == "failed"
-                else run_c_rerun["error"],
-                "targeted_test_cmd": targeted_test_cmd,
-                "targeted_test_inputs": test_inputs,
-                "log_a": run_a["log"],
-                "log_b": run_b["log"],
-                "log_c": run_c["log"],
-                "log_b_rerun": run_b_rerun["log"],
-                "log_c_rerun": run_c_rerun["log"],
-                "run_a": run_a["outcomes"],
-                "run_b": run_b["outcomes"],
-                "run_c": run_c["outcomes"],
-                "run_b_rerun": {},
-                "run_c_rerun": {},
-                "run_a_attempts": run_a["attempts"],
-                "run_b_attempts": run_b["attempts"],
-                "run_c_attempts": run_c["attempts"],
-                "run_b_rerun_attempts": run_b_rerun["attempts"],
-                "run_c_rerun_attempts": run_c_rerun["attempts"],
-                "flake_runs": 2,
-                "FAIL_TO_PASS": [],
-                "PASS_TO_PASS": [],
-                "resolved": False,
-            }
+                else run_c_rerun["error"]
+            )
+            reason = (
+                "run_b_rerun_failed"
+                if run_b_rerun["status"] == "failed"
+                else "run_c_rerun_failed"
+            )
+            return _build_eval_result(
+                status="error",
+                error=rerun_error,
+                reason=reason,
+                targeted_test_cmd=targeted_test_cmd,
+                test_inputs=test_inputs,
+                log_a=run_a["log"],
+                log_b=run_b["log"],
+                log_c=run_c["log"],
+                log_b_rerun=run_b_rerun["log"],
+                log_c_rerun=run_c_rerun["log"],
+                run_a=run_a["outcomes"],
+                run_b=run_b["outcomes"],
+                run_c=run_c["outcomes"],
+                run_b_rerun=run_b_rerun["outcomes"],
+                run_c_rerun=run_c_rerun["outcomes"],
+                run_a_attempts=run_a["attempts"],
+                run_b_attempts=run_b["attempts"],
+                run_c_attempts=run_c["attempts"],
+                run_b_rerun_attempts=run_b_rerun["attempts"],
+                run_c_rerun_attempts=run_c_rerun["attempts"],
+                flake_runs=2,
+                FAIL_TO_PASS=[],
+                PASS_TO_PASS=[],
+                resolved=False,
+            )
 
         if _is_flaky(
             run_b["outcomes"],
@@ -502,62 +584,83 @@ def _eval_instance(
             run_c["outcomes"],
             run_c_rerun["outcomes"],
         ):
-            return {
-                "status": "flaky",
-                "error": "rerun outcomes changed",
-                "targeted_test_cmd": targeted_test_cmd,
-                "targeted_test_inputs": test_inputs,
-                "log_a": run_a["log"],
-                "log_b": run_b["log"],
-                "log_c": run_c["log"],
-                "log_b_rerun": run_b_rerun["log"],
-                "log_c_rerun": run_c_rerun["log"],
-                "run_a": run_a["outcomes"],
-                "run_b": run_b["outcomes"],
-                "run_c": run_c["outcomes"],
-                "run_b_rerun": run_b_rerun["outcomes"],
-                "run_c_rerun": run_c_rerun["outcomes"],
-                "run_a_attempts": run_a["attempts"],
-                "run_b_attempts": run_b["attempts"],
-                "run_c_attempts": run_c["attempts"],
-                "run_b_rerun_attempts": run_b_rerun["attempts"],
-                "run_c_rerun_attempts": run_c_rerun["attempts"],
-                "flake_runs": 2,
-                "FAIL_TO_PASS": [],
-                "PASS_TO_PASS": [],
-                "resolved": False,
-            }
+            if run_b["outcomes"] != run_b_rerun["outcomes"]:
+                reason = "run_b_rerun_mismatch"
+            elif run_c["outcomes"] != run_c_rerun["outcomes"]:
+                reason = "run_c_rerun_mismatch"
+            else:
+                reason = "unstable_reruns"
+            return _build_eval_result(
+                status="flaky",
+                error="rerun outcomes changed",
+                reason=reason,
+                targeted_test_cmd=targeted_test_cmd,
+                test_inputs=test_inputs,
+                log_a=run_a["log"],
+                log_b=run_b["log"],
+                log_c=run_c["log"],
+                log_b_rerun=run_b_rerun["log"],
+                log_c_rerun=run_c_rerun["log"],
+                run_a=run_a["outcomes"],
+                run_b=run_b["outcomes"],
+                run_c=run_c["outcomes"],
+                run_b_rerun=run_b_rerun["outcomes"],
+                run_c_rerun=run_c_rerun["outcomes"],
+                run_a_attempts=run_a["attempts"],
+                run_b_attempts=run_b["attempts"],
+                run_c_attempts=run_c["attempts"],
+                run_b_rerun_attempts=run_b_rerun["attempts"],
+                run_c_rerun_attempts=run_c_rerun["attempts"],
+                flake_runs=2,
+                FAIL_TO_PASS=[],
+                PASS_TO_PASS=[],
+                resolved=False,
+            )
 
         ftp, ptp = _derive_test_lists(
             run_b["outcomes"], run_c["outcomes"], declared_ftp, declared_ptp
         )
         resolved = _is_resolved(ftp, run_c["outcomes"], declared_ftp)
+        if _has_pass_to_pass_regression(
+            run_b["outcomes"], run_c["outcomes"], declared_ptp
+        ):
+            resolved = False
+            rejection_reason = "pass_to_pass_regression"
+        elif _declared_ftp_not_resolved(run_c["outcomes"], declared_ftp):
+            resolved = False
+            rejection_reason = "declared_ftp_not_resolved"
+        elif not ftp:
+            rejection_reason = "no_fail_to_pass"
+        else:
+            rejection_reason = None
+        status = "resolved" if resolved else "not_resolved"
 
-    return {
-        "status": "resolved" if resolved else "not_resolved",
-        "error": None,
-        "log_a": run_a["log"],
-        "log_b": run_b["log"],
-        "log_c": run_c["log"],
-        "log_b_rerun": run_b_rerun["log"],
-        "log_c_rerun": run_c_rerun["log"],
-        "targeted_test_cmd": targeted_test_cmd,
-        "targeted_test_inputs": test_inputs,
-        "run_a": run_a["outcomes"],
-        "run_b": run_b["outcomes"],
-        "run_c": run_c["outcomes"],
-        "run_b_rerun": run_b_rerun["outcomes"],
-        "run_c_rerun": run_c_rerun["outcomes"],
-        "run_a_attempts": run_a["attempts"],
-        "run_b_attempts": run_b["attempts"],
-        "run_c_attempts": run_c["attempts"],
-        "run_b_rerun_attempts": run_b_rerun["attempts"],
-        "run_c_rerun_attempts": run_c_rerun["attempts"],
-        "flake_runs": 2,
-        "FAIL_TO_PASS": ftp,
-        "PASS_TO_PASS": ptp,
-        "resolved": resolved,
-    }
+    return _build_eval_result(
+        status=status,
+        error=None,
+        reason=rejection_reason,
+        targeted_test_cmd=targeted_test_cmd,
+        test_inputs=test_inputs,
+        log_a=run_a["log"],
+        log_b=run_b["log"],
+        log_c=run_c["log"],
+        log_b_rerun=run_b_rerun["log"],
+        log_c_rerun=run_c_rerun["log"],
+        run_a=run_a["outcomes"],
+        run_b=run_b["outcomes"],
+        run_c=run_c["outcomes"],
+        run_b_rerun=run_b_rerun["outcomes"],
+        run_c_rerun=run_c_rerun["outcomes"],
+        run_a_attempts=run_a["attempts"],
+        run_b_attempts=run_b["attempts"],
+        run_c_attempts=run_c["attempts"],
+        run_b_rerun_attempts=run_b_rerun["attempts"],
+        run_c_rerun_attempts=run_c_rerun["attempts"],
+        flake_runs=2,
+        FAIL_TO_PASS=ftp,
+        PASS_TO_PASS=ptp,
+        resolved=resolved,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -612,6 +715,7 @@ def run_eval(
                     "instance_id": iid,
                     "status": "skipped",
                     "error": "no matching prediction",
+                    "reason": "missing_prediction",
                     "resolved": False,
                     "targeted_test_cmd": "",
                     "targeted_test_inputs": [],
@@ -642,6 +746,7 @@ def run_eval(
             {
                 "instance_id": iid,
                 "status": outcome["status"],
+                "reason": outcome["reason"],
                 "error": outcome["error"],
                 "resolved": outcome["resolved"],
                 "targeted_test_cmd": outcome["targeted_test_cmd"],
@@ -650,6 +755,11 @@ def run_eval(
                 "PASS_TO_PASS": outcome["PASS_TO_PASS"],
                 "metadata": {
                     "base_commit": ds["base_commit"],
+                    "run_a": outcome["run_a"],
+                    "run_b": outcome["run_b"],
+                    "run_c": outcome["run_c"],
+                    "run_b_rerun": outcome["run_b_rerun"],
+                    "run_c_rerun": outcome["run_c_rerun"],
                     "run_a_count": len(outcome["run_a"]),
                     "run_b_count": len(outcome["run_b"]),
                     "run_c_count": len(outcome["run_c"]),
