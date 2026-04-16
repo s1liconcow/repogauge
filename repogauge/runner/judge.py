@@ -121,12 +121,16 @@ def _prepare_prediction_index(
     return by_id
 
 
+BatchRows = list[tuple[Dict[str, Any], Dict[str, Any]]]
+PreparedBatches = tuple[list[tuple[str, BatchRows]], list[dict[str, Any]]]
+
+
 def _prepare_batches(
     *,
     dataset_rows: list[Dict[str, Any]],
     predictions_rows: list[Dict[str, Any]],
     batch_size: int,
-) -> tuple[list[tuple[str, list[tuple[Dict[str, Any], Dict[str, Any]]]], list[dict[str, Any]]]:
+) -> PreparedBatches:
     prediction_by_id = _prepare_prediction_index(predictions_rows)
     grouped: dict[str, list[tuple[Dict[str, Any], Dict[str, Any]]]] = {}
     missing_prediction_rows: list[dict[str, Any]] = []
@@ -150,7 +154,7 @@ def _prepare_batches(
         )
         grouped.setdefault(key, []).append((dataset_row, prediction))
 
-    batches: list[tuple[str, list[tuple[Dict[str, Any], Dict[str, Any]]]] = []
+    batches: list[tuple[str, BatchRows]] = []
     for key, pairs in grouped.items():
         for chunk in _iter_chunks(pairs, batch_size):
             batches.append((key, chunk))
