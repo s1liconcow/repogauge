@@ -50,7 +50,11 @@ def normalize_failure_reason(
         return "flaky_outcomes"
 
     if status == "not_resolved":
-        if reason in {"no_fail_to_pass", "pass_to_pass_regression", "declared_ftp_not_resolved"}:
+        if reason in {
+            "no_fail_to_pass",
+            "pass_to_pass_regression",
+            "declared_ftp_not_resolved",
+        }:
             return reason
         return "unknown_validator_failure"
 
@@ -90,7 +94,9 @@ def write_validation_bundle(
         log_path.write_text(str(log_payload), encoding="utf-8")
 
         attempts_payload = outcome.get(attempts_key, [])
-        attempts_payload = attempts_payload if isinstance(attempts_payload, list) else []
+        attempts_payload = (
+            attempts_payload if isinstance(attempts_payload, list) else []
+        )
         attempts_path.write_text(
             "".join(json.dumps(r, sort_keys=True) + "\n" for r in attempts_payload),
             encoding="utf-8",
@@ -109,4 +115,3 @@ def tail(text: str, max_chars: int = 2000) -> str:
     if len(text) <= max_chars:
         return text
     return text[-max_chars:]
-

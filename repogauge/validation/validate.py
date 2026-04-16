@@ -468,13 +468,10 @@ def _eval_instance(
     )
     test_inputs = targeted_test_inputs
     target_cmd_tokens = targeted_test_cmd.split()
-    is_pytest = (
-        "pytest" in target_cmd_tokens
-        or (
-            target_cmd_tokens[:2] == ["python", "-m"]
-            and len(target_cmd_tokens) > 2
-            and target_cmd_tokens[2] == "pytest"
-        )
+    is_pytest = "pytest" in target_cmd_tokens or (
+        target_cmd_tokens[:2] == ["python", "-m"]
+        and len(target_cmd_tokens) > 2
+        and target_cmd_tokens[2] == "pytest"
     )
     if is_pytest:
         test_strategy = "targeted_pytest" if test_inputs else "full_pytest"

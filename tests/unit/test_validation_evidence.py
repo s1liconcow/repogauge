@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from repogauge.validation.evidence import FAILURE_TAXONOMY, normalize_failure_reason, write_validation_bundle
+from repogauge.validation.evidence import (
+    FAILURE_TAXONOMY,
+    normalize_failure_reason,
+    write_validation_bundle,
+)
 
 
 def test_normalize_failure_reason_maps_known_cases() -> None:
@@ -93,7 +97,9 @@ def test_write_validation_bundle_creates_expected_artifacts(tmp_path: Path) -> N
         "run_c_rerun",
     }
     assert (tmp_path / "logs" / "validation" / "inst-1" / "run_a.log").exists()
-    assert (tmp_path / "logs" / "validation" / "inst-1" / "run_b_attempts.jsonl").exists()
+    assert (
+        tmp_path / "logs" / "validation" / "inst-1" / "run_b_attempts.jsonl"
+    ).exists()
     assert (
         tmp_path / "logs" / "validation" / "inst-1" / "run_c_rerun_attempts.jsonl"
     ).exists()
