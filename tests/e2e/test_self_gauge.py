@@ -812,7 +812,6 @@ class TestGoldEvalAgainstFixture:
         )
         assert rc == 0
 
-        reviewed = _read_jsonl(rev_out / "reviewed.jsonl")
         exp_out = repo_workspace / "export"
         rc = _export(rev_out / "reviewed.jsonl", exp_out)
         assert rc == 0
@@ -822,7 +821,6 @@ class TestGoldEvalAgainstFixture:
 
     def test_eval_gold_resolves_all_exported_instances(self, repo_workspace) -> None:
         """`repogauge eval --gold` resolves every exported fixture instance."""
-        from pathlib import Path
         from unittest.mock import patch
 
         exp_out, dataset_rows = self._setup_export(repo_workspace)
