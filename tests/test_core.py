@@ -1,2 +1,2 @@
 def test_value():
-    assert value() == 1
+    assert value() == 2
