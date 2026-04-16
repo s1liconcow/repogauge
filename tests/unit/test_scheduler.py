@@ -458,6 +458,42 @@ def test_scheduler_preserves_dataset_row_in_prepare_request(tmp_path: Path) -> N
     ]
 
 
+def test_scheduler_persists_task_feature_bundle_in_attempt_rows(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    adapter = CaptureAdapter([SolverAttemptState.SUCCEEDED])
+    dataset_rows = {
+        "i-1": {
+            "instance_id": "i-1",
+            "repo": "sample/repo",
+            "base_commit": "deadbeef",
+            "version": "1.0.0",
+            "problem_statement": "Traceback while loading cache from disk.",
+        }
+    }
+
+    summary = scheduler.run(
+        [job],
+        adapters={"solver-a": adapter},
+        dataset_rows=dataset_rows,
+    )
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 1
+    attempt_row = attempt_rows[0]
+    assert attempt_row["task_feature_version"] == "task-features-v1"
+    assert attempt_row["task_cluster"] == "len=short|signal=stacktrace|version=semantic"
+    assert attempt_row["task_features"]["problem_statement_signal"] == "stacktrace"
+    assert attempt_row["metadata"]["task_feature_version"] == "task-features-v1"
+
+
 def test_scheduler_prepare_error_is_recorded_and_retried_on_budget(
     tmp_path: Path,
 ) -> None:

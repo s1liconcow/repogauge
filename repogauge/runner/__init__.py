@@ -12,6 +12,7 @@ from .adapters import (
     SolverAdapterError,
     build_solver_adapters,
 )
+from .features import TASK_FEATURE_VERSION, TaskFeatureBundle, build_task_feature_bundle
 from .scheduler import (
     SolverAdapter,
     SolverAdapterRequest,
@@ -45,6 +46,9 @@ __all__ = [
     "write_matrix_copy",
     "write_run_manifest",
     "build_solver_adapters",
+    "TASK_FEATURE_VERSION",
+    "TaskFeatureBundle",
+    "build_task_feature_bundle",
     "SolverAdapterError",
     "SolverAdapter",
     "SolverAdapterRequest",

@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -614,6 +615,7 @@ def _invoke_swebench_harness(
     if "report_path" in params:
         kwargs["report_path"] = str(out_dir / "report.json")
 
+    print("repogauge eval: dispatching to official SWE-bench harness", file=sys.stderr)
     return run_fn(**kwargs)
 
 

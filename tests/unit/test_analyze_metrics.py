@@ -157,3 +157,42 @@ def test_summarize_attempt_metrics_marginal_cost_uses_only_resolved_instances() 
     # min(cheap)=2.0, min(middle)=12.0 -> (12 - 2) / 1 = 10
     assert summary.marginal_cost_per_extra_resolve == 10.0
     assert summary.resolved_instance_count == 2
+
+
+def test_summarize_attempt_metrics_can_stratify_by_task_cluster() -> None:
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-stack",
+            "duration_ms": 10,
+            "cost": {"total_cost": 1.5},
+            "repo": "owner/repo",
+            "version": "1.0.0",
+            "problem_statement": "Traceback when loading cached settings from disk.",
+        },
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-plain",
+            "duration_ms": 12,
+            "cost": {"total_cost": 2.0},
+            "repo": "owner/repo",
+            "version": "1.0.0",
+            "problem_statement": "Update the cache key handling.",
+        },
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-stack", harness_outcome="resolved", resolved=True),
+        _eval_row("solver-a", "inst-plain", harness_outcome="resolved", resolved=True),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        group_by=("task_cluster",),
+        expensive_cost_threshold=1.0,
+    )
+
+    assert len(summaries) == 2
+    labels = {summary.group[0][1] for summary in summaries}
+    assert "len=short|signal=stacktrace|version=semantic" in labels
+    assert "len=short|signal=neutral|version=semantic" in labels

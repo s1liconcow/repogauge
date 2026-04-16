@@ -235,7 +235,7 @@ def _apply_positional_scores(
                 "reason": "Patch is small/medium.",
             }
         )
-    elif changed_lines > 900:
+    elif changed_lines > 1800:
         score += -3
         score_breakdown.append(
             {
@@ -306,7 +306,7 @@ def _apply_penalties(
 
     n_hunks = _row_metadata_int(metadata, "n_hunks")
     changed_lines = _row_metadata_int(metadata, "total_changed_lines")
-    if n_hunks > 14 or changed_lines > 900:
+    if n_hunks > 14 or changed_lines > 1800:
         score += -3
         score_breakdown.append(
             {

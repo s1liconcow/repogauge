@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .features import build_task_feature_bundle
+
 
 @dataclass(frozen=True)
 class ResolutionMetrics:
@@ -348,6 +350,21 @@ def join_attempt_rows(
         )
         item["attempt_cost_usd"] = _read_row_cost(item)
         item["instance_id"] = attempt_instance
+
+        task_features = build_task_feature_bundle(item)
+        item.setdefault("task_feature_version", task_features.feature_version)
+        item.setdefault("task_feature_hash", task_features.feature_hash)
+        item.setdefault("task_cluster", task_features.cluster_label)
+        item.setdefault("task_features", task_features.features)
+
+        existing_metadata = item.get("metadata", {})
+        metadata = (
+            dict(existing_metadata)
+            if isinstance(existing_metadata, Mapping)
+            else {}
+        )
+        metadata.update(task_features.to_metadata())
+        item["metadata"] = metadata
         joined.append(item)
     return joined
 

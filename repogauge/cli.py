@@ -33,6 +33,7 @@ from repogauge.runner.analyze import (
     write_summary_json,
     write_summary_parquet,
 )
+from repogauge.runner.features import TASK_FEATURE_VERSION
 from repogauge.runner.matrix import MatrixConfigurationError, load_matrix_config
 from repogauge.runner.adapters import SolverAdapterError, build_solver_adapters
 from repogauge.runner.scheduler import (
@@ -1030,9 +1031,6 @@ def _run_command(namespace: argparse.Namespace) -> int:
 
         print(f"repogauge eval: dataset={dataset_path}", file=sys.stderr)
         print(f"repogauge eval: predictions={predictions_path}", file=sys.stderr)
-        print(
-            "repogauge eval: dispatching to official SWE-bench harness", file=sys.stderr
-        )
 
         if gold_if_missing and not predictions_path.exists():
             print(
@@ -1274,6 +1272,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "run_root": str(analyze_root),
                     "group_by": _parse_group_by(namespace.group_by),
                     "expensive_cost_threshold": namespace.expensive_cost_threshold,
+                    "task_feature_version": TASK_FEATURE_VERSION,
                     "attempt_rows": len(attempt_rows),
                     "instance_result_rows": len(instance_results),
                 },
@@ -1295,6 +1294,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 metadata={
                     "run_root": str(analyze_root),
                     "group_by": _parse_group_by(namespace.group_by),
+                    "task_feature_version": TASK_FEATURE_VERSION,
                     "attempt_rows": len(attempt_rows),
                     "instance_result_rows": len(instance_results),
                 },
@@ -1319,6 +1319,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.metadata["analyze"] = {
                 "group_by": _parse_group_by(namespace.group_by),
                 "expensive_cost_threshold": namespace.expensive_cost_threshold,
+                "task_feature_version": TASK_FEATURE_VERSION,
                 "attempt_rows": len(attempt_rows),
                 "instance_result_rows": len(instance_results),
                 "summary_rows": len(summary_rows),

@@ -17,6 +17,7 @@ from typing import Any, Iterable, Mapping
 from repogauge.config import AttemptRow, JobRow
 
 from .planner import PlannedRunJob
+from .features import build_task_feature_bundle
 
 
 class SolverAttemptState:
@@ -285,6 +286,19 @@ def _normalize_attempt_row(
         normalized["instance_base_commit"] = str(dataset_row.get("base_commit", ""))
         normalized["instance_version"] = str(dataset_row.get("version", ""))
         normalized["problem_statement"] = dataset_row.get("problem_statement")
+
+    task_features = build_task_feature_bundle(normalized)
+    normalized["task_feature_version"] = task_features.feature_version
+    normalized["task_feature_hash"] = task_features.feature_hash
+    normalized["task_cluster"] = task_features.cluster_label
+    normalized["task_features"] = task_features.features
+
+    existing_metadata = normalized.get("metadata", {})
+    metadata = (
+        dict(existing_metadata) if isinstance(existing_metadata, Mapping) else {}
+    )
+    metadata.update(task_features.to_metadata())
+    normalized["metadata"] = metadata
     return normalized
 
 
@@ -482,7 +496,7 @@ class SolverScheduler:
             attempt_state=attempt_state,
         )
         if self.config.persist_attempts_to is not None:
-            self._writer.append_jsonl(self.config.persist_attempts_to, payload)
+            self._writer.append_jsonl(self.config.persist_attempts_to, normalized_payload)
         if self.config.persist_attempts_parquet is not None:
             with self._attempt_rows_lock:
                 self._attempt_rows.append(normalized_payload)
