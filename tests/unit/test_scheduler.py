@@ -191,6 +191,38 @@ class SourceAwareAdapter(SolverAdapter):
         return result
 
 
+class StdoutStderrAdapter(SolverAdapter):
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+    ) -> SolverAdapterRequest:
+        return SolverAdapterRequest(
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            job=job,
+            instance_row=instance_row,
+        )
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=SolverAttemptState.FAILED,
+            model_patch=None,
+            raw_output="stdout payload\nsecond line\n",
+            stderr_output="stderr payload\n",
+            exit_reason="command failed",
+        )
+
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
+        return result
+
+
 class PrepareErrorAdapter(ReplayAdapter):
     def __init__(self, statuses: list[str], fail_prepare_attempts: set[int]) -> None:
         super().__init__(statuses)
@@ -397,6 +429,32 @@ def test_scheduler_writes_normalized_attempt_parquet_rows(tmp_path: Path) -> Non
     assert row["prompt_policy_hash"] == "p"
     assert row["tool_policy_hash"] == "t"
     assert row["solver_config_hash"] == "s"
+
+
+def test_scheduler_persists_per_attempt_stdout_and_stderr_logs(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0")
+    logs_root = tmp_path / "attempt_logs"
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+            persist_attempt_logs_root=logs_root,
+        )
+    )
+    adapter = StdoutStderrAdapter()
+
+    summary = scheduler.run([job], adapters={"solver-a": adapter})
+
+    assert summary.jobs[0].final_status == SolverAttemptState.BUDGET_EXCEEDED
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 1
+    stdout_log = Path(attempt_rows[0]["stdout_log_path"])
+    stderr_log = Path(attempt_rows[0]["stderr_log_path"])
+    assert stdout_log.exists()
+    assert stderr_log.exists()
+    assert stdout_log.read_text(encoding="utf-8") == "stdout payload\nsecond line\n"
+    assert stderr_log.read_text(encoding="utf-8") == "stderr payload\n"
+    assert stdout_log.parent.parent == logs_root
 
 
 def test_scheduler_retries_are_budgeted_and_exhausted(tmp_path: Path) -> None:
