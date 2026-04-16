@@ -4,7 +4,7 @@ Contracts are intentionally explicit, JSONL-friendly, and versioned.
 """
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -50,7 +50,10 @@ class RepoProfile(ContractRecord):
     package_manager: Optional[str] = None
     install_cmds: List[str] = field(default_factory=list)
     test_cmds: List[str] = field(default_factory=list)
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    updated_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        + "Z"
+    )
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

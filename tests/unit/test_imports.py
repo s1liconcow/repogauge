@@ -3,6 +3,7 @@
 from repogauge import __version__  # noqa: F401
 from repogauge.cli import main
 from repogauge.config import DatasetInstance
+from repogauge.config import RepoProfile
 from repogauge.validation import EnvPlan
 from repogauge.manifest import Manifest
 from repogauge.export.specs import AdapterConfig
@@ -25,7 +26,10 @@ def test_contract_imports():
     )
     assert AdapterConfig()
     assert Manifest(command="x")
-    assert AttemptTelemetry(attempt_id="a", provider="p")
+    telemetry = AttemptTelemetry(attempt_id="a", provider="p")
+    assert telemetry.started_at.endswith("Z")
+    assert telemetry.duration_ms == 0
+    assert RepoProfile().updated_at.endswith("Z")
     assert EnvPlan(
         python_version="3.11",
         pre_install=[],

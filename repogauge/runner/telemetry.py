@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from repogauge.config import AttemptRow as _AttemptRow
@@ -26,7 +26,10 @@ class UsageSnapshot:
 class AttemptTelemetry:
     attempt_id: str
     provider: str
-    started_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    started_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        + "Z"
+    )
     ended_at: Optional[str] = None
     usage: UsageSnapshot = field(default_factory=UsageSnapshot)
     errors: int = 0
