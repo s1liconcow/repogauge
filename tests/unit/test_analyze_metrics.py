@@ -11,14 +11,19 @@ def _attempt_row(
     *,
     duration_ms: int,
     cost: float | None,
+    usage: dict[str, object] | None = None,
+    raw_output: str = "",
 ) -> dict:
     row: dict[str, object] = {
         "solver_id": solver_id,
         "instance_id": instance_id,
         "duration_ms": duration_ms,
+        "raw_output": raw_output,
     }
     if cost is not None:
         row["cost"] = {"total_cost": cost}
+    if usage is not None:
+        row["usage"] = usage
     return row
 
 
@@ -98,6 +103,10 @@ def test_summarize_attempt_metrics_with_zero_resolutions() -> None:
     assert summary.expensive_coverage == 0.0
     assert summary.exclusive_expensive_win_rate == 0.0
     assert summary.marginal_cost_per_extra_resolve is None
+    assert summary.total_tokens == 0
+    assert summary.total_tool_calls == 0
+    assert summary.p50_attempt_duration_ms == 23
+    assert summary.p95_attempt_duration_ms == 40
 
 
 def test_summarize_attempt_metrics_expensive_coverage_and_exclusive_win_rate() -> None:
@@ -196,3 +205,51 @@ def test_summarize_attempt_metrics_can_stratify_by_task_cluster() -> None:
     labels = {summary.group[0][1] for summary in summaries}
     assert "len=short|signal=stacktrace|version=semantic" in labels
     assert "len=short|signal=neutral|version=semantic" in labels
+
+
+def test_summarize_attempt_metrics_tracks_tokens_and_tool_calls() -> None:
+    attempts = [
+        _attempt_row(
+            "solver-a",
+            "inst-1",
+            duration_ms=100,
+            cost=0.4,
+            usage={"input_tokens": 1200, "output_tokens": 90},
+            raw_output="\n".join(
+                [
+                    '{"type":"item.started","item":{"type":"command_execution"}}',
+                    '{"type":"item.started","item":{"type":"command_execution"}}',
+                ]
+            ),
+        ),
+        _attempt_row(
+            "solver-a",
+            "inst-2",
+            duration_ms=250,
+            cost=0.9,
+            usage={"prompt_tokens": 2000, "completion_tokens": 200},
+            raw_output='{"type":"response.output_item.added","item":{"type":"tool_call"}}',
+        ),
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True),
+        _eval_row("solver-a", "inst-2", harness_outcome="resolved", resolved=True),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+    )
+
+    summary = summaries[0]
+    assert summary.total_input_tokens == 3200
+    assert summary.total_output_tokens == 290
+    assert summary.total_tokens == 3490
+    assert summary.avg_total_tokens_per_attempt == 1745.0
+    assert summary.tokens_per_resolved_issue == 1745.0
+    assert summary.total_tool_calls == 3
+    assert summary.avg_tool_calls_per_attempt == 1.5
+    assert summary.tool_calls_per_resolved_issue == 1.5
+    assert summary.avg_attempt_duration_ms == 175.0
+    assert summary.p50_attempt_duration_ms == 250
+    assert summary.p95_attempt_duration_ms == 250

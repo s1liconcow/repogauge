@@ -18,14 +18,20 @@ def _attempt_row(
     duration_ms: int,
     cost: float,
     problem_statement: str,
+    usage: dict[str, object] | None = None,
+    raw_output: str = "",
 ) -> dict[str, object]:
-    return {
+    row: dict[str, object] = {
         "solver_id": solver_id,
         "instance_id": instance_id,
         "duration_ms": duration_ms,
         "cost": {"total_cost": cost},
         "problem_statement": problem_statement,
+        "raw_output": raw_output,
     }
+    if usage is not None:
+        row["usage"] = usage
+    return row
 
 
 def _eval_row(
@@ -55,6 +61,7 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             duration_ms=10,
             cost=1.0,
             problem_statement="Cheap path resolves one issue.",
+            usage={"input_tokens": 1000, "output_tokens": 100},
         ),
         _attempt_row(
             "solver-cheap",
@@ -62,6 +69,7 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             duration_ms=12,
             cost=0.5,
             problem_statement="Cheap path misses the timeout case.",
+            usage={"input_tokens": 900, "output_tokens": 80},
         ),
         _attempt_row(
             "solver-expensive",
@@ -69,6 +77,8 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             duration_ms=18,
             cost=6.0,
             problem_statement="Expensive path resolves the hard case.",
+            usage={"input_tokens": 3200, "output_tokens": 210},
+            raw_output='{"type":"item.started","item":{"type":"command_execution"}}',
         ),
         _attempt_row(
             "solver-expensive",
@@ -76,6 +86,8 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             duration_ms=20,
             cost=7.0,
             problem_statement="Expensive path resolves the timeout case.",
+            usage={"input_tokens": 3400, "output_tokens": 260},
+            raw_output='{"type":"response.output_item.added","item":{"type":"tool_call"}}',
         ),
     ]
     instance_results = [
@@ -128,6 +140,14 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert report["budget_frontier"][-1]["best_solver_id"] == "solver-expensive"
     assert report["failure_reason_breakdown"][0]["reason"] == "timeout"
     assert report["unresolved_samples"][0]["instance_id"] == "inst-2"
+    assert report["top_line"]["total_tokens"] == 9150
+    assert report["top_line"]["total_tool_calls"] == 2
+    assert report["cost_opportunity"]["portfolio_cost_floor_usd"] == 8.0
+    assert report["cost_opportunity"]["best_solver_mixed_routing_gap_usd"] == 5.0
+    assert (
+        report["cost_opportunity"]["solver_savings"][0]["solver_id"]
+        == "solver-expensive"
+    )
 
     summary_path = tmp_path / "summary.json"
     html_path = tmp_path / "report.html"
@@ -156,6 +176,10 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert "Budget Frontier" in html
     assert "Failure Reasons" in html
     assert "Unresolved Samples" in html
-    assert "best_solver_id" in html
+    assert "Cost Opportunities" in html
+    assert "Solver Frontier" in html
+    assert "Total Tokens" in html
+    assert "Avg Tool Calls" in html
+    assert "Best Solver" in html
     assert "task_cluster" in html
-    assert "solver_id" in html
+    assert "Solver" in html
