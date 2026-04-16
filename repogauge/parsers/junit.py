@@ -37,7 +37,9 @@ def _parse_string_payload(report: str, test_spec: Any | None) -> Dict[str, str]:
     return parse_log_pytest_v2(normalized, test_spec)
 
 
-def parse_repogauge_junit(report: object, test_spec: Any | None = None) -> Dict[str, str]:
+def parse_repogauge_junit(
+    report: object, test_spec: Any | None = None
+) -> Dict[str, str]:
     """Parse pytest JUnit output into ``{test_id: outcome}``.
 
     The harness may pass either a path to a JUnit XML file or raw XML text. In
