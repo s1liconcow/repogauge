@@ -8,9 +8,13 @@ import sys
 
 def load_script_module():
     script_path = (
-        Path(__file__).resolve().parents[2] / "scripts" / "repair_imported_bead_dependencies.py"
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "repair_imported_bead_dependencies.py"
     )
-    spec = importlib.util.spec_from_file_location("repair_imported_bead_dependencies", script_path)
+    spec = importlib.util.spec_from_file_location(
+        "repair_imported_bead_dependencies", script_path
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec is not None
     assert spec.loader is not None

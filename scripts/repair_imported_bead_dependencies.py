@@ -105,7 +105,9 @@ def map_old_ids_to_new_ids(
             )
 
     if errors:
-        raise ValueError("Unable to build a unique title mapping:\n- " + "\n- ".join(errors))
+        raise ValueError(
+            "Unable to build a unique title mapping:\n- " + "\n- ".join(errors)
+        )
     return mapping
 
 
@@ -135,7 +137,9 @@ def build_repair_plan(
 
     current_edges = collect_current_edges(issue_records)
     current_import_edges = {
-        edge for edge in current_edges if edge[0] in imported_ids and edge[1] in imported_ids
+        edge
+        for edge in current_edges
+        if edge[0] in imported_ids and edge[1] in imported_ids
     }
 
     return RepairPlan(
@@ -146,7 +150,9 @@ def build_repair_plan(
     )
 
 
-def make_dependency_record(issue_id: str, depends_on_id: str, *, actor: str) -> dict[str, str]:
+def make_dependency_record(
+    issue_id: str, depends_on_id: str, *, actor: str
+) -> dict[str, str]:
     return {
         "issue_id": issue_id,
         "depends_on_id": depends_on_id,
@@ -170,8 +176,12 @@ def apply_repair_plan_to_records(
             dep["issue_id"] == issue_id and dep["depends_on_id"] == depends_on_id
             for dep in dependencies
         ):
-            dependencies.append(make_dependency_record(issue_id, depends_on_id, actor=actor))
-            dependencies.sort(key=lambda dep: (dep["depends_on_id"], dep.get("created_at", "")))
+            dependencies.append(
+                make_dependency_record(issue_id, depends_on_id, actor=actor)
+            )
+            dependencies.sort(
+                key=lambda dep: (dep["depends_on_id"], dep.get("created_at", ""))
+            )
 
     if prune_extra:
         for issue_id, depends_on_id in plan.extra_edges:
@@ -179,7 +189,10 @@ def apply_repair_plan_to_records(
             dependencies = [
                 dep
                 for dep in record.get("dependencies", [])
-                if not (dep["issue_id"] == issue_id and dep["depends_on_id"] == depends_on_id)
+                if not (
+                    dep["issue_id"] == issue_id
+                    and dep["depends_on_id"] == depends_on_id
+                )
             ]
             if dependencies:
                 record["dependencies"] = dependencies
@@ -191,7 +204,9 @@ def apply_repair_plan_to_records(
 
 def write_issue_records(path: Path, issue_records: list[dict]) -> None:
     path.write_text(
-        "".join(json.dumps(record, separators=(",", ":")) + "\n" for record in issue_records),
+        "".join(
+            json.dumps(record, separators=(",", ":")) + "\n" for record in issue_records
+        ),
         encoding="utf-8",
     )
 
@@ -208,7 +223,11 @@ def print_plan(plan: RepairPlan, *, prune_extra: bool) -> None:
             print(f"  + {issue_id} <- {depends_on_id}")
 
     if plan.extra_edges:
-        heading = "Unexpected edges to remove:" if prune_extra else "Unexpected edges detected:"
+        heading = (
+            "Unexpected edges to remove:"
+            if prune_extra
+            else "Unexpected edges detected:"
+        )
         print(f"\n{heading}")
         for issue_id, depends_on_id in plan.extra_edges:
             print(f"  - {issue_id} <- {depends_on_id}")
