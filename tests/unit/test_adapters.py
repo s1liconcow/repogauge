@@ -257,6 +257,47 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.cost_source, "codex_cli.event.cost")
         self.assertEqual(result.usage, {"input_tokens": 5})
         self.assertEqual(result.cost, {"total_cost": 0.5})
+        self.assertEqual(result.stderr_output, "")
+
+    def test_codex_cli_adapter_preserves_stderr_on_failure(self) -> None:
+        provider = _provider_for_command("/bin/echo")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:5"),
+            attempt_id="run-1:repo__sample-1:solver-a:5:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        output = (
+            '{"usage":{"input_tokens":5}}\n'
+            '{"cost":{"total_cost":0.5}}\n'
+            '{"message":{"content":"partial"}}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo", "exec", "--json", "--model", "gpt-5.4"],
+            returncode=1,
+            stdout=output,
+            stderr="boom",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.FAILED)
+        self.assertEqual(result.exit_reason, "boom")
+        self.assertEqual(result.stderr_output, "boom")
+        self.assertEqual(result.raw_output, output)
 
     def test_codex_cli_adapter_disables_ambient_codex_config(self) -> None:
         provider = _provider_for_command("codex")

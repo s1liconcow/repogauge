@@ -716,6 +716,7 @@ solvers:
             self.assertTrue((run_root / "run_jobs.jsonl").exists())
             self.assertTrue((run_root / "attempts.jsonl").exists())
             self.assertTrue((run_root / "attempts.parquet").exists())
+            self.assertTrue((run_root / "attempt_logs").exists())
             self.assertTrue((run_root / "run_summary.json").exists())
 
             rows = [
@@ -756,6 +757,10 @@ solvers:
                 artifact_paths["attempts_parquet"],
                 str(run_root / "attempts.parquet"),
             )
+            self.assertEqual(
+                artifact_paths["attempt_logs"],
+                str(run_root / "attempt_logs"),
+            )
 
             run_summary = json.loads(
                 (run_root / "run_summary.json").read_text(encoding="utf-8")
@@ -784,6 +789,10 @@ solvers:
             self.assertTrue(
                 all(row["attempt_state"] == "succeeded" for row in attempt_rows)
             )
+            self.assertTrue(all("stdout_log_path" in row for row in attempt_rows))
+            self.assertTrue(all("stderr_log_path" in row for row in attempt_rows))
+            self.assertTrue(Path(attempt_rows[0]["stdout_log_path"]).exists())
+            self.assertTrue(Path(attempt_rows[0]["stderr_log_path"]).exists())
 
     def test_run_rejects_unknown_solver_provider(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

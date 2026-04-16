@@ -1,0 +1,1 @@
+def test_add():\n    assert add(1, 2) == 3\n

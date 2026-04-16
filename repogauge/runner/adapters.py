@@ -932,11 +932,12 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                 status=SolverAttemptState.TIMED_OUT,
                 model_patch=None,
                 raw_output=output,
+                stderr_output=command_result.stderr,
                 exit_reason=f"command timeout: {command_result.stderr or 'timed out'}",
                 usage_source=usage_source,
                 cost_source=cost_source,
-                usage={},
-                cost={},
+                usage=usage,
+                cost=cost,
             )
 
         if not command_result.success:
@@ -945,6 +946,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                 status=SolverAttemptState.FAILED,
                 model_patch=None,
                 raw_output=output,
+                stderr_output=command_result.stderr,
                 exit_reason=(
                     command_result.stderr
                     or command_result.stdout
@@ -961,6 +963,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             status=SolverAttemptState.SUCCEEDED,
             model_patch=text,
             raw_output=output,
+            stderr_output=command_result.stderr,
             exit_reason="",
             usage_source=usage_source,
             cost_source=cost_source,

@@ -57,6 +57,7 @@ class SolverSchedulerConfig:
     persist_jobs_to: Path | None = None
     persist_attempts_to: Path | None = None
     persist_attempts_parquet: Path | None = None
+    persist_attempt_logs_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class SolverAdapterResult:
     status: str
     model_patch: str | None = None
     raw_output: str = ""
+    stderr_output: str = ""
     exit_reason: str = ""
     usage_source: str = ""
     cost_source: str = ""
@@ -304,6 +306,15 @@ def _serialize_attempt_row(
     payload["raw_output"] = raw_output
     payload["attempt_state"] = attempt_state
     return payload
+
+
+def _safe_attempt_log_dir(root: Path, attempt_id: str) -> Path:
+    safe_id = "".join(
+        c if c.isalnum() or c in {"-", "_", ":"} else "-" for c in attempt_id
+    )
+    if not safe_id:
+        safe_id = "attempt"
+    return root / safe_id
 
 
 def _coerce_attempt_index(attempt_id: str) -> int:
@@ -540,6 +551,7 @@ class SolverScheduler:
         if (
             self.config.persist_attempts_to is None
             and self.config.persist_attempts_parquet is None
+            and self.config.persist_attempt_logs_root is None
         ):
             return
         payload = _serialize_attempt_row(
@@ -565,6 +577,20 @@ class SolverScheduler:
             attempt_ended_at=ended_at,
             attempt_state=attempt_state,
         )
+        if self.config.persist_attempt_logs_root is not None:
+            logs_root = self.config.persist_attempt_logs_root
+            logs_root.mkdir(parents=True, exist_ok=True)
+            attempt_log_dir = _safe_attempt_log_dir(logs_root, attempt_id)
+            attempt_log_dir.mkdir(parents=True, exist_ok=True)
+            stdout_log_path = attempt_log_dir / "stdout.log"
+            stderr_log_path = attempt_log_dir / "stderr.log"
+            stdout_log_path.write_text(raw_output or "", encoding="utf-8")
+            stderr_log_path.write_text(
+                result.stderr_output or result.exit_reason or "",
+                encoding="utf-8",
+            )
+            normalized_payload["stdout_log_path"] = str(stdout_log_path)
+            normalized_payload["stderr_log_path"] = str(stderr_log_path)
         if self.config.persist_attempts_to is not None:
             self._writer.append_jsonl(
                 self.config.persist_attempts_to, normalized_payload
@@ -631,6 +657,7 @@ class SolverScheduler:
                     result = SolverAdapterResult(
                         attempt_id=attempt_id,
                         status=SolverAttemptState.FAILED,
+                        stderr_output=str(exc),
                         usage_source="",
                         cost_source="",
                         exit_reason=f"adapter_prepare_error: {exc}",
@@ -644,6 +671,7 @@ class SolverScheduler:
                         result = SolverAdapterResult(
                             attempt_id=attempt_id,
                             status=SolverAttemptState.FAILED,
+                            stderr_output=str(exc),
                             usage_source="",
                             cost_source="",
                             exit_reason=f"adapter_execution_error: {exc}",
@@ -660,6 +688,7 @@ class SolverScheduler:
                     result = SolverAdapterResult(
                         attempt_id=result.attempt_id,
                         status=result.status,
+                        stderr_output=result.stderr_output,
                         usage_source=result.usage_source,
                         cost_source=result.cost_source,
                         model_patch=result.model_patch,
@@ -676,6 +705,7 @@ class SolverScheduler:
                         result = SolverAdapterResult(
                             attempt_id=result.attempt_id,
                             status=SolverAttemptState.FAILED,
+                            stderr_output=str(exc),
                             usage_source=result.usage_source,
                             cost_source=result.cost_source,
                             model_patch=result.model_patch,
