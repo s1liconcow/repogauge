@@ -461,19 +461,43 @@ def _parse_harness_results(
             for iid in candidate.get("resolved_ids", []):
                 iid = _coerce_text(iid)
                 if iid:
-                    by_instance[iid] = {"status": "resolved", "resolved": True, "reason": None, "error": None, "metadata": {}}
+                    by_instance[iid] = {
+                        "status": "resolved",
+                        "resolved": True,
+                        "reason": None,
+                        "error": None,
+                        "metadata": {},
+                    }
             for iid in candidate.get("unresolved_ids", []):
                 iid = _coerce_text(iid)
                 if iid:
-                    by_instance[iid] = {"status": "not_resolved", "resolved": False, "reason": None, "error": None, "metadata": {}}
+                    by_instance[iid] = {
+                        "status": "not_resolved",
+                        "resolved": False,
+                        "reason": None,
+                        "error": None,
+                        "metadata": {},
+                    }
             for iid in candidate.get("error_ids", []):
                 iid = _coerce_text(iid)
                 if iid and iid not in by_instance:
-                    by_instance[iid] = {"status": "error", "resolved": False, "reason": "harness error", "error": "harness error", "metadata": {}}
+                    by_instance[iid] = {
+                        "status": "error",
+                        "resolved": False,
+                        "reason": "harness error",
+                        "error": "harness error",
+                        "metadata": {},
+                    }
             for iid in candidate.get("incomplete_ids", []):
                 iid = _coerce_text(iid)
                 if iid and iid not in by_instance:
-                    by_instance[iid] = {"status": "error", "resolved": False, "reason": "incomplete", "error": "incomplete", "metadata": {}}
+                    by_instance[iid] = {
+                        "status": "error",
+                        "resolved": False,
+                        "reason": "incomplete",
+                        "error": "incomplete",
+                        "metadata": {},
+                    }
         else:
             rows = candidate.get("results") or candidate.get("rows")
             if isinstance(rows, list):
@@ -601,14 +625,9 @@ def _invoke_swebench_harness(
     dataset_rows = _read_jsonl(dataset_path)
     pred_rows = _read_jsonl(predictions_path)
     predictions = {
-        row["instance_id"]: row
-        for row in pred_rows
-        if row.get("instance_id")
+        row["instance_id"]: row for row in pred_rows if row.get("instance_id")
     }
-    instances = [
-        row for row in dataset_rows
-        if row.get("instance_id") in predictions
-    ]
+    instances = [row for row in dataset_rows if row.get("instance_id") in predictions]
     if not instances:
         return {}
 
