@@ -79,7 +79,9 @@ class ReplayAdapter(SolverAdapter):
             raw_output=f"{status}-{request.attempt_id}",
         )
 
-    def finalize_output(self, request: SolverAdapterRequest, result: SolverAdapterResult) -> SolverAdapterResult:
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
         return result
 
 
@@ -123,7 +125,9 @@ class SleepyAdapter(SolverAdapter):
             raw_output="",
         )
 
-    def finalize_output(self, request: SolverAdapterRequest, result: SolverAdapterResult) -> SolverAdapterResult:
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
         return result
 
 
@@ -181,7 +185,9 @@ def test_scheduler_retries_are_budgeted_and_exhausted(tmp_path: Path) -> None:
             persist_attempts_to=tmp_path / "attempts.jsonl",
         )
     )
-    adapter = ReplayAdapter([SolverAttemptState.TIMED_OUT, SolverAttemptState.TIMED_OUT])
+    adapter = ReplayAdapter(
+        [SolverAttemptState.TIMED_OUT, SolverAttemptState.TIMED_OUT]
+    )
 
     summary = scheduler.run([job], adapters={"solver-b": adapter})
 

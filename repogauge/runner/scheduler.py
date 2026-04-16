@@ -310,7 +310,9 @@ class SolverScheduler:
         return self._rate_limiters.get(provider_id)
 
     def _attempt_budget(self, solver_id: str) -> int:
-        budget = self.config.solver_budget.get(solver_id, self.config.default_solver_budget)
+        budget = self.config.solver_budget.get(
+            solver_id, self.config.default_solver_budget
+        )
         if budget < 1:
             raise SolverSchedulerError(
                 f"solver budget for '{solver_id}' must be >= 1, got {budget}"
@@ -332,8 +334,15 @@ class SolverScheduler:
             provider_sema.release()
             self._global_sema.release()
 
-    def _persist_job(self, *, job: PlannedRunJob, status: str, attempts: int,
-                    started_at: str | None, ended_at: str | None) -> None:
+    def _persist_job(
+        self,
+        *,
+        job: PlannedRunJob,
+        status: str,
+        attempts: int,
+        started_at: str | None,
+        ended_at: str | None,
+    ) -> None:
         if self.config.persist_jobs_to is None:
             return
         payload = _serialize_job_row(
@@ -484,7 +493,10 @@ class SolverScheduler:
                 ended_at = _now_ts()
                 break
 
-            if attempt_state == SolverAttemptState.FAILED and attempt_state in self.config.retriable_states:
+            if (
+                attempt_state == SolverAttemptState.FAILED
+                and attempt_state in self.config.retriable_states
+            ):
                 if attempts < budget:
                     job_status = SolverAttemptState.QUEUED
                     self._persist_job(

@@ -781,3 +781,113 @@ class TestFullPipeline:
         assert len(versions) <= 1, (
             f"Multiple schema_version values found across artifacts: {versions}"
         )
+
+
+class TestGoldEvalAgainstFixture:
+    def _setup_export(self, repo_workspace: Path) -> tuple[Path, list[dict]]:
+        mine_out = repo_workspace / "mine"
+        _mine(mine_out, max_commits=40)
+        candidates = _read_jsonl(mine_out / "candidates.jsonl")
+        exportable = [
+            c
+            for c in candidates
+            if c["metadata"].get("n_test_files", 0) > 0
+            and c["metadata"].get("n_prod_files", 0) > 0
+        ]
+        if not exportable:
+            exportable = [c for c in candidates if c["heuristic_score"] > 0]
+        if not exportable:
+            exportable = candidates[:1]
+
+        decisions_path = repo_workspace / "decisions.jsonl"
+        _write_decisions(
+            decisions_path, [c["id"] for c in exportable[:3]], state="accepted"
+        )
+
+        rev_out = repo_workspace / "review"
+        rc = _review(
+            mine_out / "candidates.jsonl",
+            rev_out,
+            decisions_path=decisions_path,
+        )
+        assert rc == 0
+
+        reviewed = _read_jsonl(rev_out / "reviewed.jsonl")
+        exp_out = repo_workspace / "export"
+        rc = _export(rev_out / "reviewed.jsonl", exp_out)
+        assert rc == 0
+
+        dataset_rows = _read_jsonl(exp_out / "dataset" / "dataset.jsonl")
+        return exp_out, dataset_rows
+
+    def test_eval_gold_resolves_all_exported_instances(self, repo_workspace) -> None:
+        """`repogauge eval --gold` resolves every exported fixture instance."""
+        from pathlib import Path
+        from unittest.mock import patch
+
+        exp_out, dataset_rows = self._setup_export(repo_workspace)
+        if not dataset_rows:
+            pytest.skip("no exported fixture instances to evaluate")
+
+        eval_out = repo_workspace / "eval"
+        expected_ids = {r["instance_id"] for r in dataset_rows}
+
+        dataset_path = exp_out / "dataset" / "dataset.jsonl"
+        assert dataset_path.exists()
+        assert (exp_out / "dataset" / "predictions.gold.jsonl").exists()
+        assert (exp_out / "specs.json").exists()
+        adapter_files = sorted(exp_out.glob("adapter_*.py"))
+        assert len(adapter_files) >= 1
+
+        def fake_invoke(
+            *,
+            dataset_path: Path,
+            predictions_path: Path,
+            out_root: Path,
+            workers: int,
+            timeout_seconds: int,
+        ):
+            output_rows = [
+                {
+                    "instance_id": row["instance_id"],
+                    "status": "resolved",
+                    "resolved": 1,
+                }
+                for row in dataset_rows
+            ]
+            harness_out_dir = out_root / "harness"
+            harness_out_dir.mkdir(parents=True, exist_ok=True)
+            (harness_out_dir / "evaluation_result.json").write_text(
+                json.dumps({"results": output_rows}, sort_keys=True),
+                encoding="utf-8",
+            )
+            return {"results": output_rows}
+
+        with patch(
+            "repogauge.runner.judge._invoke_swebench_harness", side_effect=fake_invoke
+        ):
+            rc = _run_main(
+                [
+                    "eval",
+                    str(exp_out),
+                    "--gold",
+                    "--out",
+                    str(eval_out),
+                    "--llm-mode",
+                    "off",
+                ]
+            )
+
+        assert rc == 0
+
+        manifest = _read_manifest(eval_out)
+        eval_metadata = manifest["metadata"]["eval"]
+        assert eval_metadata["total"] == len(dataset_rows)
+        assert eval_metadata["resolved"] == eval_metadata["total"]
+        assert eval_metadata["resolve_rate"] == 1.0
+
+        validation_path = Path(manifest["artifact_paths"]["validation"])
+        rows = _read_jsonl(validation_path)
+        assert {row["instance_id"] for row in rows} == expected_ids
+        assert all(row["status"] == "resolved" for row in rows)
+        assert all(row["resolved"] is True for row in rows)
