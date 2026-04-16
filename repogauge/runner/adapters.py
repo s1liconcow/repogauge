@@ -237,6 +237,25 @@ def _parse_usage_cost(
     return dict(usage), dict(cost)
 
 
+def _parse_usage_cost_with_source(
+    payload: Mapping[str, Any] | list[Any] | None,
+) -> tuple[dict[str, Any], str, dict[str, Any], str]:
+    if not isinstance(payload, Mapping):
+        return {}, "", {}, ""
+
+    usage_source = ""
+    usage = _coerce_usage(payload.get("usage")) if "usage" in payload else {}
+    if usage or "usage" in payload:
+        usage_source = "response.usage"
+
+    cost_source = ""
+    cost = _coerce_cost(payload.get("cost")) if "cost" in payload else {}
+    if cost or "cost" in payload:
+        cost_source = "response.cost"
+
+    return dict(usage), usage_source, dict(cost), cost_source
+
+
 def _post_json(
     *,
     url: str,
@@ -344,6 +363,8 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
                     model_patch=None,
                     raw_output=result.raw_output,
                     exit_reason="invalid patch: no unified diff found in model output",
+                    usage_source=result.usage_source,
+                    cost_source=result.cost_source,
                     usage=result.usage,
                     cost=result.cost,
                     metadata=metadata,
@@ -354,6 +375,8 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
                 model_patch=patch,
                 raw_output=result.raw_output,
                 exit_reason=result.exit_reason,
+                usage_source=result.usage_source,
+                cost_source=result.cost_source,
                 usage=_coerce_usage(result.usage),
                 cost=_coerce_cost(result.cost),
                 metadata=metadata,
@@ -365,6 +388,8 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
             model_patch=result.model_patch,
             raw_output=result.raw_output,
             exit_reason=result.exit_reason,
+            usage_source=result.usage_source,
+            cost_source=result.cost_source,
             usage=_coerce_usage(result.usage),
             cost=_coerce_cost(result.cost),
             metadata=metadata,
@@ -437,6 +462,8 @@ class MockSolverAdapter(_BaseConcreteSolverAdapter):
                 model_patch=self.mock_patch,
                 raw_output=self.mock_patch,
                 exit_reason="",
+                usage_source="",
+                cost_source="",
             )
         return SolverAdapterResult(
             attempt_id=request.attempt_id,
@@ -444,6 +471,8 @@ class MockSolverAdapter(_BaseConcreteSolverAdapter):
             model_patch=None,
             raw_output="",
             exit_reason=self.mock_exit_reason,
+            usage_source="",
+            cost_source="",
         )
 
 
@@ -544,7 +573,7 @@ class AnthropicAgentSDKAdapter(_BaseConcreteSolverAdapter):
         text = self._coerce_output_text(
             _coerce_mapping(response, field_name="response")
         )
-        usage, cost = _parse_usage_cost(
+        usage, usage_source, cost, cost_source = _parse_usage_cost_with_source(
             _coerce_mapping(response, field_name="response")
         )
         return SolverAdapterResult(
@@ -553,6 +582,8 @@ class AnthropicAgentSDKAdapter(_BaseConcreteSolverAdapter):
             model_patch=text,
             raw_output=text,
             exit_reason="",
+            usage_source=usage_source,
+            cost_source=cost_source,
             usage=usage,
             cost=cost,
         )
@@ -636,7 +667,9 @@ class OpenAIResponsesAdapter(_BaseConcreteSolverAdapter):
             )
 
         response_payload = _coerce_mapping(response, field_name="response")
-        usage, cost = _parse_usage_cost(response_payload)
+        usage, usage_source, cost, cost_source = _parse_usage_cost_with_source(
+            response_payload
+        )
         text = response_payload.get("output_text")
         if not isinstance(text, str):
             text = ""
@@ -651,6 +684,8 @@ class OpenAIResponsesAdapter(_BaseConcreteSolverAdapter):
             model_patch=text or "",
             raw_output=text or json.dumps(response_payload),
             exit_reason="",
+            usage_source=usage_source,
+            cost_source=cost_source,
             usage=usage,
             cost=cost,
         )
@@ -740,7 +775,9 @@ class OpenAICompatibleAdapter(_BaseConcreteSolverAdapter):
             )
 
         response_payload = _coerce_mapping(response, field_name="response")
-        usage, cost = _parse_usage_cost(response_payload)
+        usage, usage_source, cost, cost_source = _parse_usage_cost_with_source(
+            response_payload
+        )
         text = ""
         choices = response_payload.get("choices")
         if isinstance(choices, list) and choices:
@@ -763,6 +800,8 @@ class OpenAICompatibleAdapter(_BaseConcreteSolverAdapter):
             model_patch=text or "",
             raw_output=text or json.dumps(response_payload),
             exit_reason="",
+            usage_source=usage_source,
+            cost_source=cost_source,
             usage=usage,
             cost=cost,
         )
@@ -854,15 +893,21 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         )
         usage = {}
         cost = {}
+        usage_source = ""
+        cost_source = ""
         output = command_result.stdout
+
+        text = ""
         if command_result.success:
             parsed = _parse_json_lines(output)
             text_parts = []
             for event in parsed:
                 if "usage" in event and isinstance(event["usage"], Mapping):
                     usage = dict(event["usage"])
+                    usage_source = "codex_cli.event.usage"
                 if "cost" in event and isinstance(event["cost"], Mapping):
                     cost = dict(event["cost"])
+                    cost_source = "codex_cli.event.cost"
                 if "message" in event and isinstance(event["message"], Mapping):
                     text = event["message"].get("content")
                     if isinstance(text, str):
@@ -872,15 +917,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             text = "".join(text_parts).strip()
             if not text and output.strip():
                 text = output.strip()
-            return SolverAdapterResult(
-                attempt_id=request.attempt_id,
-                status=SolverAttemptState.SUCCEEDED,
-                model_patch=text,
-                raw_output=output,
-                exit_reason="",
-                usage=usage,
-                cost=cost,
-            )
+
         if command_result.timed_out:
             return SolverAdapterResult(
                 attempt_id=request.attempt_id,
@@ -888,19 +925,37 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                 model_patch=None,
                 raw_output=output,
                 exit_reason=f"command timeout: {command_result.stderr or 'timed out'}",
+                usage_source=usage_source,
+                cost_source=cost_source,
                 usage={},
                 cost={},
             )
+
+        if not command_result.success:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output=output,
+                exit_reason=(
+                    command_result.stderr
+                    or command_result.stdout
+                    or "command execution failed"
+                ),
+                usage_source=usage_source,
+                cost_source=cost_source,
+                usage=usage,
+                cost=cost,
+            )
+
         return SolverAdapterResult(
             attempt_id=request.attempt_id,
-            status=SolverAttemptState.FAILED,
-            model_patch=None,
+            status=SolverAttemptState.SUCCEEDED,
+            model_patch=text,
             raw_output=output,
-            exit_reason=(
-                command_result.stderr
-                or command_result.stdout
-                or "command execution failed"
-            ),
+            exit_reason="",
+            usage_source=usage_source,
+            cost_source=cost_source,
             usage=usage,
             cost=cost,
         )

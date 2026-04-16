@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
+from repogauge.exec import CommandResult
 from repogauge.runner.adapters import (
+    CodexCLIAdapter,
+    OpenAICompatibleAdapter,
+    OpenAIResponsesAdapter,
     MockSolverAdapter,
     SolverAdapterError,
     build_solver_adapters,
@@ -38,6 +43,16 @@ def _provider() -> MatrixProvider:
         provider_id="mock",
         kind="mock",
         config={},
+        redacted_config={},
+        raw={},
+    )
+
+
+def _provider_for_command(command: str = "echo") -> MatrixProvider:
+    return MatrixProvider(
+        provider_id="codex",
+        kind="codex_cli",
+        config={"command": command},
         redacted_config={},
         raw={},
     )
@@ -140,3 +155,103 @@ class TestAdapters(unittest.TestCase):
                 solvers=(_solver(adapter="bogus"),),
                 providers=(provider,),
             )
+
+    def test_openai_responses_adapter_marks_usage_and_cost_source(self) -> None:
+        adapter = OpenAIResponsesAdapter(
+            solver_id="solver-a",
+            provider_id="openai",
+            provider_config={"api_key": "k", "base_url": "https://example.test"},
+            behavior={"model": "gpt-4o-mini"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:2"),
+            attempt_id="run-1:repo__sample-1:solver-a:2:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        payload = {
+            "usage": {"input_tokens": 1},
+            "cost": {"input_cost": 0.1},
+            "output_text": "diff --git a/x b/x\n+ok",
+        }
+        with mock.patch("repogauge.runner.adapters._post_json", return_value=payload):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.usage_source, "response.usage")
+        self.assertEqual(result.cost_source, "response.cost")
+        self.assertEqual(result.usage, {"input_tokens": 1})
+        self.assertEqual(result.cost, {"input_cost": 0.1})
+
+    def test_openai_compatible_adapter_marks_usage_and_cost_source(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            solver_id="solver-a",
+            provider_id="openai",
+            provider_config={"api_key": "k", "base_url": "https://example.test"},
+            behavior={"model": "gpt-4o-mini"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:3"),
+            attempt_id="run-1:repo__sample-1:solver-a:3:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        payload = {
+            "usage": {"prompt_tokens": 10},
+            "cost": {"total_cost": 0.2},
+            "choices": [{"message": {"content": "diff --git a/x b/x\n+ok"}}],
+        }
+        with mock.patch("repogauge.runner.adapters._post_json", return_value=payload):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.usage_source, "response.usage")
+        self.assertEqual(result.cost_source, "response.cost")
+        self.assertEqual(result.usage, {"prompt_tokens": 10})
+        self.assertEqual(result.cost, {"total_cost": 0.2})
+
+    def test_codex_cli_adapter_marks_usage_and_cost_source(self) -> None:
+        provider = _provider_for_command("/bin/echo")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+            attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        output = (
+            '{"usage":{"input_tokens":5}}\n'
+            '{"cost":{"total_cost":0.5}}\n'
+            '{"message":{"content":"diff --git a/x b/x\\n+ok"}}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo", "exec", "--json", "--model", "gpt-5.4"],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch("repogauge.runner.adapters.run_command", return_value=command_result):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.usage_source, "codex_cli.event.usage")
+        self.assertEqual(result.cost_source, "codex_cli.event.cost")
+        self.assertEqual(result.usage, {"input_tokens": 5})
+        self.assertEqual(result.cost, {"total_cost": 0.5})

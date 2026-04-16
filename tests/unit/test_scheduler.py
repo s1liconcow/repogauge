@@ -136,6 +136,61 @@ class CaptureAdapter(SolverAdapter):
         return result
 
 
+class SourceAwareAdapter(SolverAdapter):
+    """Adapter that returns fixed usage/cost metadata with provenance."""
+
+    def __init__(
+        self,
+        *,
+        status: str,
+        usage: dict[str, object],
+        cost: dict[str, object],
+        usage_source: str,
+        cost_source: str,
+    ) -> None:
+        self._status = status
+        self._usage = usage
+        self._cost = cost
+        self._usage_source = usage_source
+        self._cost_source = cost_source
+        self.prepare_request_calls: list[str] = []
+        self.execute_calls: list[str] = []
+
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+    ) -> SolverAdapterRequest:
+        self.prepare_request_calls.append(attempt_id)
+        return SolverAdapterRequest(
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            job=job,
+            instance_row=instance_row,
+        )
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        self.execute_calls.append(request.attempt_id)
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=self._status,
+            model_patch="diff --git a/x b/x\n+ok",
+            raw_output="ok",
+            usage_source=self._usage_source,
+            cost_source=self._cost_source,
+            usage=self._usage,
+            cost=self._cost,
+        )
+
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
+        return result
+
+
 class PrepareErrorAdapter(ReplayAdapter):
     def __init__(self, statuses: list[str], fail_prepare_attempts: set[int]) -> None:
         super().__init__(statuses)
@@ -273,6 +328,31 @@ def test_scheduler_records_job_attempt_state_transitions(tmp_path: Path) -> None
     assert attempt_rows[-1]["attempt_state"] == SolverAttemptState.SUCCEEDED
     assert attempt_rows[-1]["exit_reason"] == ""
     assert attempt_rows[0]["attempt_state"] == SolverAttemptState.FAILED
+
+
+def test_scheduler_persists_usage_cost_sources_in_attempt_rows(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    adapter = SourceAwareAdapter(
+        status=SolverAttemptState.SUCCEEDED,
+        usage={"input_tokens": 7},
+        cost={"total_cost": 0.07},
+        usage_source="response.usage",
+        cost_source="response.cost",
+    )
+
+    summary = scheduler.run([job], adapters={"solver-a": adapter})
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0]["usage_source"] == "response.usage"
+    assert attempt_rows[0]["cost_source"] == "response.cost"
 
 
 def test_scheduler_retries_are_budgeted_and_exhausted(tmp_path: Path) -> None:

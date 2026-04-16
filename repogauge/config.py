@@ -159,7 +159,9 @@ class AttemptRow(ContractRecord):
     exit_reason: str = ""
     model_patch: Optional[str] = None
     usage: Dict[str, Any] = field(default_factory=dict)
+    usage_source: str = ""
     cost: Dict[str, Any] = field(default_factory=dict)
+    cost_source: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

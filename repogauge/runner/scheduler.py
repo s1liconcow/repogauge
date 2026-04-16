@@ -66,6 +66,8 @@ class SolverAdapterResult:
     model_patch: str | None = None
     raw_output: str = ""
     exit_reason: str = ""
+    usage_source: str = ""
+    cost_source: str = ""
     usage: Mapping[str, Any] = field(default_factory=dict)
     cost: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -210,6 +212,8 @@ def _serialize_attempt_row(
     raw_output: str,
     usage: Mapping[str, Any],
     cost: Mapping[str, Any],
+    usage_source: str,
+    cost_source: str,
     exit_reason: str,
     metadata: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -222,7 +226,9 @@ def _serialize_attempt_row(
         exit_reason=exit_reason,
         model_patch=patch,
         usage=dict(usage),
+        usage_source=usage_source,
         cost=dict(cost),
+        cost_source=cost_source,
         metadata=dict(metadata, attempt_state=attempt_state),
     )
     payload = row.to_dict()
@@ -374,7 +380,9 @@ class SolverScheduler:
             patch=result.model_patch,
             raw_output=raw_output,
             usage=result.usage,
+            usage_source=result.usage_source,
             cost=result.cost,
+            cost_source=result.cost_source,
             exit_reason=result.exit_reason,
             metadata=result.metadata,
         )
@@ -438,6 +446,8 @@ class SolverScheduler:
                     result = SolverAdapterResult(
                         attempt_id=attempt_id,
                         status=SolverAttemptState.FAILED,
+                        usage_source="",
+                        cost_source="",
                         exit_reason=f"adapter_prepare_error: {exc}",
                         raw_output="",
                     )
@@ -449,6 +459,8 @@ class SolverScheduler:
                         result = SolverAdapterResult(
                             attempt_id=attempt_id,
                             status=SolverAttemptState.FAILED,
+                            usage_source="",
+                            cost_source="",
                             exit_reason=f"adapter_execution_error: {exc}",
                             raw_output="",
                         )
@@ -463,6 +475,8 @@ class SolverScheduler:
                     result = SolverAdapterResult(
                         attempt_id=result.attempt_id,
                         status=result.status,
+                        usage_source=result.usage_source,
+                        cost_source=result.cost_source,
                         model_patch=result.model_patch,
                         raw_output=result.raw_output,
                         exit_reason=result.exit_reason,
@@ -477,6 +491,8 @@ class SolverScheduler:
                         result = SolverAdapterResult(
                             attempt_id=result.attempt_id,
                             status=SolverAttemptState.FAILED,
+                            usage_source=result.usage_source,
+                            cost_source=result.cost_source,
                             model_patch=result.model_patch,
                             raw_output=result.raw_output,
                             exit_reason=f"adapter_finalize_error: {exc}",
