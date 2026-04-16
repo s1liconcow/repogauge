@@ -31,11 +31,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from repogauge.exec import run_command
-from repogauge.utils.git import apply_patch_text, create_worktree
+from repogauge.utils.git import CommandPatchError, apply_patch_text, create_worktree
 from repogauge.validation.junit_parser import (
     JUnitParseError,
     OUTCOME_PASS,
     parse_junit_xml,
+)
+from repogauge.validation.evidence import (
+    normalize_failure_reason,
+    tail,
+    write_validation_bundle,
 )
 from repogauge.validation.testsel import build_targeted_test_plan
 
@@ -87,6 +92,22 @@ class PytestExecutionError(RuntimeError):
     def __init__(self, message: str, attempts: List[Dict[str, Any]]) -> None:
         super().__init__(message)
         self.attempts = attempts
+
+
+def _bundle_payload(outcome: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a minimal payload for ``write_validation_bundle``."""
+    return {
+        "log_a": outcome.get("log_a", ""),
+        "log_b": outcome.get("log_b", ""),
+        "log_c": outcome.get("log_c", ""),
+        "log_b_rerun": outcome.get("log_b_rerun", ""),
+        "log_c_rerun": outcome.get("log_c_rerun", ""),
+        "run_a_attempts": outcome.get("run_a_attempts", []),
+        "run_b_attempts": outcome.get("run_b_attempts", []),
+        "run_c_attempts": outcome.get("run_c_attempts", []),
+        "run_b_rerun_attempts": outcome.get("run_b_rerun_attempts", []),
+        "run_c_rerun_attempts": outcome.get("run_c_rerun_attempts", []),
+    }
 
 
 def _pytest_command_attempts(test_cmd_base: str) -> List[List[str]]:
@@ -244,12 +265,15 @@ def _run_validation_pass(
     test_files: List[str],
     timeout_seconds: int,
     test_cmd_base: str,
+    apply_test_patch: bool = False,
+    apply_pred_patch: bool = False,
 ) -> Dict[str, Any]:
     """Execute one isolated validation run and return outcomes + telemetry."""
     wt = None
     outcomes: Dict[str, str] = {}
     log = ""
     attempts: List[Dict[str, Any]] = []
+    failure_code: str | None = None
 
     try:
         wt = create_worktree(repo_root, ref=base_commit)
@@ -267,14 +291,25 @@ def _run_validation_pass(
             test_cmd_base=test_cmd_base,
         )
     except Exception as exc:
-        if isinstance(exc, PytestExecutionError):
+        if isinstance(exc, CommandPatchError):
+            if apply_pred_patch:
+                failure_code = "patch_apply_failed"
+            elif apply_test_patch:
+                failure_code = "test_patch_apply_failed"
+            else:
+                failure_code = "unknown_validator_failure"
+        elif isinstance(exc, PytestExecutionError):
+            failure_code = "missing_junit"
             attempts = exc.attempts
+        else:
+            failure_code = "unknown_validator_failure"
         return {
             "status": "failed",
             "error": f"{label} failed: {exc}",
             "outcomes": {},
             "log": log,
             "attempts": attempts,
+            "failure_code": failure_code,
         }
     finally:
         if wt is not None:
@@ -352,11 +387,23 @@ def _build_eval_result(
     FAIL_TO_PASS: List[str],
     PASS_TO_PASS: List[str],
     resolved: bool,
+    failure_code: str | None = None,
+    test_strategy: str | None = None,
+    environment_strategy: str = "default",
 ) -> Dict[str, Any]:
+    normalized_reason = reason
+    if status != "resolved" and reason is not None:
+        normalized_reason = normalize_failure_reason(
+            status=status, reason=reason, failure_code=failure_code
+        )
+
     return {
         "status": status,
         "error": error,
-        "reason": reason,
+        "reason": normalized_reason,
+        "failure_code": failure_code,
+        "environment_strategy": environment_strategy,
+        "test_strategy": test_strategy or "full",
         "targeted_test_cmd": targeted_test_cmd,
         "targeted_test_inputs": test_inputs,
         "log_a": log_a,
@@ -381,6 +428,21 @@ def _build_eval_result(
     }
 
 
+def _finalize_eval_result(
+    *,
+    outcome: Dict[str, Any],
+    out_root: Path | None,
+    instance_id: str | None,
+) -> Dict[str, Any]:
+    if out_root is not None and instance_id:
+        outcome["validation_bundle"] = write_validation_bundle(
+            out_root=out_root,
+            instance_id=instance_id,
+            outcome=_bundle_payload(outcome),
+        )
+    return outcome
+
+
 # ---------------------------------------------------------------------------
 # Per-instance evaluation
 # ---------------------------------------------------------------------------
@@ -396,12 +458,28 @@ def _eval_instance(
     declared_ptp: List[str],
     timeout_seconds: int,
     test_cmd_base: str = "python -m pytest",
+    out_root: Path | None = None,
+    instance_id: str | None = None,
+    environment_strategy: str = "default",
 ) -> Dict[str, Any]:
     """Run validation passes for one instance. Returns a result dict."""
     targeted_test_cmd, targeted_test_inputs = build_targeted_test_plan(
         test_cmd_base, test_patch
     )
     test_inputs = targeted_test_inputs
+    target_cmd_tokens = targeted_test_cmd.split()
+    is_pytest = (
+        "pytest" in target_cmd_tokens
+        or (
+            target_cmd_tokens[:2] == ["python", "-m"]
+            and len(target_cmd_tokens) > 2
+            and target_cmd_tokens[2] == "pytest"
+        )
+    )
+    if is_pytest:
+        test_strategy = "targeted_pytest" if test_inputs else "full_pytest"
+    else:
+        test_strategy = "targeted_command" if test_inputs else "full_command"
 
     with tempfile.TemporaryDirectory(prefix="repogauge-eval-") as tmpdir:
         tmp = Path(tmpdir)
@@ -416,29 +494,38 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            apply_test_patch=False,
+            apply_pred_patch=False,
         )
         if run_a["status"] == "failed":
-            return _build_eval_result(
-                status="error",
-                error=run_a["error"],
-                reason="run_a_failed",
-                targeted_test_cmd=targeted_test_cmd,
-                test_inputs=test_inputs,
-                log_a=run_a["log"],
-                run_a=run_a["outcomes"],
-                run_b={},
-                run_c={},
-                run_b_rerun={},
-                run_c_rerun={},
-                run_a_attempts=run_a["attempts"],
-                run_b_attempts=[],
-                run_c_attempts=[],
-                run_b_rerun_attempts=[],
-                run_c_rerun_attempts=[],
-                flake_runs=0,
-                FAIL_TO_PASS=[],
-                PASS_TO_PASS=[],
-                resolved=False,
+            return _finalize_eval_result(
+                outcome=_build_eval_result(
+                    status="error",
+                    error=run_a["error"],
+                    failure_code=run_a.get("failure_code"),
+                    reason="run_a_failed",
+                    targeted_test_cmd=targeted_test_cmd,
+                    test_inputs=test_inputs,
+                    log_a=run_a["log"],
+                    run_a=run_a["outcomes"],
+                    run_b={},
+                    run_c={},
+                    run_b_rerun={},
+                    run_c_rerun={},
+                    run_a_attempts=run_a["attempts"],
+                    run_b_attempts=[],
+                    run_c_attempts=[],
+                    run_b_rerun_attempts=[],
+                    run_c_rerun_attempts=[],
+                    flake_runs=0,
+                    FAIL_TO_PASS=[],
+                    PASS_TO_PASS=[],
+                    resolved=False,
+                    test_strategy=test_strategy,
+                    environment_strategy=environment_strategy,
+                ),
+                out_root=out_root,
+                instance_id=instance_id,
             )
 
         # --- Pass B: base + test_patch --------------------------------------
@@ -452,30 +539,39 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            apply_test_patch=True,
+            apply_pred_patch=False,
         )
         if run_b["status"] == "failed":
-            return _build_eval_result(
-                status="error",
-                error=run_b["error"],
-                reason="run_b_failed",
-                targeted_test_cmd=targeted_test_cmd,
-                test_inputs=test_inputs,
-                log_a=run_a["log"],
-                log_b=run_b["log"],
-                run_a=run_a["outcomes"],
-                run_b=run_b["outcomes"],
-                run_c={},
-                run_b_rerun={},
-                run_c_rerun={},
-                run_a_attempts=run_a["attempts"],
-                run_b_attempts=run_b["attempts"],
-                run_c_attempts=[],
-                run_b_rerun_attempts=[],
-                run_c_rerun_attempts=[],
-                flake_runs=0,
-                FAIL_TO_PASS=[],
-                PASS_TO_PASS=[],
-                resolved=False,
+            return _finalize_eval_result(
+                outcome=_build_eval_result(
+                    status="error",
+                    error=run_b["error"],
+                    failure_code=run_b.get("failure_code"),
+                    reason="run_b_failed",
+                    targeted_test_cmd=targeted_test_cmd,
+                    test_inputs=test_inputs,
+                    log_a=run_a["log"],
+                    log_b=run_b["log"],
+                    run_a=run_a["outcomes"],
+                    run_b=run_b["outcomes"],
+                    run_c={},
+                    run_b_rerun={},
+                    run_c_rerun={},
+                    run_a_attempts=run_a["attempts"],
+                    run_b_attempts=run_b["attempts"],
+                    run_c_attempts=[],
+                    run_b_rerun_attempts=[],
+                    run_c_rerun_attempts=[],
+                    flake_runs=0,
+                    FAIL_TO_PASS=[],
+                    PASS_TO_PASS=[],
+                    resolved=False,
+                    test_strategy=test_strategy,
+                    environment_strategy=environment_strategy,
+                ),
+                out_root=out_root,
+                instance_id=instance_id,
             )
 
         # --- Pass C: base + test_patch + pred_patch --------------------------
@@ -489,31 +585,40 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            apply_test_patch=True,
+            apply_pred_patch=True,
         )
         if run_c["status"] == "failed":
-            return _build_eval_result(
-                status="error",
-                error=run_c["error"],
-                reason="run_c_failed",
-                targeted_test_cmd=targeted_test_cmd,
-                test_inputs=test_inputs,
-                log_a=run_a["log"],
-                log_b=run_b["log"],
-                log_c=run_c["log"],
-                run_a=run_a["outcomes"],
-                run_b=run_b["outcomes"],
-                run_c={},
-                run_b_rerun={},
-                run_c_rerun={},
-                run_a_attempts=run_a["attempts"],
-                run_b_attempts=run_b["attempts"],
-                run_c_attempts=run_c["attempts"],
-                run_b_rerun_attempts=[],
-                run_c_rerun_attempts=[],
-                flake_runs=0,
-                FAIL_TO_PASS=[],
-                PASS_TO_PASS=[],
-                resolved=False,
+            return _finalize_eval_result(
+                outcome=_build_eval_result(
+                    status="error",
+                    error=run_c["error"],
+                    failure_code=run_c.get("failure_code"),
+                    reason="run_c_failed",
+                    targeted_test_cmd=targeted_test_cmd,
+                    test_inputs=test_inputs,
+                    log_a=run_a["log"],
+                    log_b=run_b["log"],
+                    log_c=run_c["log"],
+                    run_a=run_a["outcomes"],
+                    run_b=run_b["outcomes"],
+                    run_c={},
+                    run_b_rerun={},
+                    run_c_rerun={},
+                    run_a_attempts=run_a["attempts"],
+                    run_b_attempts=run_b["attempts"],
+                    run_c_attempts=run_c["attempts"],
+                    run_b_rerun_attempts=[],
+                    run_c_rerun_attempts=[],
+                    flake_runs=0,
+                    FAIL_TO_PASS=[],
+                    PASS_TO_PASS=[],
+                    resolved=False,
+                    test_strategy=test_strategy,
+                    environment_strategy=environment_strategy,
+                ),
+                out_root=out_root,
+                instance_id=instance_id,
             )
 
         # --- Pass D: reruns for flake detection ------------------------------
@@ -527,6 +632,8 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            apply_test_patch=True,
+            apply_pred_patch=False,
         )
         run_c_rerun = _run_validation_pass(
             label="c_rerun",
@@ -538,6 +645,8 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            apply_test_patch=True,
+            apply_pred_patch=True,
         )
 
         if run_b_rerun["status"] == "failed" or run_c_rerun["status"] == "failed":
@@ -551,31 +660,42 @@ def _eval_instance(
                 if run_b_rerun["status"] == "failed"
                 else "run_c_rerun_failed"
             )
-            return _build_eval_result(
-                status="error",
-                error=rerun_error,
-                reason=reason,
-                targeted_test_cmd=targeted_test_cmd,
-                test_inputs=test_inputs,
-                log_a=run_a["log"],
-                log_b=run_b["log"],
-                log_c=run_c["log"],
-                log_b_rerun=run_b_rerun["log"],
-                log_c_rerun=run_c_rerun["log"],
-                run_a=run_a["outcomes"],
-                run_b=run_b["outcomes"],
-                run_c=run_c["outcomes"],
-                run_b_rerun=run_b_rerun["outcomes"],
-                run_c_rerun=run_c_rerun["outcomes"],
-                run_a_attempts=run_a["attempts"],
-                run_b_attempts=run_b["attempts"],
-                run_c_attempts=run_c["attempts"],
-                run_b_rerun_attempts=run_b_rerun["attempts"],
-                run_c_rerun_attempts=run_c_rerun["attempts"],
-                flake_runs=2,
-                FAIL_TO_PASS=[],
-                PASS_TO_PASS=[],
-                resolved=False,
+            return _finalize_eval_result(
+                outcome=_build_eval_result(
+                    status="error",
+                    error=rerun_error,
+                    failure_code=(
+                        run_b_rerun.get("failure_code")
+                        if run_b_rerun["status"] == "failed"
+                        else run_c_rerun.get("failure_code")
+                    ),
+                    reason=reason,
+                    targeted_test_cmd=targeted_test_cmd,
+                    test_inputs=test_inputs,
+                    log_a=run_a["log"],
+                    log_b=run_b["log"],
+                    log_c=run_c["log"],
+                    log_b_rerun=run_b_rerun["log"],
+                    log_c_rerun=run_c_rerun["log"],
+                    run_a=run_a["outcomes"],
+                    run_b=run_b["outcomes"],
+                    run_c=run_c["outcomes"],
+                    run_b_rerun=run_b_rerun["outcomes"],
+                    run_c_rerun=run_c_rerun["outcomes"],
+                    run_a_attempts=run_a["attempts"],
+                    run_b_attempts=run_b["attempts"],
+                    run_c_attempts=run_c["attempts"],
+                    run_b_rerun_attempts=run_b_rerun["attempts"],
+                    run_c_rerun_attempts=run_c_rerun["attempts"],
+                    flake_runs=2,
+                    FAIL_TO_PASS=[],
+                    PASS_TO_PASS=[],
+                    resolved=False,
+                    test_strategy=test_strategy,
+                    environment_strategy=environment_strategy,
+                ),
+                out_root=out_root,
+                instance_id=instance_id,
             )
 
         if _is_flaky(
@@ -590,31 +710,38 @@ def _eval_instance(
                 reason = "run_c_rerun_mismatch"
             else:
                 reason = "unstable_reruns"
-            return _build_eval_result(
-                status="flaky",
-                error="rerun outcomes changed",
-                reason=reason,
-                targeted_test_cmd=targeted_test_cmd,
-                test_inputs=test_inputs,
-                log_a=run_a["log"],
-                log_b=run_b["log"],
-                log_c=run_c["log"],
-                log_b_rerun=run_b_rerun["log"],
-                log_c_rerun=run_c_rerun["log"],
-                run_a=run_a["outcomes"],
-                run_b=run_b["outcomes"],
-                run_c=run_c["outcomes"],
-                run_b_rerun=run_b_rerun["outcomes"],
-                run_c_rerun=run_c_rerun["outcomes"],
-                run_a_attempts=run_a["attempts"],
-                run_b_attempts=run_b["attempts"],
-                run_c_attempts=run_c["attempts"],
-                run_b_rerun_attempts=run_b_rerun["attempts"],
-                run_c_rerun_attempts=run_c_rerun["attempts"],
-                flake_runs=2,
-                FAIL_TO_PASS=[],
-                PASS_TO_PASS=[],
-                resolved=False,
+            return _finalize_eval_result(
+                outcome=_build_eval_result(
+                    status="flaky",
+                    error="rerun outcomes changed",
+                    failure_code="flaky_outcomes",
+                    reason=reason,
+                    targeted_test_cmd=targeted_test_cmd,
+                    test_inputs=test_inputs,
+                    log_a=run_a["log"],
+                    log_b=run_b["log"],
+                    log_c=run_c["log"],
+                    log_b_rerun=run_b_rerun["log"],
+                    log_c_rerun=run_c_rerun["log"],
+                    run_a=run_a["outcomes"],
+                    run_b=run_b["outcomes"],
+                    run_c=run_c["outcomes"],
+                    run_b_rerun=run_b_rerun["outcomes"],
+                    run_c_rerun=run_c_rerun["outcomes"],
+                    run_a_attempts=run_a["attempts"],
+                    run_b_attempts=run_b["attempts"],
+                    run_c_attempts=run_c["attempts"],
+                    run_b_rerun_attempts=run_b_rerun["attempts"],
+                    run_c_rerun_attempts=run_c_rerun["attempts"],
+                    flake_runs=2,
+                    FAIL_TO_PASS=[],
+                    PASS_TO_PASS=[],
+                    resolved=False,
+                    test_strategy=test_strategy,
+                    environment_strategy=environment_strategy,
+                ),
+                out_root=out_root,
+                instance_id=instance_id,
             )
 
         ftp, ptp = _derive_test_lists(
@@ -635,31 +762,38 @@ def _eval_instance(
             rejection_reason = None
         status = "resolved" if resolved else "not_resolved"
 
-    return _build_eval_result(
-        status=status,
-        error=None,
-        reason=rejection_reason,
-        targeted_test_cmd=targeted_test_cmd,
-        test_inputs=test_inputs,
-        log_a=run_a["log"],
-        log_b=run_b["log"],
-        log_c=run_c["log"],
-        log_b_rerun=run_b_rerun["log"],
-        log_c_rerun=run_c_rerun["log"],
-        run_a=run_a["outcomes"],
-        run_b=run_b["outcomes"],
-        run_c=run_c["outcomes"],
-        run_b_rerun=run_b_rerun["outcomes"],
-        run_c_rerun=run_c_rerun["outcomes"],
-        run_a_attempts=run_a["attempts"],
-        run_b_attempts=run_b["attempts"],
-        run_c_attempts=run_c["attempts"],
-        run_b_rerun_attempts=run_b_rerun["attempts"],
-        run_c_rerun_attempts=run_c_rerun["attempts"],
-        flake_runs=2,
-        FAIL_TO_PASS=ftp,
-        PASS_TO_PASS=ptp,
-        resolved=resolved,
+    return _finalize_eval_result(
+        outcome=_build_eval_result(
+            status=status,
+            error=None,
+            failure_code=None,
+            reason=rejection_reason,
+            targeted_test_cmd=targeted_test_cmd,
+            test_inputs=test_inputs,
+            log_a=run_a["log"],
+            log_b=run_b["log"],
+            log_c=run_c["log"],
+            log_b_rerun=run_b_rerun["log"],
+            log_c_rerun=run_c_rerun["log"],
+            run_a=run_a["outcomes"],
+            run_b=run_b["outcomes"],
+            run_c=run_c["outcomes"],
+            run_b_rerun=run_b_rerun["outcomes"],
+            run_c_rerun=run_c_rerun["outcomes"],
+            run_a_attempts=run_a["attempts"],
+            run_b_attempts=run_b["attempts"],
+            run_c_attempts=run_c["attempts"],
+            run_b_rerun_attempts=run_b_rerun["attempts"],
+            run_c_rerun_attempts=run_c_rerun["attempts"],
+            flake_runs=2,
+            FAIL_TO_PASS=ftp,
+            PASS_TO_PASS=ptp,
+            resolved=resolved,
+            test_strategy=test_strategy,
+            environment_strategy=environment_strategy,
+        ),
+        out_root=out_root,
+        instance_id=instance_id,
     )
 
 
@@ -695,6 +829,9 @@ def run_eval(
 
         repo_root = _normalize_repo_root(dataset_path)
 
+    environment_strategy = (adapter_spec or {}).get("strategy_name", "default")
+    test_cmd_base = (adapter_spec or {}).get("test_cmd_base", "python -m pytest")
+
     dataset_rows = _read_jsonl(dataset_path)
     pred_rows = _read_jsonl(predictions_path)
     pred_by_id = {r["instance_id"]: r for r in pred_rows}
@@ -719,6 +856,8 @@ def run_eval(
                     "resolved": False,
                     "targeted_test_cmd": "",
                     "targeted_test_inputs": [],
+                    "environment_strategy": environment_strategy,
+                    "test_strategy": "full_command",
                     "FAIL_TO_PASS": ds.get("FAIL_TO_PASS", []),
                     "PASS_TO_PASS": ds.get("PASS_TO_PASS", []),
                     "metadata": {},
@@ -734,7 +873,10 @@ def run_eval(
             declared_ftp=ds.get("FAIL_TO_PASS") or [],
             declared_ptp=ds.get("PASS_TO_PASS") or [],
             timeout_seconds=timeout_seconds,
-            test_cmd_base=(adapter_spec or {}).get("test_cmd_base", "python -m pytest"),
+            test_cmd_base=test_cmd_base,
+            out_root=out_root,
+            instance_id=iid,
+            environment_strategy=environment_strategy,
         )
 
         if outcome["status"] == "error":
@@ -747,8 +889,11 @@ def run_eval(
                 "instance_id": iid,
                 "status": outcome["status"],
                 "reason": outcome["reason"],
+                "failure_code": outcome["failure_code"],
                 "error": outcome["error"],
                 "resolved": outcome["resolved"],
+                "environment_strategy": outcome["environment_strategy"],
+                "test_strategy": outcome["test_strategy"],
                 "targeted_test_cmd": outcome["targeted_test_cmd"],
                 "targeted_test_inputs": outcome["targeted_test_inputs"],
                 "FAIL_TO_PASS": outcome["FAIL_TO_PASS"],
@@ -771,10 +916,11 @@ def run_eval(
                     "run_a_attempts": outcome["run_a_attempts"],
                     "run_b_rerun_attempts": outcome["run_b_rerun_attempts"],
                     "run_c_rerun_attempts": outcome["run_c_rerun_attempts"],
-                    "log_b": outcome["log_b"][-2000:],
-                    "log_c": outcome["log_c"][-2000:],
-                    "log_b_rerun": outcome["log_b_rerun"][-2000:],
-                    "log_c_rerun": outcome["log_c_rerun"][-2000:],
+                    "log_b": tail(outcome["log_b"]),
+                    "log_c": tail(outcome["log_c"]),
+                    "log_b_rerun": tail(outcome["log_b_rerun"]),
+                    "log_c_rerun": tail(outcome["log_c_rerun"]),
+                    "validation_bundle": outcome.get("validation_bundle", {}),
                 },
             }
         )

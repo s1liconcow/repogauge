@@ -572,7 +572,7 @@ def test_eval_instance_marks_flaky_reason_for_b_rerun_mismatch(
     )
 
     assert outcome["status"] == "flaky"
-    assert outcome["reason"] == "run_b_rerun_mismatch"
+    assert outcome["reason"] == "flaky_outcomes"
 
 
 def test_run_eval_includes_missing_prediction_reason(tmp_path: Path) -> None:
@@ -661,6 +661,9 @@ def test_run_eval_includes_reason_from_eval_instance(
             "status": "not_resolved",
             "reason": "no_fail_to_pass",
             "error": None,
+            "failure_code": None,
+            "environment_strategy": "default",
+            "test_strategy": "full_pytest",
             "targeted_test_cmd": "python -m pytest",
             "targeted_test_inputs": [],
             "log_a": "",
