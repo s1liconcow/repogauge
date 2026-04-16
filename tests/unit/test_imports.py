@@ -14,7 +14,15 @@ def test_cli_importable():
 
 
 def test_contract_imports():
-    assert DatasetInstance(instance_id="i", repo="repo", base_commit="c", problem_statement="", version="", patch="", test_patch="")
+    assert DatasetInstance(
+        instance_id="i",
+        repo="repo",
+        base_commit="c",
+        problem_statement="",
+        version="",
+        patch="",
+        test_patch="",
+    )
     assert AdapterConfig()
     assert Manifest(command="x")
     assert AttemptTelemetry(attempt_id="a", provider="p")

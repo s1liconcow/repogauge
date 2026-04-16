@@ -93,4 +93,6 @@ def run_command_checked(
     )
     if result.success:
         return result
-    raise RuntimeError(f"command failed: {' '.join(result.command)} (code={result.returncode}, timed_out={result.timed_out})\n{result.stderr}")
+    raise RuntimeError(
+        f"command failed: {' '.join(result.command)} (code={result.returncode}, timed_out={result.timed_out})\n{result.stderr}"
+    )

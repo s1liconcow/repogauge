@@ -7,4 +7,3 @@ Invariant:
 """
 
 # TODO(oss_repogauge): implement batched judge scheduling and report persistence.
-

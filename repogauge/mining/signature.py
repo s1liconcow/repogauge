@@ -58,32 +58,46 @@ def _read_requirements_signature(repo_root: Path, profile: dict[str, Any]) -> li
         return []
 
     requirements: list[str] = []
-    for candidate in sorted((repo_root / "requirements.txt", repo_root / "requirements-dev.txt", repo_root / "dev-requirements.txt")):
+    for candidate in sorted(
+        (
+            repo_root / "requirements.txt",
+            repo_root / "requirements-dev.txt",
+            repo_root / "dev-requirements.txt",
+        )
+    ):
         if not candidate.exists():
             continue
         try:
-            normalized_lines = _normalize_dependency_lines(candidate.read_text(encoding="utf-8"))
+            normalized_lines = _normalize_dependency_lines(
+                candidate.read_text(encoding="utf-8")
+            )
             requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
         except OSError:
             requirements.append("")
     pyproject = repo_root / "pyproject.toml"
     if pyproject.exists():
         try:
-            normalized_lines = _normalize_dependency_lines(pyproject.read_text(encoding="utf-8"))
+            normalized_lines = _normalize_dependency_lines(
+                pyproject.read_text(encoding="utf-8")
+            )
             requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
         except OSError:
             requirements.append("")
     setup_cfg = repo_root / "setup.cfg"
     if setup_cfg.exists():
         try:
-            normalized_lines = _normalize_dependency_lines(setup_cfg.read_text(encoding="utf-8"))
+            normalized_lines = _normalize_dependency_lines(
+                setup_cfg.read_text(encoding="utf-8")
+            )
             requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
         except OSError:
             requirements.append("")
     setup_py = repo_root / "setup.py"
     if setup_py.exists():
         try:
-            normalized_lines = _normalize_dependency_lines(setup_py.read_text(encoding="utf-8"))
+            normalized_lines = _normalize_dependency_lines(
+                setup_py.read_text(encoding="utf-8")
+            )
             requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
         except OSError:
             requirements.append("")
@@ -101,7 +115,9 @@ def build_environment_signature(profile: dict[str, Any]) -> dict[str, Any]:
     package_managers = _as_sorted_unique(python_hints.get("package_managers", []))
     install_cmds = _as_sorted_unique(profile.get("install_hints", []))
     test_commands = _as_sorted_unique(test_runner_hints.get("commands", []))
-    package_style = str(python_hints.get("package_style", "unknown")).strip() or "unknown"
+    package_style = (
+        str(python_hints.get("package_style", "unknown")).strip() or "unknown"
+    )
     repo_name = str(profile.get("repo_name", "")).strip()
     repo_version = str(profile.get("repo_version", "")).strip() or REPO_VERSION_UNKNOWN
 

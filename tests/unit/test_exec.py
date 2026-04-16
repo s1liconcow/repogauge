@@ -11,7 +11,9 @@ def test_run_command_captures_output():
 
 def test_run_command_records_timeout():
     start = time.perf_counter()
-    result = run_command(["python3", "-c", "import time; time.sleep(1)"], timeout_seconds=0.01)
+    result = run_command(
+        ["python3", "-c", "import time; time.sleep(1)"], timeout_seconds=0.01
+    )
     duration_ms = (time.perf_counter() - start) * 1000
     assert result.timed_out
     assert not result.success

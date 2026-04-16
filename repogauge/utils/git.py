@@ -7,7 +7,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Optional, Sequence
+from typing import Iterator, Optional
 
 from repogauge.exec import CommandResult, run_command
 
@@ -31,7 +31,9 @@ def get_repo_root(path: str | Path) -> Path:
 def get_default_branch(path: str | Path) -> str:
     """Return repository default branch name."""
     root = get_repo_root(path)
-    head_result = run_command(["git", "-C", str(root), "symbolic-ref", "refs/remotes/origin/HEAD"])
+    head_result = run_command(
+        ["git", "-C", str(root), "symbolic-ref", "refs/remotes/origin/HEAD"]
+    )
     if head_result.success and head_result.stdout.strip():
         return head_result.stdout.strip().rsplit("/", 1)[-1]
 
@@ -42,7 +44,13 @@ def get_default_branch(path: str | Path) -> str:
     return "main"
 
 
-def list_commits(path: str | Path, *, max_count: int = 100, branch: Optional[str] = None, include_merges: bool = True) -> list[str]:
+def list_commits(
+    path: str | Path,
+    *,
+    max_count: int = 100,
+    branch: Optional[str] = None,
+    include_merges: bool = True,
+) -> list[str]:
     """List recent commits from a repo."""
     root = get_repo_root(path)
     cmd = ["git", "-C", str(root), "log", f"--max-count={max_count}", "--pretty=%H"]
@@ -52,7 +60,9 @@ def list_commits(path: str | Path, *, max_count: int = 100, branch: Optional[str
         cmd.insert(3, "--no-merges")
     result = run_command(cmd)
     if not result.success:
-        raise GitError(f"failed listing commits: {result.stderr.strip() or result.stdout}")
+        raise GitError(
+            f"failed listing commits: {result.stderr.strip() or result.stdout}"
+        )
     output = result.stdout.strip()
     return output.splitlines() if output else []
 
@@ -60,9 +70,13 @@ def list_commits(path: str | Path, *, max_count: int = 100, branch: Optional[str
 def list_commit_parents(path: str | Path, commit: str) -> list[str]:
     """Return direct parent SHAs for commit."""
     root = get_repo_root(path)
-    result = run_command(["git", "-C", str(root), "rev-list", "--parents", "-n", "1", commit])
+    result = run_command(
+        ["git", "-C", str(root), "rev-list", "--parents", "-n", "1", commit]
+    )
     if not result.success:
-        raise GitError(f"failed listing parents for {commit}: {result.stderr.strip() or result.stdout}")
+        raise GitError(
+            f"failed listing parents for {commit}: {result.stderr.strip() or result.stdout}"
+        )
     fields = result.stdout.strip().split()
     return fields[1:]
 
@@ -77,7 +91,9 @@ def extract_commit_diff(
     root = get_repo_root(path)
     result = run_command(["git", "-C", str(root), "diff", "--no-color", left, right])
     if not result.success:
-        raise GitError(f"failed extracting diff between {left} and {right}: {result.stderr.strip() or result.stdout}")
+        raise GitError(
+            f"failed extracting diff between {left} and {right}: {result.stderr.strip() or result.stdout}"
+        )
     return result.stdout
 
 
@@ -125,11 +141,15 @@ def create_worktree(
     else:
         temp_path = Path(worktree_path)
 
-    result = run_command(["git", "-C", str(repo), "worktree", "add", "--detach", str(temp_path), ref])
+    result = run_command(
+        ["git", "-C", str(repo), "worktree", "add", "--detach", str(temp_path), ref]
+    )
     if not result.success:
         if worktree_path is None and temp_path.exists():
             shutil.rmtree(temp_path, ignore_errors=True)
-        raise GitError(f"failed to create worktree: {result.stderr.strip() or result.stdout}")
+        raise GitError(
+            f"failed to create worktree: {result.stderr.strip() or result.stdout}"
+        )
     return WorktreeHandle(repo=repo, path=temp_path)
 
 
@@ -143,7 +163,9 @@ def remove_worktree(path: str | Path, worktree_path: str | Path) -> None:
 
 
 @contextmanager
-def scoped_worktree(path: str | Path, *, ref: str = "HEAD", worktree_path: Optional[str | Path] = None) -> Iterator[Path]:
+def scoped_worktree(
+    path: str | Path, *, ref: str = "HEAD", worktree_path: Optional[str | Path] = None
+) -> Iterator[Path]:
     """Context manager yielding a temporary worktree path."""
     handle = create_worktree(path, ref=ref, worktree_path=worktree_path)
     try:

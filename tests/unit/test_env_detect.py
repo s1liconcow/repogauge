@@ -51,7 +51,10 @@ def test_build_environment_plan_selects_first_sorted_requirements_file() -> None
             "versions": ["3.12"],
             "package_managers": ["requirements"],
         },
-        "install_hints": ["pip install -r requirements-dev.txt", "pip install -r requirements.txt"],
+        "install_hints": [
+            "pip install -r requirements-dev.txt",
+            "pip install -r requirements.txt",
+        ],
         "test_runner_hints": {"commands": []},
     }
     plan = build_environment_plan(profile)

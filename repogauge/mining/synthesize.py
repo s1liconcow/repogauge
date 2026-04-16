@@ -76,8 +76,14 @@ def _render_file_summary(file_roles: Dict[str, list[str]]) -> str:
     return " ".join(details)
 
 
-def _issue_style_statement(title: str, body: str | None, reference: str, kind: str) -> tuple[str, str]:
-    title_text = title or (body or "").strip() or f"{kind.replace('_', ' ').title()}-linked change"
+def _issue_style_statement(
+    title: str, body: str | None, reference: str, kind: str
+) -> tuple[str, str]:
+    title_text = (
+        title
+        or (body or "").strip()
+        or f"{kind.replace('_', ' ').title()}-linked change"
+    )
     body_text = body.strip() if isinstance(body, str) else ""
     parts = [
         f"Observed behavior\n- {title_text}",
@@ -145,7 +151,9 @@ def _llm_candidate(row: Dict[str, Any]) -> str:
     return _coerce_text(advisory.get("problem_statement"))
 
 
-def synthesize_problem_statement(row: Dict[str, Any], patch: str = "") -> tuple[str, str, str | None]:
+def synthesize_problem_statement(
+    row: Dict[str, Any], patch: str = ""
+) -> tuple[str, str, str | None]:
     """Return a deterministic issue-style statement, a source label, and provenance string."""
 
     issue_title = _pick_text(
@@ -159,7 +167,9 @@ def synthesize_problem_statement(row: Dict[str, Any], patch: str = "") -> tuple[
     if issue_title or issue_body:
         refs = _extract_issue_refs(row)
         ref = refs[0] if refs else _pick_ref(row, ("issue_ref", "linked_issue_ref"))
-        statement, source = _issue_style_statement(issue_title, issue_body, ref, "linked_issue")
+        statement, source = _issue_style_statement(
+            issue_title, issue_body, ref, "linked_issue"
+        )
         return statement, source, ref or None
 
     pr_title = _pick_text(
@@ -171,8 +181,17 @@ def synthesize_problem_statement(row: Dict[str, Any], patch: str = "") -> tuple[
         ("pr_body", "pull_request_body", "source_pr_body"),
     )
     if pr_title or pr_body:
-        statement, source = _issue_style_statement(pr_title, pr_body, _pick_ref(row, ("pr_ref", "pull_request_number")), "pull_request")
-        return statement, source, _pick_ref(row, ("pr_ref", "pull_request_number")) or None
+        statement, source = _issue_style_statement(
+            pr_title,
+            pr_body,
+            _pick_ref(row, ("pr_ref", "pull_request_number")),
+            "pull_request",
+        )
+        return (
+            statement,
+            source,
+            _pick_ref(row, ("pr_ref", "pull_request_number")) or None,
+        )
 
     commit_subject = _pick_text(
         row,
@@ -185,7 +204,9 @@ def synthesize_problem_statement(row: Dict[str, Any], patch: str = "") -> tuple[
     commit_statement, commit_source = _commit_style_statement(row, patch)
     llm_text = _llm_candidate(row)
     if llm_text and _is_weak_source(commit_subject, commit_body):
-        ref = _pick_ref(row, ("llm_advisory_model", "llm_model")) or _pick_text(row, ("llm_reference",))
+        ref = _pick_ref(row, ("llm_advisory_model", "llm_model")) or _pick_text(
+            row, ("llm_reference",)
+        )
         return llm_text, "llm_advisory", ref or None
 
     return commit_statement, commit_source, _pick_text(row, ("commit", "source_commit"))

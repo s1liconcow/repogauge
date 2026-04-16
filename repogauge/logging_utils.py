@@ -12,7 +12,7 @@ def setup_json_logger(path: Path, *, level: int = logging.INFO) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(path)
     handler.setLevel(level)
-    formatter = logging.Formatter('%(message)s')
+    formatter = logging.Formatter("%(message)s")
     handler.setFormatter(formatter)
 
     logging.basicConfig(level=level)

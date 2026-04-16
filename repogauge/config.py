@@ -29,7 +29,10 @@ class ContractRecord:
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
-        if self.schema_version == REPOGAUGE_SCHEMA_VERSION and "schema_version" not in payload:
+        if (
+            self.schema_version == REPOGAUGE_SCHEMA_VERSION
+            and "schema_version" not in payload
+        ):
             payload["schema_version"] = REPOGAUGE_SCHEMA_VERSION
         return payload
 
@@ -186,4 +189,6 @@ ALL_RECORD_TYPES = [
     InstanceEvalRow,
 ]
 
-__all__ = ["REPOGAUGE_SCHEMA_VERSION", "ContractState", "ContractRecord"] + [cls.__name__ for cls in ALL_RECORD_TYPES]
+__all__ = ["REPOGAUGE_SCHEMA_VERSION", "ContractState", "ContractRecord"] + [
+    cls.__name__ for cls in ALL_RECORD_TYPES
+]

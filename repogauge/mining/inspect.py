@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from configparser import ConfigParser
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 import re
 
 from repogauge.mining.signature import REPO_VERSION_UNKNOWN, build_environment_signature
@@ -47,7 +47,7 @@ def _extract_toml_value(path: Path, sections: list[str], key: str) -> str | None
 
     value = cursor.get(key)
     if isinstance(value, str):
-        cleaned = value.strip().strip('"\'')
+        cleaned = value.strip().strip("\"'")
         return cleaned if cleaned else None
     return None
 
@@ -111,7 +111,9 @@ def _parse_version_tokens(raw: str) -> list[str]:
                 values.add(f"3.{py[1:]}")
                 continue
 
-        match = re.match(r"(?P<op>>=|<=|>|<|==|=|~=)?\s*(?P<ver>3\.\d+(?:\.\d+)?)", value)
+        match = re.match(
+            r"(?P<op>>=|<=|>|<|==|=|~=)?\s*(?P<ver>3\.\d+(?:\.\d+)?)", value
+        )
         if not match:
             continue
         op = match.group("op") or "=="
@@ -123,7 +125,9 @@ def _parse_version_tokens(raw: str) -> list[str]:
 
 
 def _parse_requires_python(raw: str) -> list[str]:
-    python_lines = re.findall(r"(?m)^\s*(?:python|requires-python)\s*=\s*['\"]([^'\"]+)['\"]", raw)
+    python_lines = re.findall(
+        r"(?m)^\s*(?:python|requires-python)\s*=\s*['\"]([^'\"]+)['\"]", raw
+    )
     if not python_lines:
         return _parse_version_tokens(raw.replace(",", " "))
     versions: list[str] = []
@@ -133,7 +137,9 @@ def _parse_requires_python(raw: str) -> list[str]:
 
 
 def _detect_repo_name(repo_root: Path, warnings: list[dict]) -> str:
-    remote_result = run_command(["git", "-C", str(repo_root), "config", "--get", "remote.origin.url"])
+    remote_result = run_command(
+        ["git", "-C", str(repo_root), "config", "--get", "remote.origin.url"]
+    )
     if remote_result.success and remote_result.stdout.strip():
         remote = remote_result.stdout.strip().rstrip("/")
         remote = re.sub(r"\.git$", "", remote)
@@ -157,7 +163,9 @@ def _detect_repo_name(repo_root: Path, warnings: list[dict]) -> str:
     return repo_root.name
 
 
-def _detect_package_and_install_hints(repo_root: Path) -> tuple[list[str], list[str], list[str]]:
+def _detect_package_and_install_hints(
+    repo_root: Path,
+) -> tuple[list[str], list[str], list[str]]:
     install_hints: list[str] = []
     package_managers: list[str] = []
     hints: list[str] = []
@@ -336,15 +344,25 @@ def inspect_repository(path: str | Path) -> Dict[str, Any]:
             }
         )
 
-    package_managers, install_hints, package_hints = _detect_package_and_install_hints(repo_root_resolved)
+    package_managers, install_hints, package_hints = _detect_package_and_install_hints(
+        repo_root_resolved
+    )
     test_commands = _detect_test_runner_hints(repo_root_resolved)
     repo_version = _detect_package_version(repo_root_resolved)
 
     python_versions: list[str] = []
     if (repo_root_resolved / ".python-version").exists():
-        python_versions.extend(_parse_version_tokens(_safe_read_text(repo_root_resolved / ".python-version")))
+        python_versions.extend(
+            _parse_version_tokens(
+                _safe_read_text(repo_root_resolved / ".python-version")
+            )
+        )
     if (repo_root_resolved / "pyproject.toml").exists():
-        python_versions.extend(_parse_requires_python(_safe_read_text(repo_root_resolved / "pyproject.toml")))
+        python_versions.extend(
+            _parse_requires_python(
+                _safe_read_text(repo_root_resolved / "pyproject.toml")
+            )
+        )
 
     if (repo_root_resolved / "tox.ini").exists():
         tox_text = _safe_read_text(repo_root_resolved / "tox.ini")

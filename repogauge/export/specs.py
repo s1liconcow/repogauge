@@ -32,9 +32,13 @@ class AdapterRenderContext:
     def as_json(self) -> str:
         import json
 
-        return json.dumps({
-            "module_name": self.module_name,
-            "repository": self.repository,
-            "spec": asdict(self.spec),
-            "metadata": self.metadata,
-        }, indent=2, sort_keys=True)
+        return json.dumps(
+            {
+                "module_name": self.module_name,
+                "repository": self.repository,
+                "spec": asdict(self.spec),
+                "metadata": self.metadata,
+            },
+            indent=2,
+            sort_keys=True,
+        )

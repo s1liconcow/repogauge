@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Iterable, Optional
 
 from repogauge.config import ContractState, ReviewedCandidate
 from repogauge.mining.file_roles import classify_files
-from repogauge.llm import LlmModelSpec, TriageSuggestion, load_triage_payload, write_triage_payload
+from repogauge.llm import (
+    LlmModelSpec,
+    TriageSuggestion,
+    load_triage_payload,
+    write_triage_payload,
+)
 
 STATE_ACCEPTED = ContractState.ACCEPTED
 STATE_REJECTED = ContractState.REJECTED
@@ -24,7 +28,14 @@ LLM_ALLOW_REMOTE = "allow_remote"
 TRIAGE_CACHE_FILENAME = "triage_cache.json"
 TRIAGE_DEFAULT_MODEL_NAME = "local-policy"
 TRIAGE_DEFAULT_PROVIDER = "local"
-LOCAL_ONLY_PROVIDERS = {"local", "local-only", "offline", "builtin", "built-in", "internal"}
+LOCAL_ONLY_PROVIDERS = {
+    "local",
+    "local-only",
+    "offline",
+    "builtin",
+    "built-in",
+    "internal",
+}
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -87,7 +98,10 @@ def _extract_candidate_id(row: dict[str, Any]) -> str:
 
 
 def _candidate_subject(row: dict[str, Any]) -> str:
-    return str(row.get("commit_subject", row.get("problem_statement", "")) or row.get("repo", "")).strip()
+    return str(
+        row.get("commit_subject", row.get("problem_statement", ""))
+        or row.get("repo", "")
+    ).strip()
 
 
 def _candidate_body(row: dict[str, Any]) -> str:
@@ -158,7 +172,9 @@ def _validate_llm_policy(mode: str, model: LlmModelSpec) -> None:
         )
 
 
-def _merge_file_roles(files_by_role: dict[str, list[str]], suggested: dict[str, list[str]]) -> dict[str, list[str]]:
+def _merge_file_roles(
+    files_by_role: dict[str, list[str]], suggested: dict[str, list[str]]
+) -> dict[str, list[str]]:
     merged = {role: sorted(set(paths)) for role, paths in files_by_role.items()}
     for role, paths in suggested.items():
         existing = merged.setdefault(role, [])
@@ -169,7 +185,9 @@ def _merge_file_roles(files_by_role: dict[str, list[str]], suggested: dict[str, 
     return merged
 
 
-def _default_triage_suggestion(row: dict[str, Any], candidate_id: str) -> TriageSuggestion:
+def _default_triage_suggestion(
+    row: dict[str, Any], candidate_id: str
+) -> TriageSuggestion:
     files = [str(value) for value in row.get("files_touched", [])]
     file_roles = _file_roles(files)
     subject = _candidate_subject(row)
@@ -221,22 +239,28 @@ def _load_llm_artifacts(
     return cache_hints, source_hints, triage_model
 
 
-def _render_score_breakdown(score_breakdown: list[dict[str, Any]], score: float) -> list[str]:
+def _render_score_breakdown(
+    score_breakdown: list[dict[str, Any]], score: float
+) -> list[str]:
     from repogauge.mining.score import AUTO_SHORTLIST_THRESHOLD, REVIEW_THRESHOLD
 
     lines: list[str] = []
     if not score_breakdown:
         return lines
     band_label = (
-        f"shortlist (≥{AUTO_SHORTLIST_THRESHOLD})" if score >= AUTO_SHORTLIST_THRESHOLD
-        else f"review (≥{REVIEW_THRESHOLD})" if score >= REVIEW_THRESHOLD
+        f"shortlist (≥{AUTO_SHORTLIST_THRESHOLD})"
+        if score >= AUTO_SHORTLIST_THRESHOLD
+        else f"review (≥{REVIEW_THRESHOLD})"
+        if score >= REVIEW_THRESHOLD
         else f"reject (<{REVIEW_THRESHOLD})"
     )
     lines.append(f"- Score breakdown: **{score:.2f}** → {band_label}")
     for entry in score_breakdown:
         weight = entry.get("weight", 0)
         sign = "+" if weight >= 0 else ""
-        lines.append(f"  - `{sign}{weight}` **{entry.get('component', '?')}**: {entry.get('reason', '')}")
+        lines.append(
+            f"  - `{sign}{weight}` **{entry.get('component', '?')}**: {entry.get('reason', '')}"
+        )
     return lines
 
 
@@ -269,7 +293,11 @@ def _render_markdown(records: list[dict[str, Any]]) -> str:
         issue_refs = row["issue_refs"]
         if issue_refs:
             lines.append(f"- Linked references: {', '.join(issue_refs)}")
-        score_breakdown = row.get("reviewed_record", {}).get("metadata", {}).get("score_breakdown", [])
+        score_breakdown = (
+            row.get("reviewed_record", {})
+            .get("metadata", {})
+            .get("score_breakdown", [])
+        )
         lines.extend(_render_score_breakdown(score_breakdown, row["heuristic_score"]))
         lines.append("- Files by role:")
         for role, files in row["file_roles"].items():
@@ -316,13 +344,20 @@ def _render_html(records: list[dict[str, Any]]) -> str:
 
         score = row["heuristic_score"]
         if score >= AUTO_SHORTLIST_THRESHOLD:
-            band_css, band_label = "band-shortlist", f"shortlist (≥{AUTO_SHORTLIST_THRESHOLD})"
+            band_css, band_label = (
+                "band-shortlist",
+                f"shortlist (≥{AUTO_SHORTLIST_THRESHOLD})",
+            )
         elif score >= REVIEW_THRESHOLD:
             band_css, band_label = "band-review", f"review (≥{REVIEW_THRESHOLD})"
         else:
             band_css, band_label = "band-reject", f"reject (&lt;{REVIEW_THRESHOLD})"
 
-        score_breakdown = row.get("reviewed_record", {}).get("metadata", {}).get("score_breakdown", [])
+        score_breakdown = (
+            row.get("reviewed_record", {})
+            .get("metadata", {})
+            .get("score_breakdown", [])
+        )
         breakdown_html = ""
         if score_breakdown:
             items = []
@@ -332,8 +367,8 @@ def _render_html(records: list[dict[str, Any]]) -> str:
                 css = "pos" if w >= 0 else "neg"
                 items.append(
                     f"<li><span class='{css}'>{sign}{w}</span> "
-                    f"<strong>{entry.get('component','?')}</strong>: "
-                    f"{entry.get('reason','')}</li>"
+                    f"<strong>{entry.get('component', '?')}</strong>: "
+                    f"{entry.get('reason', '')}</li>"
                 )
             breakdown_html = f"<ul class='breakdown'>{''.join(items)}</ul>"
 
@@ -360,22 +395,40 @@ def _coerce_score(row: dict[str, Any]) -> float:
         return 0.0
 
 
-def _run_decision(row: dict[str, Any], decision: Optional[dict[str, Any]]) -> tuple[str, str | None, str]:
+def _run_decision(
+    row: dict[str, Any], decision: Optional[dict[str, Any]]
+) -> tuple[str, str | None, str]:
     source_state = str(row.get("review_state") or row.get("state") or STATE_OPEN.value)
     if decision:
         requested = _normalize_decision_state(decision.get("state"))
         if requested in {STATE_ACCEPTED.value, STATE_REJECTED.value}:
-            return requested, str(decision.get("reason") or ""), str(decision.get("reviewer_notes") or "")
+            return (
+                requested,
+                str(decision.get("reason") or ""),
+                str(decision.get("reviewer_notes") or ""),
+            )
         if requested == STATE_OPEN.value:
-            return STATE_OPEN.value, str(decision.get("reason") or ""), str(decision.get("reviewer_notes") or "")
+            return (
+                STATE_OPEN.value,
+                str(decision.get("reason") or ""),
+                str(decision.get("reviewer_notes") or ""),
+            )
 
     if source_state in {STATE_ACCEPTED.value, STATE_REJECTED.value, STATE_OPEN.value}:
         return source_state, None, ""
 
     if _extract_decision_band(row) == "shortlist":
-        return STATE_ACCEPTED.value, "Auto-accepted from shortlist", "Auto-generated acceptance"
+        return (
+            STATE_ACCEPTED.value,
+            "Auto-accepted from shortlist",
+            "Auto-generated acceptance",
+        )
 
-    return STATE_REJECTED.value, "Auto-rejected (not in shortlist)", "No manual decision provided"
+    return (
+        STATE_REJECTED.value,
+        "Auto-rejected (not in shortlist)",
+        "No manual decision provided",
+    )
 
 
 def run_review(
@@ -394,7 +447,15 @@ def run_review(
 
     decisions = _load_decisions(decisions_path)
     mode = _coerce_llm_mode(llm_mode)
-    triage_cache, triage_source, triage_model = ({}, {}, LlmModelSpec(model_name=llm_model_name or TRIAGE_DEFAULT_MODEL_NAME, provider=llm_provider or TRIAGE_DEFAULT_PROVIDER, prompt_version="triage/v1"))
+    triage_cache, triage_source, triage_model = (
+        {},
+        {},
+        LlmModelSpec(
+            model_name=llm_model_name or TRIAGE_DEFAULT_MODEL_NAME,
+            provider=llm_provider or TRIAGE_DEFAULT_PROVIDER,
+            prompt_version="triage/v1",
+        ),
+    )
     if mode != LLM_OFF:
         triage_cache, triage_source, triage_model = _load_llm_artifacts(
             out_root=out_root,
@@ -449,7 +510,9 @@ def run_review(
         metadata.update(
             {
                 "decision_source": "script" if decision else "default",
-                "original_state": str(row.get("review_state", row.get("state", STATE_OPEN.value))),
+                "original_state": str(
+                    row.get("review_state", row.get("state", STATE_OPEN.value))
+                ),
                 "heuristic_score": score,
                 "decision_band": decision_band,
                 "candidate_id": candidate_id,
@@ -465,9 +528,15 @@ def run_review(
                     "suggested_state": triage_hint.state if triage_hint else None,
                     "applied": triage_hint is not None,
                     "reason": triage_hint.reason if triage_hint else None,
-                    "reviewer_notes": triage_hint.reviewer_notes if triage_hint else None,
-                    "problem_statement": triage_hint.suggested_problem_statement if triage_hint else None,
-                    "file_roles_hint": triage_hint.suggested_file_roles if triage_hint else None,
+                    "reviewer_notes": triage_hint.reviewer_notes
+                    if triage_hint
+                    else None,
+                    "problem_statement": triage_hint.suggested_problem_statement
+                    if triage_hint
+                    else None,
+                    "file_roles_hint": triage_hint.suggested_file_roles
+                    if triage_hint
+                    else None,
                     "confidence": triage_hint.confidence if triage_hint else None,
                 },
             }
@@ -500,10 +569,18 @@ def run_review(
 
     out_root.mkdir(parents=True, exist_ok=True)
     if mode != LLM_OFF:
-        write_triage_payload(out_root / TRIAGE_CACHE_FILENAME, triage_model, triage_hints)
+        write_triage_payload(
+            out_root / TRIAGE_CACHE_FILENAME, triage_model, triage_hints
+        )
 
     reviewed_path = out_root / "reviewed.jsonl"
-    reviewed_path.write_text("".join(json.dumps(row["reviewed_record"], sort_keys=True) + "\n" for row in prepared_rows), encoding="utf-8")
+    reviewed_path.write_text(
+        "".join(
+            json.dumps(row["reviewed_record"], sort_keys=True) + "\n"
+            for row in prepared_rows
+        ),
+        encoding="utf-8",
+    )
 
     md_path = out_root / "review.md"
     html_path = out_root / "review.html"

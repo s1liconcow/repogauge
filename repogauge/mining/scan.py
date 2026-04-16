@@ -9,7 +9,12 @@ from repogauge.config import ScanRow
 from repogauge.exec import run_command
 from repogauge.mining.score import score_scan_commit
 from repogauge.mining.file_roles import classify_files
-from repogauge.utils.git import get_default_branch, get_repo_root, extract_commit_diff, list_commit_parents
+from repogauge.utils.git import (
+    get_default_branch,
+    get_repo_root,
+    extract_commit_diff,
+    list_commit_parents,
+)
 
 
 _RECORD_SEPARATOR = "\x1f"
@@ -42,7 +47,9 @@ def _list_commit_shas(
         output = _run_git_command(repo_root, command)
     except RuntimeError as exc:
         if commit_range:
-            raise RuntimeError(f"failed scanning commit range {commit_range}: {exc}") from exc
+            raise RuntimeError(
+                f"failed scanning commit range {commit_range}: {exc}"
+            ) from exc
 
         # Empty repos have no branch tip commit object; keep behavior permissive.
         return []
@@ -69,9 +76,32 @@ def _extract_changed_paths_and_hunks(
     commit: str,
 ) -> tuple[list[str], int, bool, int]:
     if parent is None:
-        name_status_cmd = ["diff-tree", "--no-commit-id", "--name-status", "-r", "--find-renames", "--root", commit]
-        numstat_cmd = ["diff", "--no-color", "--numstat", "--find-renames", "--find-copies", "--root", commit]
-        patch_cmd = ["diff", "--no-color", "--find-renames", "--find-copies", "--root", commit]
+        name_status_cmd = [
+            "diff-tree",
+            "--no-commit-id",
+            "--name-status",
+            "-r",
+            "--find-renames",
+            "--root",
+            commit,
+        ]
+        numstat_cmd = [
+            "diff",
+            "--no-color",
+            "--numstat",
+            "--find-renames",
+            "--find-copies",
+            "--root",
+            commit,
+        ]
+        patch_cmd = [
+            "diff",
+            "--no-color",
+            "--find-renames",
+            "--find-copies",
+            "--root",
+            commit,
+        ]
     else:
         name_status_cmd = [
             "diff-tree",
@@ -136,7 +166,11 @@ def _extract_changed_paths_and_hunks(
 
     patch = _run_git_command(repo_root, patch_cmd)
     n_hunks = len([line for line in patch.splitlines() if _HUNK_RE.match(line)])
-    has_rename_only = bool(statuses) and all(status.startswith(("R", "C")) for status in statuses) and changed_lines == 0
+    has_rename_only = (
+        bool(statuses)
+        and all(status.startswith(("R", "C")) for status in statuses)
+        and changed_lines == 0
+    )
     return files_touched, n_hunks, has_rename_only, changed_lines
 
 
@@ -164,14 +198,22 @@ def _build_scan_row(
     parents = list_commit_parents(repo_root, commit)
     subject, body, author_date = _read_commit_metadata(repo_root, commit)
     is_revert = "revert" in subject.lower() or "revert" in body.lower()
-    files_touched, n_hunks, has_rename_only, changed_lines = _extract_changed_paths_and_hunks(
-        repo_root,
-        parent=str(parents[0]) if parents else None,
-        commit=commit,
+    files_touched, n_hunks, has_rename_only, changed_lines = (
+        _extract_changed_paths_and_hunks(
+            repo_root,
+            parent=str(parents[0]) if parents else None,
+            commit=commit,
+        )
     )
     files_touched = sorted(set(files_touched))
     file_counts = _classify_file_counts(files_touched)
-    diff = extract_commit_diff(repo_root, left=str(parents[0]) if parents else commit, right=commit) if parents else extract_commit_diff(repo_root, left=commit, right=commit)
+    diff = (
+        extract_commit_diff(
+            repo_root, left=str(parents[0]) if parents else commit, right=commit
+        )
+        if parents
+        else extract_commit_diff(repo_root, left=commit, right=commit)
+    )
     if not parents:
         root_diff = _run_git_command(
             repo_root,

@@ -87,7 +87,9 @@ def _resolve_base_commit(repo_root: Path, commit: str, row: Dict[str, Any]) -> s
     return parents[0]
 
 
-def _extract_candidate_metadata(row: Dict[str, Any], patch: str, base_commit: str) -> Dict[str, Any]:
+def _extract_candidate_metadata(
+    row: Dict[str, Any], patch: str, base_commit: str
+) -> Dict[str, Any]:
     metadata = dict(row.get("metadata", {}))
     split_prod, split_test, split_meta = split_prod_and_test(patch)
     metadata.update(
@@ -166,7 +168,9 @@ def _materialize_candidate(
                 prod_patch="",
                 status="rejected",
                 reason="non_single_parent",
-                metadata={"reason": f"commit has {actual_parent_count} parent(s), expected 1"},
+                metadata={
+                    "reason": f"commit has {actual_parent_count} parent(s), expected 1"
+                },
             )
 
     base_commit = _resolve_base_commit(repo_root, commit, row)
@@ -387,7 +391,10 @@ def run_materialization(
         elif rejected is not None:
             rejected_rows.append(rejected.to_dict())
 
-    ready_path.write_text("".join(json.dumps(item, sort_keys=True) + "\n" for item in ready_rows), encoding="utf-8")
+    ready_path.write_text(
+        "".join(json.dumps(item, sort_keys=True) + "\n" for item in ready_rows),
+        encoding="utf-8",
+    )
     rejected_path.write_text(
         "".join(json.dumps(item, sort_keys=True) + "\n" for item in rejected_rows),
         encoding="utf-8",

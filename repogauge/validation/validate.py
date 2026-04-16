@@ -29,13 +29,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from repogauge.exec import run_command
-from repogauge.utils.git import apply_patch_text, create_worktree, remove_worktree
-from repogauge.validation.junit_parser import JUnitParseError, OUTCOME_PASS, parse_junit_xml
+from repogauge.utils.git import apply_patch_text, create_worktree
+from repogauge.validation.junit_parser import (
+    JUnitParseError,
+    OUTCOME_PASS,
+    parse_junit_xml,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
@@ -75,7 +80,11 @@ def _test_files_from_patch(patch: str) -> List[str]:
 
 def _resolve_test_cmd(test_cmd_base: str) -> List[str]:
     """Split *test_cmd_base* into argv, replacing bare 'python' tokens with sys.executable."""
-    parts = shlex.split(test_cmd_base) if test_cmd_base.strip() else ["python", "-m", "pytest"]
+    parts = (
+        shlex.split(test_cmd_base)
+        if test_cmd_base.strip()
+        else ["python", "-m", "pytest"]
+    )
     if parts and re.match(r"^python3?(\.\d+)?$", parts[0]):
         parts[0] = sys.executable
     return parts
@@ -96,13 +105,19 @@ def _run_pytest(
     ``test_cmd_base`` is taken from the adapter spec when available.
     """
     env = {**os.environ, "PYTHONPATH": str(worktree)}
-    cmd = _resolve_test_cmd(test_cmd_base) + [
-        "--tb=no",
-        "-q",
-        f"--junit-xml={junit_xml}",
-    ] + (test_files if test_files else [])
+    cmd = (
+        _resolve_test_cmd(test_cmd_base)
+        + [
+            "--tb=no",
+            "-q",
+            f"--junit-xml={junit_xml}",
+        ]
+        + (test_files if test_files else [])
+    )
 
-    result = run_command(cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds)
+    result = run_command(
+        cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
+    )
     raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
 
     if not junit_xml.exists():
@@ -130,16 +145,16 @@ def _derive_test_lists(
     all_ids = set(run_b) | set(run_c)
 
     ftp = sorted(
-        tid for tid in all_ids
+        tid
+        for tid in all_ids
         # "absent" (None) covers collection errors and newly-added tests that couldn't
         # be collected at base_commit because the implementation didn't exist yet.
-        if run_b.get(tid) in {"fail", "error", None}
-        and run_c.get(tid) == OUTCOME_PASS
+        if run_b.get(tid) in {"fail", "error", None} and run_c.get(tid) == OUTCOME_PASS
     )
     ptp = sorted(
-        tid for tid in all_ids
-        if run_b.get(tid) == OUTCOME_PASS
-        and run_c.get(tid) == OUTCOME_PASS
+        tid
+        for tid in all_ids
+        if run_b.get(tid) == OUTCOME_PASS and run_c.get(tid) == OUTCOME_PASS
     )
 
     # If the dataset already has declared lists, restrict to those subsets.
@@ -151,7 +166,9 @@ def _derive_test_lists(
     return ftp, ptp
 
 
-def _is_resolved(ftp: List[str], run_c: Dict[str, str], declared_ftp: List[str]) -> bool:
+def _is_resolved(
+    ftp: List[str], run_c: Dict[str, str], declared_ftp: List[str]
+) -> bool:
     """Return True when the prediction resolves the instance."""
     if declared_ftp:
         return all(run_c.get(t) == OUTCOME_PASS for t in declared_ftp)
@@ -162,6 +179,7 @@ def _is_resolved(ftp: List[str], run_c: Dict[str, str], declared_ftp: List[str])
 # ---------------------------------------------------------------------------
 # Per-instance evaluation
 # ---------------------------------------------------------------------------
+
 
 def _eval_instance(
     *,
@@ -272,6 +290,7 @@ def _eval_instance(
 # Public entry point
 # ---------------------------------------------------------------------------
 
+
 def run_eval(
     *,
     dataset_path: Path,
@@ -296,6 +315,7 @@ def run_eval(
     """
     if repo_root is None:
         from repogauge.export.materialize import _normalize_repo_root
+
         repo_root = _normalize_repo_root(dataset_path)
 
     dataset_rows = _read_jsonl(dataset_path)
@@ -313,15 +333,17 @@ def run_eval(
         pred = pred_by_id.get(iid)
         if pred is None:
             skipped_count += 1
-            results.append({
-                "instance_id": iid,
-                "status": "skipped",
-                "error": "no matching prediction",
-                "resolved": False,
-                "FAIL_TO_PASS": ds.get("FAIL_TO_PASS", []),
-                "PASS_TO_PASS": ds.get("PASS_TO_PASS", []),
-                "metadata": {},
-            })
+            results.append(
+                {
+                    "instance_id": iid,
+                    "status": "skipped",
+                    "error": "no matching prediction",
+                    "resolved": False,
+                    "FAIL_TO_PASS": ds.get("FAIL_TO_PASS", []),
+                    "PASS_TO_PASS": ds.get("PASS_TO_PASS", []),
+                    "metadata": {},
+                }
+            )
             continue
 
         outcome = _eval_instance(
@@ -340,21 +362,23 @@ def run_eval(
         elif outcome["resolved"]:
             resolved_count += 1
 
-        results.append({
-            "instance_id": iid,
-            "status": outcome["status"],
-            "error": outcome["error"],
-            "resolved": outcome["resolved"],
-            "FAIL_TO_PASS": outcome["FAIL_TO_PASS"],
-            "PASS_TO_PASS": outcome["PASS_TO_PASS"],
-            "metadata": {
-                "base_commit": ds["base_commit"],
-                "run_b_count": len(outcome["run_b"]),
-                "run_c_count": len(outcome["run_c"]),
-                "log_b": outcome["log_b"][-2000:],
-                "log_c": outcome["log_c"][-2000:],
-            },
-        })
+        results.append(
+            {
+                "instance_id": iid,
+                "status": outcome["status"],
+                "error": outcome["error"],
+                "resolved": outcome["resolved"],
+                "FAIL_TO_PASS": outcome["FAIL_TO_PASS"],
+                "PASS_TO_PASS": outcome["PASS_TO_PASS"],
+                "metadata": {
+                    "base_commit": ds["base_commit"],
+                    "run_b_count": len(outcome["run_b"]),
+                    "run_c_count": len(outcome["run_c"]),
+                    "log_b": outcome["log_b"][-2000:],
+                    "log_c": outcome["log_c"][-2000:],
+                },
+            }
+        )
 
     validation_path.write_text(
         "".join(json.dumps(r, sort_keys=True) + "\n" for r in results),

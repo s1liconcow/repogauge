@@ -22,7 +22,9 @@ def _write_xml(path: Path, content: str) -> Path:
 
 class TestParseJunitXml:
     def test_passes_failures_and_errors_are_classified(self, tmp_path):
-        xml = _write_xml(tmp_path / "results.xml", """\
+        xml = _write_xml(
+            tmp_path / "results.xml",
+            """\
             <?xml version="1.0" encoding="utf-8"?>
             <testsuites>
               <testsuite name="pytest">
@@ -38,7 +40,8 @@ class TestParseJunitXml:
                 </testcase>
               </testsuite>
             </testsuites>
-        """)
+        """,
+        )
         results = parse_junit_xml(xml)
         assert results["tests/unit/test_foo.py::test_pass"] == OUTCOME_PASS
         assert results["tests/unit/test_foo.py::test_fail"] == OUTCOME_FAIL
@@ -46,37 +49,46 @@ class TestParseJunitXml:
         assert results["tests/unit/test_foo.py::test_skip"] == OUTCOME_SKIP
 
     def test_bare_testsuite_root(self, tmp_path):
-        xml = _write_xml(tmp_path / "results.xml", """\
+        xml = _write_xml(
+            tmp_path / "results.xml",
+            """\
             <?xml version="1.0" encoding="utf-8"?>
             <testsuite name="pytest">
               <testcase classname="tests.test_bar" name="test_something"/>
             </testsuite>
-        """)
+        """,
+        )
         results = parse_junit_xml(xml)
         assert "tests/test_bar.py::test_something" in results
         assert results["tests/test_bar.py::test_something"] == OUTCOME_PASS
 
     def test_parametrized_test_ids_are_preserved(self, tmp_path):
-        xml = _write_xml(tmp_path / "results.xml", """\
+        xml = _write_xml(
+            tmp_path / "results.xml",
+            """\
             <?xml version="1.0" encoding="utf-8"?>
             <testsuite>
               <testcase classname="tests.test_params" name="test_add[1-2-3]"/>
               <testcase classname="tests.test_params" name="test_add[0-0-0]"/>
             </testsuite>
-        """)
+        """,
+        )
         results = parse_junit_xml(xml)
         assert "tests/test_params.py::test_add[1-2-3]" in results
         assert "tests/test_params.py::test_add[0-0-0]" in results
 
     def test_classname_with_class_produces_three_part_id(self, tmp_path):
         # pytest encodes class-based tests as module.path.ClassName in classname
-        xml = _write_xml(tmp_path / "results.xml", """\
+        xml = _write_xml(
+            tmp_path / "results.xml",
+            """\
             <?xml version="1.0" encoding="utf-8"?>
             <testsuite>
               <testcase classname="tests.unit.test_foo.TestSuite" name="test_method"/>
               <testcase classname="tests.unit.test_foo" name="test_standalone"/>
             </testsuite>
-        """)
+        """,
+        )
         results = parse_junit_xml(xml)
         assert "tests/unit/test_foo.py::TestSuite::test_method" in results
         assert "tests/unit/test_foo.py::test_standalone" in results
@@ -104,19 +116,24 @@ class TestParseJunitXml:
             parse_junit_xml(f)
 
     def test_testcase_without_name_is_skipped(self, tmp_path):
-        xml = _write_xml(tmp_path / "results.xml", """\
+        xml = _write_xml(
+            tmp_path / "results.xml",
+            """\
             <?xml version="1.0" encoding="utf-8"?>
             <testsuite>
               <testcase classname="tests.test_foo" name=""/>
               <testcase classname="tests.test_foo" name="test_real"/>
             </testsuite>
-        """)
+        """,
+        )
         results = parse_junit_xml(xml)
         assert len(results) == 1
         assert "tests/test_foo.py::test_real" in results
 
     def test_multiple_suites_are_merged(self, tmp_path):
-        xml = _write_xml(tmp_path / "results.xml", """\
+        xml = _write_xml(
+            tmp_path / "results.xml",
+            """\
             <?xml version="1.0" encoding="utf-8"?>
             <testsuites>
               <testsuite name="suite1">
@@ -128,7 +145,8 @@ class TestParseJunitXml:
                 </testcase>
               </testsuite>
             </testsuites>
-        """)
+        """,
+        )
         results = parse_junit_xml(xml)
         assert results["tests/a.py::test_x"] == OUTCOME_PASS
         assert results["tests/b.py::test_y"] == OUTCOME_FAIL

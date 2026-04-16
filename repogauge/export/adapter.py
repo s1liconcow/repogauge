@@ -19,12 +19,15 @@ from typing import Any, Dict
 # Spec serialisation
 # ---------------------------------------------------------------------------
 
+
 def _safe_module_name(repo: str) -> str:
     """Turn ``owner/repo`` into a valid Python identifier ``owner__repo``."""
     return re.sub(r"[^a-zA-Z0-9]", "_", repo)
 
 
-def build_adapter_spec(repo_name: str, environment_plan: Dict[str, Any]) -> Dict[str, Any]:
+def build_adapter_spec(
+    repo_name: str, environment_plan: Dict[str, Any]
+) -> Dict[str, Any]:
     """Build a serialisable adapter spec dict from a repo name and env plan."""
     return {
         "repo": repo_name,
@@ -91,6 +94,7 @@ def _render_adapter(spec: Dict[str, Any]) -> str:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+
 def generate_adapter(
     repo_name: str,
     environment_plan: Dict[str, Any],
@@ -105,7 +109,9 @@ def generate_adapter(
     spec = build_adapter_spec(repo_name, environment_plan)
 
     specs_path = out_root / "specs.json"
-    specs_path.write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    specs_path.write_text(
+        json.dumps(spec, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     adapter_path = out_root / f"adapter_{_safe_module_name(repo_name)}.py"
     adapter_path.write_text(_render_adapter(spec), encoding="utf-8")

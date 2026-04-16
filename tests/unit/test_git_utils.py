@@ -70,6 +70,9 @@ def test_commit_diff_and_patch_round_trip(tmp_path: Path):
 def test_scoped_worktree_path_cleanup(tmp_path: Path):
     repo = _repo(tmp_path)
     with scoped_worktree(repo) as worktree:
-        assert (worktree / "hello.txt").read_text(encoding="utf-8") in {"first\n", "second\n"}
+        assert (worktree / "hello.txt").read_text(encoding="utf-8") in {
+            "first\n",
+            "second\n",
+        }
         tracked = os.path.abspath(str(worktree))
     assert not os.path.exists(tracked)

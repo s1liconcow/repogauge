@@ -1,7 +1,13 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from repogauge.llm import LlmModelSpec, TriageSuggestion, load_triage_payload, parse_triage_payload, write_triage_payload
+from repogauge.llm import (
+    LlmModelSpec,
+    TriageSuggestion,
+    load_triage_payload,
+    parse_triage_payload,
+    write_triage_payload,
+)
 
 
 def _sample_model() -> tuple[LlmModelSpec, dict[str, TriageSuggestion]]:
@@ -17,7 +23,10 @@ def _sample_model() -> tuple[LlmModelSpec, dict[str, TriageSuggestion]]:
                 "state": "accepted",
                 "reason": "Looks good",
                 "suggested_problem_statement": "Fixes regression in parser.",
-                "suggested_file_roles": {"prod": ["src/parser.py"], "test": ["tests/test_parser.py"]},
+                "suggested_file_roles": {
+                    "prod": ["src/parser.py"],
+                    "test": ["tests/test_parser.py"],
+                },
                 "confidence": 0.9,
             },
             {
@@ -32,7 +41,9 @@ def _sample_model() -> tuple[LlmModelSpec, dict[str, TriageSuggestion]]:
             },
         ],
     }
-    return parse_triage_payload(payload, default_name="fallback", default_provider="fallback")
+    return parse_triage_payload(
+        payload, default_name="fallback", default_provider="fallback"
+    )
 
 
 def test_parse_triage_payload_strips_invalid_hints_and_keeps_valid():
@@ -59,4 +70,3 @@ def test_triage_cache_round_trip():
         assert reloaded_model.model_name == "advisor-unit"
         assert reloaded_model.provider == "local"
         assert reloaded_hints.keys() == hints.keys()
-

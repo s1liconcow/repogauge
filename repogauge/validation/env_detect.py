@@ -7,7 +7,7 @@ consumed by later deterministic validation stages.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable
 
 
 _DEFAULT_PYTHON_VERSION = "3.11"
@@ -53,7 +53,9 @@ def _version_tuple(v: str) -> tuple[int, ...]:
         return (999,)
 
 
-def _choose_python_version(versions: list[str], provenance: list[str]) -> tuple[str, float]:
+def _choose_python_version(
+    versions: list[str], provenance: list[str]
+) -> tuple[str, float]:
     if not versions:
         provenance.append("python_version:default-3.11")
         return _DEFAULT_PYTHON_VERSION, 0.75
@@ -69,7 +71,9 @@ def _choose_python_version(versions: list[str], provenance: list[str]) -> tuple[
     return normalized[0], 1.0
 
 
-def _build_test_command(test_commands: list[str], provenance: list[str]) -> tuple[str, float, str]:
+def _build_test_command(
+    test_commands: list[str], provenance: list[str]
+) -> tuple[str, float, str]:
     if "pytest" in test_commands:
         provenance.append("test_runner:pytest")
         return "pytest", 1.0, "pytest"
@@ -114,7 +118,9 @@ def _build_install_commands(
         return ["pip install -e ."], build, 0.88, "setuptools"
 
     requirements_commands = [
-        hint for hint in install_hints if hint.startswith("pip install -r ") and "requirements" in hint
+        hint
+        for hint in install_hints
+        if hint.startswith("pip install -r ") and "requirements" in hint
     ]
     if requirements_commands:
         # Do not blindly run every requirements file; prefer a single deterministic file.
@@ -134,13 +140,17 @@ def _build_install_commands(
 _SELF_MANAGING_INSTALL_PREFIXES = ("poetry install", "uv sync", "pipenv install")
 
 
-def _augment_for_pytest(install: list[str], test_cmd_base: str, provenance: list[str], confidence: float) -> tuple[list[str], float]:
+def _augment_for_pytest(
+    install: list[str], test_cmd_base: str, provenance: list[str], confidence: float
+) -> tuple[list[str], float]:
     if test_cmd_base not in {"pytest", "python -m pytest"}:
         return install, confidence
 
     # Package managers like poetry, uv, and pipenv install dev dependencies
     # (including pytest) automatically; no separate pip install step is needed.
-    if any(cmd.startswith(p) for cmd in install for p in _SELF_MANAGING_INSTALL_PREFIXES):
+    if any(
+        cmd.startswith(p) for cmd in install for p in _SELF_MANAGING_INSTALL_PREFIXES
+    ):
         return install, confidence
 
     has_pytest_hint = any("pytest" in command for command in install)
@@ -166,7 +176,9 @@ def build_environment_plan(profile: Any) -> EnvPlan:
     provenance: list[str] = []
     python_version, python_confidence = _choose_python_version(versions, provenance)
 
-    test_cmd_base, test_confidence, test_name = _build_test_command(test_commands, provenance)
+    test_cmd_base, test_confidence, test_name = _build_test_command(
+        test_commands, provenance
+    )
     install, build_cmds, install_confidence, install_name = _build_install_commands(
         package_managers,
         install_hints,
@@ -180,7 +192,9 @@ def build_environment_plan(profile: Any) -> EnvPlan:
         install_confidence,
     )
 
-    confidence = min(1.0, (python_confidence + test_confidence + adjusted_install_confidence) / 3.0)
+    confidence = min(
+        1.0, (python_confidence + test_confidence + adjusted_install_confidence) / 3.0
+    )
     strategy_name = f"{install_name}:{test_name}"
 
     return EnvPlan(

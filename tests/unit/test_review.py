@@ -19,7 +19,10 @@ def _write_candidates(path: Path) -> list[str]:
             changed_lines=10,
             heuristic_score=9.2,
             state="shortlist",
-            metadata={"decision_band": "shortlist", "score_breakdown": [{"component": "tests", "points": 4.2}]},
+            metadata={
+                "decision_band": "shortlist",
+                "score_breakdown": [{"component": "tests", "points": 4.2}],
+            },
         ).to_dict(),
         ScanRow(
             id="owner__repo-rg-b222",
@@ -31,7 +34,10 @@ def _write_candidates(path: Path) -> list[str]:
             changed_lines=8,
             heuristic_score=4.0,
             state="discovered",
-            metadata={"decision_band": "review", "score_breakdown": [{"component": "low_confidence", "points": 2.2}]},
+            metadata={
+                "decision_band": "review",
+                "score_breakdown": [{"component": "low_confidence", "points": 2.2}],
+            },
         ).to_dict(),
     ]
     with path.open("w", encoding="utf-8") as handle:
@@ -57,7 +63,9 @@ def _write_triage_hints(path: Path, candidate_id: str, payload: dict) -> None:
     path.write_text(json.dumps(triage_payload), encoding="utf-8")
 
 
-def _write_triage_hints_with_provider(path: Path, candidate_id: str, payload: dict, *, provider: str) -> None:
+def _write_triage_hints_with_provider(
+    path: Path, candidate_id: str, payload: dict, *, provider: str
+) -> None:
     triage_payload = {
         "model": {
             "model_name": "advisor-unit-1",
@@ -90,7 +98,11 @@ class TestReviewCommand(unittest.TestCase):
             self.assertTrue(markdown.exists())
             self.assertTrue(html.exists())
 
-            reviewed_rows = [json.loads(line) for line in reviewed.read_text(encoding="utf-8").splitlines() if line]
+            reviewed_rows = [
+                json.loads(line)
+                for line in reviewed.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
             self.assertEqual(len(reviewed_rows), 2)
             by_id = {row["candidate_id"]: row for row in reviewed_rows}
             self.assertEqual(by_id[candidate_ids[0]]["state"], "accepted")
@@ -120,18 +132,26 @@ class TestReviewCommand(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            exit_code = main(["review", str(candidates_path), "--decisions", str(decisions_path)])
+            exit_code = main(
+                ["review", str(candidates_path), "--decisions", str(decisions_path)]
+            )
             self.assertEqual(exit_code, 0)
 
             reviewed = root / "reviewed.jsonl"
-            reviewed_rows = [json.loads(line) for line in reviewed.read_text(encoding="utf-8").splitlines() if line]
+            reviewed_rows = [
+                json.loads(line)
+                for line in reviewed.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
             by_id = {row["candidate_id"]: row for row in reviewed_rows}
             accepted = by_id["owner__repo-rg-b222"]
             self.assertEqual(accepted["state"], "accepted")
             self.assertEqual(accepted["reason"], "manual include")
             self.assertTrue(accepted["metadata"]["force_include"])
 
-    def test_review_command_accepts_advisory_triage_without_overriding_state(self) -> None:
+    def test_review_command_accepts_advisory_triage_without_overriding_state(
+        self,
+    ) -> None:
         with TemporaryDirectory() as workspace:
             root = Path(workspace)
             candidates_path = root / "candidates.jsonl"
@@ -165,14 +185,23 @@ class TestReviewCommand(unittest.TestCase):
             self.assertEqual(exit_code, 0)
 
             reviewed = root / "reviewed.jsonl"
-            reviewed_rows = [json.loads(line) for line in reviewed.read_text(encoding="utf-8").splitlines() if line]
+            reviewed_rows = [
+                json.loads(line)
+                for line in reviewed.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
             by_id = {row["candidate_id"]: row for row in reviewed_rows}
             self.assertEqual(by_id[candidate_ids[1]]["state"], "rejected")
             advisory = by_id[candidate_ids[1]]["metadata"]["llm_advisory"]
             self.assertTrue(advisory["enabled"])
             self.assertEqual(advisory["suggested_state"], "accepted")
-            self.assertEqual(by_id[candidate_ids[1]]["metadata"]["source_subject"], "Manual statement for review")
-            self.assertEqual(advisory["problem_statement"], "Manual statement for review")
+            self.assertEqual(
+                by_id[candidate_ids[1]]["metadata"]["source_subject"],
+                "Manual statement for review",
+            )
+            self.assertEqual(
+                advisory["problem_statement"], "Manual statement for review"
+            )
             self.assertTrue((root / "triage_cache.json").exists())
 
     def test_review_rejects_remote_provider_in_local_only_mode(self) -> None:
@@ -235,7 +264,11 @@ class TestReviewCommand(unittest.TestCase):
             self.assertEqual(exit_code, 0)
 
             reviewed = root / "reviewed.jsonl"
-            reviewed_rows = [json.loads(line) for line in reviewed.read_text(encoding="utf-8").splitlines() if line]
+            reviewed_rows = [
+                json.loads(line)
+                for line in reviewed.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
             self.assertEqual(len(reviewed_rows), 2)
             model_info = reviewed_rows[0]["metadata"]["llm_advisory"]["model"]
             self.assertEqual(model_info["provider"], "openai")

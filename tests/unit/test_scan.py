@@ -27,7 +27,9 @@ def test_scan_captures_commit_shape_metadata(tmp_path: Path) -> None:
 
     (repo / "src" / "core.py").write_text("x = 2\n", encoding="utf-8")
     (repo / "tests").mkdir(exist_ok=True)
-    (repo / "tests" / "test_core.py").write_text("def test_core():\n    assert True\n", encoding="utf-8")
+    (repo / "tests" / "test_core.py").write_text(
+        "def test_core():\n    assert True\n", encoding="utf-8"
+    )
     run_command(["git", "-C", str(repo), "add", "src/core.py", "tests/test_core.py"])
     run_command(["git", "-C", str(repo), "commit", "-m", "Fix core behavior"])
 
@@ -65,7 +67,18 @@ def test_scan_detects_rename_only_commits_and_merge_metadata(tmp_path: Path) -> 
     (repo / "README.md").write_text("# Repo\n", encoding="utf-8")
     run_command(["git", "-C", str(repo), "add", "README.md"])
     run_command(["git", "-C", str(repo), "commit", "-m", "Update docs"])
-    run_command(["git", "-C", str(repo), "merge", "--no-ff", "feature", "-m", "Merge rename feature"])
+    run_command(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "merge",
+            "--no-ff",
+            "feature",
+            "-m",
+            "Merge rename feature",
+        ]
+    )
 
     rows = scan_repository(repo, repo_name="owner/repo", max_count=10)
     assert len(rows) == 4  # initial + refactor (feature) + docs update + merge commit

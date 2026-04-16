@@ -61,7 +61,11 @@ class TestScoring(unittest.TestCase):
 
         self.assertGreaterEqual(scored.score, 8.0)
         self.assertEqual(scored.decision_band, "shortlist")
-        self.assertTrue(any(item["component"] == "prod_and_tests" for item in scored.score_breakdown))
+        self.assertTrue(
+            any(
+                item["component"] == "prod_and_tests" for item in scored.score_breakdown
+            )
+        )
 
     def test_issue_reference_in_subject_is_detected(self) -> None:
         scored = score_scan_commit(
@@ -76,7 +80,9 @@ class TestScoring(unittest.TestCase):
             ),
         )
 
-        self.assertTrue(any(item["component"] == "issue_link" for item in scored.score_breakdown))
+        self.assertTrue(
+            any(item["component"] == "issue_link" for item in scored.score_breakdown)
+        )
 
     def test_mid_score_stays_in_review_band(self) -> None:
         scored = score_scan_commit(
@@ -100,10 +106,20 @@ class TestScoring(unittest.TestCase):
             commit_subject="Landing changes for bead oss_repogauge-rmy - deterministic env plan",
             commit_body="",
             diff="",
-            metadata=_metadata(n_prod_files=1, n_test_files=1, n_hunks=3, total_changed_lines=50, has_bead_changes=True),
+            metadata=_metadata(
+                n_prod_files=1,
+                n_test_files=1,
+                n_hunks=3,
+                total_changed_lines=50,
+                has_bead_changes=True,
+            ),
         )
-        self.assertTrue(any(item["component"] == "bead_context" for item in scored.score_breakdown))
-        bead_item = next(i for i in scored.score_breakdown if i["component"] == "bead_context")
+        self.assertTrue(
+            any(item["component"] == "bead_context" for item in scored.score_breakdown)
+        )
+        bead_item = next(
+            i for i in scored.score_breakdown if i["component"] == "bead_context"
+        )
         self.assertEqual(bead_item["weight"], 2)
 
     def test_no_bead_file_change_gets_no_context_bonus(self) -> None:
@@ -111,9 +127,13 @@ class TestScoring(unittest.TestCase):
             commit_subject="Landing changes for bead oss_repogauge-rmy - deterministic env plan",
             commit_body="",
             diff="",
-            metadata=_metadata(n_prod_files=1, n_test_files=1, n_hunks=3, total_changed_lines=50),
+            metadata=_metadata(
+                n_prod_files=1, n_test_files=1, n_hunks=3, total_changed_lines=50
+            ),
         )
-        self.assertFalse(any(item["component"] == "bead_context" for item in scored.score_breakdown))
+        self.assertFalse(
+            any(item["component"] == "bead_context" for item in scored.score_breakdown)
+        )
 
     def test_dependency_only_change_is_rejected(self) -> None:
         scored = score_scan_commit(
@@ -130,7 +150,9 @@ class TestScoring(unittest.TestCase):
         )
 
         self.assertEqual(scored.decision_band, "reject")
-        self.assertTrue(any(item["component"] == "hard_reject" for item in scored.score_breakdown))
+        self.assertTrue(
+            any(item["component"] == "hard_reject" for item in scored.score_breakdown)
+        )
 
 
 if __name__ == "__main__":

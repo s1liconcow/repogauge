@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Sequence
 
 from repogauge.artifacts import ArtifactLayout
 from repogauge.config import DatasetInstance, PredictionRow
@@ -95,7 +95,9 @@ def _coerce_str_or_none(value: Any) -> str | None:
     return text if text else None
 
 
-def _to_dataset_rows(materialized_rows: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _to_dataset_rows(
+    materialized_rows: Sequence[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     datasets: list[dict[str, Any]] = []
     predictions: list[dict[str, Any]] = []
 
@@ -115,7 +117,9 @@ def _to_dataset_rows(materialized_rows: Sequence[dict[str, Any]]) -> tuple[list[
         pass_to_pass = _coerce_test_ids(metadata_value.get("PASS_TO_PASS"))
         if "problem_statement_source" in metadata_value:
             metadata_value = dict(metadata_value)
-            metadata_value["problem_statement_source"] = metadata_value["problem_statement_source"]
+            metadata_value["problem_statement_source"] = metadata_value[
+                "problem_statement_source"
+            ]
         dataset_row = DatasetInstance(
             instance_id=candidate_id,
             repo=repo,
@@ -168,8 +172,14 @@ def run_export(materialized_path: str | Path, out_root: str | Path) -> Dict[str,
     predictions_path = layout.predictions_file
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
 
-    dataset_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows), encoding="utf-8")
-    predictions_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in prediction_rows), encoding="utf-8")
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+        encoding="utf-8",
+    )
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in prediction_rows),
+        encoding="utf-8",
+    )
 
     return {
         "dataset_path": str(dataset_path),

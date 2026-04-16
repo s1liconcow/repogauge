@@ -19,5 +19,7 @@ def test_dataset_instance_round_trip():
 
 
 def test_prediction_payload_has_schema_version():
-    row = PredictionRow(instance_id="owner__repo-rg-abcd", model_name_or_path="gpt", model_patch="@@")
+    row = PredictionRow(
+        instance_id="owner__repo-rg-abcd", model_name_or_path="gpt", model_patch="@@"
+    )
     assert row.to_dict()["schema_version"] == "0.1.0"

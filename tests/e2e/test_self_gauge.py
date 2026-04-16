@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Iterator
 
@@ -42,7 +41,11 @@ def _run_main(args: list[str]) -> int:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _read_manifest(out: Path) -> dict:
@@ -50,7 +53,13 @@ def _read_manifest(out: Path) -> dict:
     return json.loads(lines[-1])
 
 
-def _mine(out: Path, *, max_commits: int = 40, commit_range: str | None = None, extra: list[str] | None = None) -> int:
+def _mine(
+    out: Path,
+    *,
+    max_commits: int = 40,
+    commit_range: str | None = None,
+    extra: list[str] | None = None,
+) -> int:
     args = ["mine", str(REPO_ROOT), "--out", str(out), "--llm-mode", "off"]
     args += ["--max-commits", str(max_commits)]
     if commit_range:
@@ -60,13 +69,24 @@ def _mine(out: Path, *, max_commits: int = 40, commit_range: str | None = None, 
     return _run_main(args)
 
 
-def _write_decisions(path: Path, candidate_ids: list[str], state: str = "accepted") -> None:
+def _write_decisions(
+    path: Path, candidate_ids: list[str], state: str = "accepted"
+) -> None:
     with path.open("w", encoding="utf-8") as fh:
         for cid in candidate_ids:
-            fh.write(json.dumps({"id": cid, "state": state, "reviewer_notes": "e2e-test"}) + "\n")
+            fh.write(
+                json.dumps({"id": cid, "state": state, "reviewer_notes": "e2e-test"})
+                + "\n"
+            )
 
 
-def _review(candidates_path: Path, out: Path, decisions_path: Path | None = None, *, extra: list[str] | None = None) -> int:
+def _review(
+    candidates_path: Path,
+    out: Path,
+    decisions_path: Path | None = None,
+    *,
+    extra: list[str] | None = None,
+) -> int:
     args = ["review", str(candidates_path), "--out", str(out), "--llm-mode", "off"]
     if decisions_path:
         args += ["--decisions", str(decisions_path)]
@@ -136,7 +156,13 @@ class TestMineAgainstSelf:
         """mine creates scan.jsonl, candidates.jsonl, repo_profile.json, manifest.json, events.jsonl."""
         out = tmp_path / "mine"
         _mine(out)
-        for name in ("scan.jsonl", "candidates.jsonl", "repo_profile.json", "manifest.json", "events.jsonl"):
+        for name in (
+            "scan.jsonl",
+            "candidates.jsonl",
+            "repo_profile.json",
+            "manifest.json",
+            "events.jsonl",
+        ):
             assert (out / name).exists(), f"missing artifact: {name}"
 
     def test_mine_candidates_have_valid_schema_fields(self, tmp_path):
@@ -148,14 +174,20 @@ class TestMineAgainstSelf:
         for row in rows:
             assert "id" in row and row["id"], "id must be a non-empty string"
             assert "repo" in row and row["repo"] == REPO_REMOTE
-            assert "commit" in row and len(row["commit"]) == 40, "commit must be a full SHA"
-            assert "heuristic_score" in row and isinstance(row["heuristic_score"], (int, float))
+            assert "commit" in row and len(row["commit"]) == 40, (
+                "commit must be a full SHA"
+            )
+            assert "heuristic_score" in row and isinstance(
+                row["heuristic_score"], (int, float)
+            )
             assert "files_touched" in row and isinstance(row["files_touched"], list)
             assert "changed_lines" in row and row["changed_lines"] >= 0
             assert "metadata" in row
             assert "decision_band" in row["metadata"]
             assert row["metadata"]["decision_band"] in {"shortlist", "review", "reject"}
-            assert "score_breakdown" in row["metadata"] and isinstance(row["metadata"]["score_breakdown"], list)
+            assert "score_breakdown" in row["metadata"] and isinstance(
+                row["metadata"]["score_breakdown"], list
+            )
 
     def test_mine_scan_and_candidates_rows_match(self, tmp_path):
         """scan.jsonl and candidates.jsonl must contain identical rows (same ids, same order)."""
@@ -163,7 +195,9 @@ class TestMineAgainstSelf:
         _mine(out)
         scan_ids = [r["id"] for r in _read_jsonl(out / "scan.jsonl")]
         cand_ids = [r["id"] for r in _read_jsonl(out / "candidates.jsonl")]
-        assert scan_ids == cand_ids, "scan.jsonl and candidates.jsonl must mirror each other"
+        assert scan_ids == cand_ids, (
+            "scan.jsonl and candidates.jsonl must mirror each other"
+        )
 
     def test_mine_manifest_artifact_paths_point_to_existing_files(self, tmp_path):
         """manifest.json artifact_paths entries must resolve to real files."""
@@ -187,7 +221,9 @@ class TestMineAgainstSelf:
         rc = _mine(out, commit_range="HEAD~3..HEAD")
         assert rc == 0
         rows = _read_jsonl(out / "scan.jsonl")
-        assert len(rows) <= 3, f"commit-range HEAD~3..HEAD should produce ≤3 rows, got {len(rows)}"
+        assert len(rows) <= 3, (
+            f"commit-range HEAD~3..HEAD should produce ≤3 rows, got {len(rows)}"
+        )
 
     def test_mine_events_log_has_start_and_finish_events(self, tmp_path):
         """events.jsonl must contain command.start and command.finish entries."""
@@ -208,20 +244,34 @@ class TestMineAgainstSelf:
         for row in rows:
             for entry in row["metadata"]["score_breakdown"]:
                 assert "component" in entry, "score_breakdown entry missing 'component'"
-                assert "weight" in entry and isinstance(entry["weight"], (int, float)), (
-                    "score_breakdown entry 'weight' must be numeric"
-                )
+                assert "weight" in entry and isinstance(
+                    entry["weight"], (int, float)
+                ), "score_breakdown entry 'weight' must be numeric"
 
     def test_mine_commits_with_test_files_score_above_prod_only(self, tmp_path):
         """Commits touching both prod+test files score higher than prod-only ones."""
         out = tmp_path / "mine"
         _mine(out, max_commits=40)
         rows = _read_jsonl(out / "candidates.jsonl")
-        prod_test = [r for r in rows if r["metadata"].get("n_test_files", 0) > 0 and r["metadata"].get("n_prod_files", 0) > 0]
-        prod_only = [r for r in rows if r["metadata"].get("n_test_files", 0) == 0 and r["metadata"].get("n_prod_files", 0) > 0]
+        prod_test = [
+            r
+            for r in rows
+            if r["metadata"].get("n_test_files", 0) > 0
+            and r["metadata"].get("n_prod_files", 0) > 0
+        ]
+        prod_only = [
+            r
+            for r in rows
+            if r["metadata"].get("n_test_files", 0) == 0
+            and r["metadata"].get("n_prod_files", 0) > 0
+        ]
         if prod_test and prod_only:
-            avg_prod_test = sum(r["heuristic_score"] for r in prod_test) / len(prod_test)
-            avg_prod_only = sum(r["heuristic_score"] for r in prod_only) / len(prod_only)
+            avg_prod_test = sum(r["heuristic_score"] for r in prod_test) / len(
+                prod_test
+            )
+            avg_prod_only = sum(r["heuristic_score"] for r in prod_only) / len(
+                prod_only
+            )
             assert avg_prod_test > avg_prod_only, (
                 f"Commits with test files should score higher on average "
                 f"(prod+test avg={avg_prod_test:.1f}, prod-only avg={avg_prod_only:.1f})"
@@ -301,7 +351,9 @@ class TestReviewAgainstSelf:
         assert manifest["command"] == "review"
         assert manifest["status"] == "succeeded"
 
-    def test_review_without_decisions_auto_accepts_shortlist_and_rejects_rest(self, tmp_path):
+    def test_review_without_decisions_auto_accepts_shortlist_and_rejects_rest(
+        self, tmp_path
+    ):
         """Without a decisions file, shortlist candidates are auto-accepted, others auto-rejected.
 
         Guards against: review silently changing auto-accept/reject policy without surfacing it.
@@ -338,7 +390,9 @@ class TestReviewAgainstSelf:
         _write_decisions(decisions_path, [top["id"]], state="accepted")
 
         rev_out = tmp_path / "review"
-        rc = _review(mine_out / "candidates.jsonl", rev_out, decisions_path=decisions_path)
+        rc = _review(
+            mine_out / "candidates.jsonl", rev_out, decisions_path=decisions_path
+        )
         assert rc == 0
 
         # reviewed.jsonl rows have id = "{candidate_id}-reviewed"; look up by candidate_id
@@ -354,7 +408,9 @@ class TestReviewAgainstSelf:
         reviewed = _read_jsonl(rev_out / "reviewed.jsonl")
         for row in reviewed:
             assert "id" in row and row["id"]
-            assert "candidate_id" in row and row["candidate_id"], "candidate_id field must be present"
+            assert "candidate_id" in row and row["candidate_id"], (
+                "candidate_id field must be present"
+            )
             assert row["id"] == f"{row['candidate_id']}-reviewed", (
                 "reviewed.jsonl id must be '{candidate_id}-reviewed'"
             )
@@ -431,8 +487,10 @@ class TestExportAgainstSelf:
 
         # Accept candidates that touch both prod and test files (best export candidates)
         exportable = [
-            c for c in candidates
-            if c["metadata"].get("n_test_files", 0) > 0 and c["metadata"].get("n_prod_files", 0) > 0
+            c
+            for c in candidates
+            if c["metadata"].get("n_test_files", 0) > 0
+            and c["metadata"].get("n_prod_files", 0) > 0
         ]
         if not exportable:
             exportable = [c for c in candidates if c["heuristic_score"] > 0]
@@ -440,7 +498,9 @@ class TestExportAgainstSelf:
             exportable = candidates[:1]
 
         decisions_path = workspace / "decisions.jsonl"
-        _write_decisions(decisions_path, [c["id"] for c in exportable[:3]], state="accepted")
+        _write_decisions(
+            decisions_path, [c["id"] for c in exportable[:3]], state="accepted"
+        )
 
         rev_out = workspace / "review"
         _review(mine_out / "candidates.jsonl", rev_out, decisions_path=decisions_path)
@@ -488,12 +548,20 @@ class TestExportAgainstSelf:
         dataset_path = exp_out / "dataset" / "dataset.jsonl"
         rows = _read_jsonl(dataset_path)
         if not rows:
-            pytest.skip("export produced empty dataset.jsonl (all candidates rejected during materialization)")
+            pytest.skip(
+                "export produced empty dataset.jsonl (all candidates rejected during materialization)"
+            )
 
         for row in rows:
-            assert "instance_id" in row and row["instance_id"], "instance_id must be non-empty"
-            assert "repo" in row and "/" in row["repo"], "repo must be owner/name format"
-            assert "base_commit" in row and len(row["base_commit"]) == 40, "base_commit must be full SHA"
+            assert "instance_id" in row and row["instance_id"], (
+                "instance_id must be non-empty"
+            )
+            assert "repo" in row and "/" in row["repo"], (
+                "repo must be owner/name format"
+            )
+            assert "base_commit" in row and len(row["base_commit"]) == 40, (
+                "base_commit must be full SHA"
+            )
             assert "problem_statement" in row
             assert "patch" in row
             assert "test_patch" in row
@@ -541,7 +609,9 @@ class TestExportAgainstSelf:
         if not rows:
             pytest.skip("no dataset instances to validate")
 
-        assert gold_path.exists(), "predictions.gold.jsonl must be created alongside dataset.jsonl"
+        assert gold_path.exists(), (
+            "predictions.gold.jsonl must be created alongside dataset.jsonl"
+        )
         dataset_ids = {r["instance_id"] for r in rows}
         gold_ids = {r["instance_id"] for r in _read_jsonl(gold_path)}
         assert dataset_ids == gold_ids, (
@@ -563,7 +633,9 @@ class TestExportAgainstSelf:
             pytest.skip("no candidates to reject")
 
         decisions_path = repo_workspace / "decisions_reject_all.jsonl"
-        _write_decisions(decisions_path, [c["id"] for c in candidates], state="rejected")
+        _write_decisions(
+            decisions_path, [c["id"] for c in candidates], state="rejected"
+        )
 
         rev_out = repo_workspace / "review_rejected"
         _review(mine_out / "candidates.jsonl", rev_out, decisions_path=decisions_path)
@@ -579,7 +651,9 @@ class TestExportAgainstSelf:
 
 
 class TestFullPipeline:
-    def test_mine_review_export_pipeline_produces_coherent_artifacts(self, repo_workspace):
+    def test_mine_review_export_pipeline_produces_coherent_artifacts(
+        self, repo_workspace
+    ):
         """End-to-end: mine → review (accept top candidates) → export produces valid dataset.
 
         Guards against: pipeline stages producing artifacts that are inconsistent with each
@@ -590,18 +664,26 @@ class TestFullPipeline:
         candidates = _read_jsonl(mine_out / "candidates.jsonl")
 
         exportable = [
-            c for c in candidates
-            if c["metadata"].get("n_test_files", 0) > 0 and c["metadata"].get("n_prod_files", 0) > 0
+            c
+            for c in candidates
+            if c["metadata"].get("n_test_files", 0) > 0
+            and c["metadata"].get("n_prod_files", 0) > 0
         ][:3]
 
         if not exportable:
-            pytest.skip("no candidates with both prod+test files in 40 commits; pipeline cannot be tested end-to-end")
+            pytest.skip(
+                "no candidates with both prod+test files in 40 commits; pipeline cannot be tested end-to-end"
+            )
 
         decisions_path = repo_workspace / "decisions.jsonl"
-        _write_decisions(decisions_path, [c["id"] for c in exportable], state="accepted")
+        _write_decisions(
+            decisions_path, [c["id"] for c in exportable], state="accepted"
+        )
 
         rev_out = repo_workspace / "review"
-        rc = _review(mine_out / "candidates.jsonl", rev_out, decisions_path=decisions_path)
+        rc = _review(
+            mine_out / "candidates.jsonl", rev_out, decisions_path=decisions_path
+        )
         assert rc == 0
 
         exp_out = repo_workspace / "export"
@@ -610,7 +692,9 @@ class TestFullPipeline:
 
         # Validate coherence across pipeline stages
         scan_ids = {r["id"] for r in _read_jsonl(mine_out / "scan.jsonl")}
-        reviewed_candidate_ids = {r["candidate_id"] for r in _read_jsonl(rev_out / "reviewed.jsonl")}
+        reviewed_candidate_ids = {
+            r["candidate_id"] for r in _read_jsonl(rev_out / "reviewed.jsonl")
+        }
         assert reviewed_candidate_ids == scan_ids, (
             "reviewed.jsonl candidate_ids must cover every candidate from scan.jsonl"
         )
@@ -638,7 +722,11 @@ class TestFullPipeline:
         exp_out = repo_workspace / "export"
         _export(rev_out / "reviewed.jsonl", exp_out)
 
-        for stage_out, cmd in [(mine_out, "mine"), (rev_out, "review"), (exp_out, "export")]:
+        for stage_out, cmd in [
+            (mine_out, "mine"),
+            (rev_out, "review"),
+            (exp_out, "export"),
+        ]:
             manifest = _read_manifest(stage_out)
             assert manifest["command"] == cmd
             assert manifest["status"] == "succeeded", (
@@ -659,7 +747,11 @@ class TestFullPipeline:
         exp_out = repo_workspace / "export"
         _export(rev_out / "reviewed.jsonl", exp_out)
 
-        for stage_out, cmd in [(mine_out, "mine"), (rev_out, "review"), (exp_out, "export")]:
+        for stage_out, cmd in [
+            (mine_out, "mine"),
+            (rev_out, "review"),
+            (exp_out, "export"),
+        ]:
             events = _read_jsonl(stage_out / "events.jsonl")
             finish_events = [e for e in events if e.get("event") == "command.finish"]
             assert finish_events, f"No command.finish event in {cmd}/events.jsonl"
@@ -667,7 +759,9 @@ class TestFullPipeline:
                 f"{cmd} did not finish with status=succeeded"
             )
 
-    def test_pipeline_schema_version_is_consistent_across_artifacts(self, repo_workspace):
+    def test_pipeline_schema_version_is_consistent_across_artifacts(
+        self, repo_workspace
+    ):
         """All JSONL artifacts must carry the same schema_version value.
 
         Guards against: a version bump in one artifact type but not others breaking

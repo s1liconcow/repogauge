@@ -15,9 +15,13 @@ def _write_file(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _build_repo(path: Path, *, remote: str = "https://github.com/example/repo.git") -> None:
+def _build_repo(
+    path: Path, *, remote: str = "https://github.com/example/repo.git"
+) -> None:
     _init_git_repo(path)
-    run_command(["git", "-C", str(path), "remote", "add", "origin", remote], cwd=str(path))
+    run_command(
+        ["git", "-C", str(path), "remote", "add", "origin", remote], cwd=str(path)
+    )
 
 
 def test_inspect_detects_poetry_pytest_and_remote(tmp_path: Path) -> None:
@@ -64,7 +68,10 @@ def test_inspect_tox_only_generates_fallback_hints(tmp_path: Path) -> None:
     profile = inspect_repository(repo)
     assert profile["test_runner_hints"]["commands"] == ["tox"]
     assert "pip install -e ." in profile["install_hints"]
-    assert any(item["type"] == "missing_package_manager" for item in profile["profile_warnings"])
+    assert any(
+        item["type"] == "missing_package_manager"
+        for item in profile["profile_warnings"]
+    )
     assert profile["repo_version"] == "repover_unknown"
     assert profile["environment_signature"]["repo_version"] == "repover_unknown"
     assert profile["environment_plan"]["python_version"] == "3.11"
@@ -76,7 +83,10 @@ def test_inspect_flags_python_version_conflict(tmp_path: Path) -> None:
     repo = tmp_path / "conflict_repo"
     repo.mkdir()
     _build_repo(repo)
-    _write_file(repo / "pyproject.toml", '[project]\\nname="demo"\\nversion="0.1"\\nrequires-python=">=3.10,<3.11"')
+    _write_file(
+        repo / "pyproject.toml",
+        '[project]\\nname="demo"\\nversion="0.1"\\nrequires-python=">=3.10,<3.11"',
+    )
     _write_file(repo / ".python-version", "3.11.2")
     _write_file(repo / "tox.ini", "[tox]\\nenvlist = py310,py311")
 
@@ -84,7 +94,9 @@ def test_inspect_flags_python_version_conflict(tmp_path: Path) -> None:
     second = inspect_repository(repo)
     assert first == second
     assert first["python_hints"]["versions"] == ["3.10", "3.11"]
-    assert any(item["type"] == "python_version_conflict" for item in first["profile_warnings"])
+    assert any(
+        item["type"] == "python_version_conflict" for item in first["profile_warnings"]
+    )
     assert first["environment_signature"] == second["environment_signature"]
 
 

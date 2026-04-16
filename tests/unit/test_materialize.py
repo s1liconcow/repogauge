@@ -26,12 +26,18 @@ def _commit_file(repo: Path, message: str, files: dict[str, str]) -> str:
 
 
 def _write_reviewed(path: Path, rows: list[dict]) -> Path:
-    path.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows), encoding="utf-8")
+    path.write_text(
+        "\n".join(json.dumps(row, sort_keys=True) for row in rows), encoding="utf-8"
+    )
     return path
 
 
 def _load_records(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 class TestMaterialize(unittest.TestCase):
@@ -68,7 +74,9 @@ class TestMaterialize(unittest.TestCase):
                     }
                 ],
             )
-            summary = run_materialization(reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo)
+            summary = run_materialization(
+                reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo
+            )
 
             self.assertEqual(summary["ready_count"], 1)
             self.assertEqual(summary["rejected_count"], 0)
@@ -83,7 +91,9 @@ class TestMaterialize(unittest.TestCase):
             self.assertTrue(item["test_patch"])
             self.assertIn("problem_statement", item)
             self.assertTrue(item["problem_statement"])
-            self.assertEqual(item["metadata"]["materialization"]["base_commit"], commit_root)
+            self.assertEqual(
+                item["metadata"]["materialization"]["base_commit"], commit_root
+            )
             self.assertEqual(item["metadata"]["problem_statement_source"], "commit")
 
     def test_materialize_uses_issue_text_for_problem_statement(self) -> None:
@@ -124,11 +134,15 @@ class TestMaterialize(unittest.TestCase):
                     }
                 ],
             )
-            summary = run_materialization(reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo)
+            summary = run_materialization(
+                reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo
+            )
 
             self.assertEqual(summary["ready_count"], 1)
             item = _load_records(tmp_root / "out" / "materialized.jsonl")[0]
-            self.assertEqual(item["metadata"]["problem_statement_source"], "linked_issue")
+            self.assertEqual(
+                item["metadata"]["problem_statement_source"], "linked_issue"
+            )
             self.assertIn("Regression in value", item["problem_statement"])
 
     def test_materialize_rejects_non_single_parent_candidate(self) -> None:
@@ -152,8 +166,21 @@ class TestMaterialize(unittest.TestCase):
                 message="Main path",
                 files={"src/main.py": "def main_path():\n    return 1\n"},
             )
-            run_command(["git", "-C", str(repo), "merge", "--no-ff", "feature", "-m", "Merge feature branch"])
-            merge_commit = run_command(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip()
+            run_command(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "merge",
+                    "--no-ff",
+                    "feature",
+                    "-m",
+                    "Merge feature branch",
+                ]
+            )
+            merge_commit = run_command(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"]
+            ).stdout.strip()
 
             reviewed = _write_reviewed(
                 tmp_root / "reviewed.jsonl",
@@ -168,11 +195,15 @@ class TestMaterialize(unittest.TestCase):
                 ],
             )
 
-            summary = run_materialization(reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo)
+            summary = run_materialization(
+                reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo
+            )
             self.assertEqual(summary["ready_count"], 0)
             self.assertEqual(summary["rejected_count"], 1)
 
-            rejected = _load_records(tmp_root / "out" / "materialization_rejections.jsonl")
+            rejected = _load_records(
+                tmp_root / "out" / "materialization_rejections.jsonl"
+            )
             self.assertEqual(rejected[0]["reason"], "non_single_parent")
             self.assertIn("expected 1", rejected[0]["metadata"]["reason"])
 
@@ -203,11 +234,15 @@ class TestMaterialize(unittest.TestCase):
                     }
                 ],
             )
-            summary = run_materialization(reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo)
+            summary = run_materialization(
+                reviewed_path=reviewed, out_root=tmp_root / "out", repo_root=repo
+            )
             self.assertEqual(summary["ready_count"], 0)
             self.assertEqual(summary["rejected_count"], 1)
 
-            rejected = _load_records(tmp_root / "out" / "materialization_rejections.jsonl")
+            rejected = _load_records(
+                tmp_root / "out" / "materialization_rejections.jsonl"
+            )
             self.assertEqual(rejected[0]["reason"], "empty_test_patch_after_split")
 
     def test_materialization_is_deterministic(self) -> None:
@@ -244,8 +279,12 @@ class TestMaterialize(unittest.TestCase):
                 ],
             )
 
-            first = run_materialization(reviewed_path=reviewed, out_root=tmp_root / "out_a", repo_root=repo)
-            second = run_materialization(reviewed_path=reviewed, out_root=tmp_root / "out_b", repo_root=repo)
+            first = run_materialization(
+                reviewed_path=reviewed, out_root=tmp_root / "out_a", repo_root=repo
+            )
+            second = run_materialization(
+                reviewed_path=reviewed, out_root=tmp_root / "out_b", repo_root=repo
+            )
             self.assertEqual(first["ready_count"], second["ready_count"])
             self.assertEqual(
                 _load_records(tmp_root / "out_a" / "materialized.jsonl"),
@@ -257,7 +296,9 @@ class TestMaterialize(unittest.TestCase):
             tmp_root = Path(workspace)
             (tmp_root / "reviewed.jsonl").write_text("", encoding="utf-8")
             with self.assertRaises(MaterializationError):
-                run_materialization(reviewed_path=tmp_root / "reviewed.jsonl", out_root=tmp_root / "out")
+                run_materialization(
+                    reviewed_path=tmp_root / "reviewed.jsonl", out_root=tmp_root / "out"
+                )
 
 
 if __name__ == "__main__":

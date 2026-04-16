@@ -11,25 +11,43 @@ from repogauge.export import run_export, run_materialization
 def _create_repo_with_commits(path: Path) -> tuple[str, str]:
     run_command_checked(["git", "init", "-b", "main"], cwd=str(path))
     run_command_checked(["git", "config", "user.name", "ci"], cwd=str(path))
-    run_command_checked(["git", "config", "user.email", "ci@example.com"], cwd=str(path))
+    run_command_checked(
+        ["git", "config", "user.email", "ci@example.com"], cwd=str(path)
+    )
 
     (path / "src").mkdir()
     (path / "tests").mkdir()
-    (path / "src" / "module.py").write_text("def add(a, b):\\n    return a + b\\n", encoding="utf-8")
+    (path / "src" / "module.py").write_text(
+        "def add(a, b):\\n    return a + b\\n", encoding="utf-8"
+    )
     run_command_checked(["git", "add", "src/module.py"], cwd=str(path))
     run_command_checked(["git", "commit", "-m", "base"], cwd=str(path))
-    base_commit = run_command_checked(["git", "rev-parse", "HEAD"], cwd=str(path)).stdout.strip()
+    base_commit = run_command_checked(
+        ["git", "rev-parse", "HEAD"], cwd=str(path)
+    ).stdout.strip()
 
-    (path / "src" / "module.py").write_text("def add(a, b):\\n    return a + b\\n\\n", encoding="utf-8")
-    (path / "tests" / "test_module.py").write_text("def test_add():\\n    assert add(1, 2) == 3\\n", encoding="utf-8")
-    run_command_checked(["git", "add", "src/module.py", "tests/test_module.py"], cwd=str(path))
+    (path / "src" / "module.py").write_text(
+        "def add(a, b):\\n    return a + b\\n\\n", encoding="utf-8"
+    )
+    (path / "tests" / "test_module.py").write_text(
+        "def test_add():\\n    assert add(1, 2) == 3\\n", encoding="utf-8"
+    )
+    run_command_checked(
+        ["git", "add", "src/module.py", "tests/test_module.py"], cwd=str(path)
+    )
     run_command_checked(["git", "commit", "-m", "prod+tests"], cwd=str(path))
-    prod_test_commit = run_command_checked(["git", "rev-parse", "HEAD"], cwd=str(path)).stdout.strip()
+    prod_test_commit = run_command_checked(
+        ["git", "rev-parse", "HEAD"], cwd=str(path)
+    ).stdout.strip()
 
-    (path / "src" / "module.py").write_text("def add(a, b):\\n    return a + b + 1\\n", encoding="utf-8")
+    (path / "src" / "module.py").write_text(
+        "def add(a, b):\\n    return a + b + 1\\n", encoding="utf-8"
+    )
     run_command_checked(["git", "add", "src/module.py"], cwd=str(path))
     run_command_checked(["git", "commit", "-m", "prod-only"], cwd=str(path))
-    prod_only_commit = run_command_checked(["git", "rev-parse", "HEAD"], cwd=str(path)).stdout.strip()
+    prod_only_commit = run_command_checked(
+        ["git", "rev-parse", "HEAD"], cwd=str(path)
+    ).stdout.strip()
 
     return base_commit, prod_test_commit, prod_only_commit
 
@@ -39,7 +57,9 @@ class TestMaterialize(unittest.TestCase):
         with TemporaryDirectory() as workspace:
             root = Path(workspace) / "repo"
             root.mkdir()
-            base_commit, prod_test_commit, prod_only_commit = _create_repo_with_commits(root)
+            base_commit, prod_test_commit, prod_only_commit = _create_repo_with_commits(
+                root
+            )
 
             reviewed = Path(workspace) / "reviewed.jsonl"
             reviewed.write_text(
@@ -76,8 +96,14 @@ class TestMaterialize(unittest.TestCase):
             )
             ready_path = Path(summary["materialized_path"])
             rejected_path = Path(summary["rejected_path"])
-            ready_rows = [json.loads(line) for line in ready_path.read_text(encoding="utf-8").splitlines()]
-            rejected_rows = [json.loads(line) for line in rejected_path.read_text(encoding="utf-8").splitlines()]
+            ready_rows = [
+                json.loads(line)
+                for line in ready_path.read_text(encoding="utf-8").splitlines()
+            ]
+            rejected_rows = [
+                json.loads(line)
+                for line in rejected_path.read_text(encoding="utf-8").splitlines()
+            ]
 
             self.assertEqual(summary["ready_count"], 1)
             self.assertEqual(summary["rejected_count"], 1)
@@ -108,15 +134,25 @@ class TestMaterialize(unittest.TestCase):
 
             (root / "repo").mkdir()
             run_command_checked(["git", "init", "-b", "main"], cwd=str(root / "repo"))
-            run_command_checked(["git", "config", "user.name", "ci"], cwd=str(root / "repo"))
-            run_command_checked(["git", "config", "user.email", "ci@example.com"], cwd=str(root / "repo"))
+            run_command_checked(
+                ["git", "config", "user.name", "ci"], cwd=str(root / "repo")
+            )
+            run_command_checked(
+                ["git", "config", "user.email", "ci@example.com"],
+                cwd=str(root / "repo"),
+            )
 
             summary = run_materialization(
                 reviewed_path=reviewed,
                 out_root=root / "out",
                 repo_root=root / "repo",
             )
-            rejected_rows = [json.loads(line) for line in Path(summary["rejected_path"]).read_text(encoding="utf-8").splitlines()]
+            rejected_rows = [
+                json.loads(line)
+                for line in Path(summary["rejected_path"])
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
 
             self.assertEqual(summary["ready_count"], 0)
             self.assertEqual(summary["rejected_count"], 1)
@@ -162,23 +198,42 @@ class TestExportCommand(unittest.TestCase):
             self.assertTrue(dataset_path.exists())
             self.assertTrue(predictions_path.exists())
 
-            materialized_rows = [json.loads(line) for line in materialized_path.read_text(encoding="utf-8").splitlines()]
-            dataset_rows = [json.loads(line) for line in dataset_path.read_text(encoding="utf-8").splitlines()]
-            prediction_rows = [json.loads(line) for line in predictions_path.read_text(encoding="utf-8").splitlines()]
+            materialized_rows = [
+                json.loads(line)
+                for line in materialized_path.read_text(encoding="utf-8").splitlines()
+            ]
+            dataset_rows = [
+                json.loads(line)
+                for line in dataset_path.read_text(encoding="utf-8").splitlines()
+            ]
+            prediction_rows = [
+                json.loads(line)
+                for line in predictions_path.read_text(encoding="utf-8").splitlines()
+            ]
 
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+            manifest = json.loads(
+                manifest_path.read_text(encoding="utf-8").strip().splitlines()[-1]
+            )
             self.assertEqual(manifest["status"], "succeeded")
             self.assertEqual(manifest["step_statuses"]["execute"], "succeeded")
             self.assertEqual(manifest["artifact_paths"]["dataset"], str(dataset_path))
-            self.assertEqual(manifest["artifact_paths"]["predictions"], str(predictions_path))
+            self.assertEqual(
+                manifest["artifact_paths"]["predictions"], str(predictions_path)
+            )
             self.assertEqual(manifest["metadata"]["export"]["dataset_count"], 1)
             self.assertEqual(manifest["metadata"]["export"]["prediction_count"], 1)
             self.assertEqual(len(materialized_rows), 1)
             self.assertEqual(len(dataset_rows), 1)
             self.assertEqual(len(prediction_rows), 1)
-            self.assertEqual(dataset_rows[0]["instance_id"], materialized_rows[0]["candidate_id"])
-            self.assertEqual(prediction_rows[0]["instance_id"], materialized_rows[0]["candidate_id"])
-            self.assertEqual(prediction_rows[0]["model_patch"], materialized_rows[0]["prod_patch"])
+            self.assertEqual(
+                dataset_rows[0]["instance_id"], materialized_rows[0]["candidate_id"]
+            )
+            self.assertEqual(
+                prediction_rows[0]["instance_id"], materialized_rows[0]["candidate_id"]
+            )
+            self.assertEqual(
+                prediction_rows[0]["model_patch"], materialized_rows[0]["prod_patch"]
+            )
             self.assertEqual(prediction_rows[0]["model_name_or_path"], "gold")
 
     def test_run_export_converts_materialized_rows(self) -> None:
@@ -204,9 +259,17 @@ class TestExportCommand(unittest.TestCase):
             )
 
             summary = run_export(materialized_path=materialized, out_root=out_root)
-            dataset_rows = [json.loads(line) for line in Path(summary["dataset_path"]).read_text(encoding="utf-8").splitlines()]
+            dataset_rows = [
+                json.loads(line)
+                for line in Path(summary["dataset_path"])
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
             prediction_rows = [
-                json.loads(line) for line in Path(summary["predictions_path"]).read_text(encoding="utf-8").splitlines()
+                json.loads(line)
+                for line in Path(summary["predictions_path"])
+                .read_text(encoding="utf-8")
+                .splitlines()
             ]
 
             self.assertEqual(summary["dataset_count"], 1)
@@ -215,5 +278,7 @@ class TestExportCommand(unittest.TestCase):
             self.assertEqual(dataset_rows[0]["repo"], "owner/repo")
             self.assertEqual(dataset_rows[0]["version"], "0.0.0")
             self.assertEqual(dataset_rows[0]["FAIL_TO_PASS"], ["t1"])
-            self.assertEqual(prediction_rows[0]["model_patch"], dataset_rows[0]["patch"])
+            self.assertEqual(
+                prediction_rows[0]["model_patch"], dataset_rows[0]["patch"]
+            )
             self.assertEqual(prediction_rows[0]["model_name_or_path"], "gold")

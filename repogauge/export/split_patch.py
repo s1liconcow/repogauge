@@ -26,7 +26,9 @@ class _FilePatchChunk:
 
 
 def _strip_quote(value: str) -> str:
-    if len(value) >= 2 and ((value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'")):
+    if len(value) >= 2 and (
+        (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'")
+    ):
         return value[1:-1]
     return value
 
@@ -105,14 +107,24 @@ def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
                 rename_from, rename_to = _extract_rename_lines(current_lines)
                 from_path = _normalize_token(_strip_quote(rename_from or a_path))
                 to_path = _normalize_token(_strip_quote(rename_to or b_path))
-                if rename_from and rename_to and _is_test_file_boundary_split(from_path, to_path):
-                    raise PatchSplitError("rename across production/test boundary is not supported in MVP")
+                if (
+                    rename_from
+                    and rename_to
+                    and _is_test_file_boundary_split(from_path, to_path)
+                ):
+                    raise PatchSplitError(
+                        "rename across production/test boundary is not supported in MVP"
+                    )
 
                 destination = to_path or b_path or a_path
                 if destination == "/dev/null" and a_path != "/dev/null":
                     destination = a_path
                 role = _role_for_path(destination)
-                chunks.append(_FilePatchChunk(path=destination, raw_lines=current_lines, role=role))
+                chunks.append(
+                    _FilePatchChunk(
+                        path=destination, raw_lines=current_lines, role=role
+                    )
+                )
                 if destination not in touched_paths:
                     touched_paths.append(destination)
 
@@ -128,14 +140,22 @@ def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
         rename_from, rename_to = _extract_rename_lines(current_lines)
         from_path = _normalize_token(_strip_quote(rename_from or a_path))
         to_path = _normalize_token(_strip_quote(rename_to or b_path))
-        if rename_from and rename_to and _is_test_file_boundary_split(from_path, to_path):
-            raise PatchSplitError("rename across production/test boundary is not supported in MVP")
+        if (
+            rename_from
+            and rename_to
+            and _is_test_file_boundary_split(from_path, to_path)
+        ):
+            raise PatchSplitError(
+                "rename across production/test boundary is not supported in MVP"
+            )
 
         destination = to_path or b_path or a_path
         if destination == "/dev/null" and a_path != "/dev/null":
             destination = a_path
         role = _role_for_path(destination)
-        chunks.append(_FilePatchChunk(path=destination, raw_lines=current_lines, role=role))
+        chunks.append(
+            _FilePatchChunk(path=destination, raw_lines=current_lines, role=role)
+        )
         if destination not in touched_paths:
             touched_paths.append(destination)
 
@@ -151,7 +171,9 @@ def split_prod_and_test(diff: str) -> Tuple[str, str, Dict[str, List[str]]]:
     touched: Dict[str, List[str]] = {"prod": [], "test": [], "test_support": []}
 
     for chunk in file_chunks:
-        bucket = _bucket_for_file(chunk.path, chunk.role, include_test_support=has_test_file)
+        bucket = _bucket_for_file(
+            chunk.path, chunk.role, include_test_support=has_test_file
+        )
         if bucket == "test":
             test_lines.extend(chunk.raw_lines)
             if chunk.role == "test":
@@ -162,9 +184,13 @@ def split_prod_and_test(diff: str) -> Tuple[str, str, Dict[str, List[str]]]:
             prod_lines.extend(chunk.raw_lines)
             touched["prod"].append(chunk.path)
 
-    return "".join(prod_lines), "".join(test_lines), {
-        "prod_files": touched["prod"],
-        "test_files": touched["test"] + touched["test_support"],
-        "test_support_files": touched["test_support"],
-        "all_touched_files": touched_paths,
-    }
+    return (
+        "".join(prod_lines),
+        "".join(test_lines),
+        {
+            "prod_files": touched["prod"],
+            "test_files": touched["test"] + touched["test_support"],
+            "test_support_files": touched["test_support"],
+            "all_touched_files": touched_paths,
+        },
+    )

@@ -58,7 +58,9 @@ class TestProblemStatementSynthesis(unittest.TestCase):
             {
                 "source_subject": "Fix",
                 "metadata": {
-                    "llm_advisory": {"problem_statement": "Refactor to handle edge-case input safely."},
+                    "llm_advisory": {
+                        "problem_statement": "Refactor to handle edge-case input safely."
+                    },
                     "llm_model": "model",
                 },
             },

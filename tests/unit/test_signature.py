@@ -36,7 +36,11 @@ def test_environment_signature_is_deterministic(tmp_path: Path) -> None:
     second = build_environment_signature(profile_b)
 
     assert first == second
-    assert first["version"] == "1.2.3__py310_py311__pytest+tox__poetry+setuptools__reqhash_" + first["dependency_signature"]
+    assert (
+        first["version"]
+        == "1.2.3__py310_py311__pytest+tox__poetry+setuptools__reqhash_"
+        + first["dependency_signature"]
+    )
     assert first["signature"] == first["version"]
 
 
@@ -58,18 +62,24 @@ def test_environment_signature_uses_repo_version_fallback(tmp_path: Path) -> Non
     }
     first = build_environment_signature(profile)
     assert first["repo_version"] == REPO_VERSION_UNKNOWN
-    assert first["version"].startswith(f"{REPO_VERSION_UNKNOWN}__py311__pytest__requirements__reqhash_")
+    assert first["version"].startswith(
+        f"{REPO_VERSION_UNKNOWN}__py311__pytest__requirements__reqhash_"
+    )
 
 
 def test_environment_signature_normalizes_requirement_content(tmp_path: Path) -> None:
     requirements = tmp_path / "requirements.txt"
-    requirements.write_text("requests==2.31.0\n\n# comment\npytest>=8\n", encoding="utf-8")
+    requirements.write_text(
+        "requests==2.31.0\n\n# comment\npytest>=8\n", encoding="utf-8"
+    )
 
     profile = _base_profile(tmp_path)
     profile["repo_root"] = str(tmp_path)
     first = build_environment_signature(profile)
 
-    requirements.write_text("\npytest>=8  # test dep\nrequests==2.31.0\n", encoding="utf-8")
+    requirements.write_text(
+        "\npytest>=8  # test dep\nrequests==2.31.0\n", encoding="utf-8"
+    )
     second = build_environment_signature(profile)
 
     assert first["dependency_signature"] == second["dependency_signature"]

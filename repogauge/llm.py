@@ -116,9 +116,14 @@ def parse_model_spec(
             prompt_version=default_prompt_version,
         )
 
-    model_name = _coerce_string(payload.get("model_name") or payload.get("model")) or default_name
+    model_name = (
+        _coerce_string(payload.get("model_name") or payload.get("model"))
+        or default_name
+    )
     provider = _coerce_string(payload.get("provider")) or default_provider
-    prompt_version = _coerce_string(payload.get("prompt_version")) or default_prompt_version
+    prompt_version = (
+        _coerce_string(payload.get("prompt_version")) or default_prompt_version
+    )
     usage = payload.get("usage")
     cost = payload.get("cost")
     if not isinstance(usage, dict):
@@ -145,10 +150,16 @@ def _coerce_suggestion(record: Mapping[str, Any]) -> TriageSuggestion | None:
     if not candidate_id:
         return None
 
-    state = _coerce_state(record.get("state") or record.get("recommended_state") or record.get("advisory_state"))
+    state = _coerce_state(
+        record.get("state")
+        or record.get("recommended_state")
+        or record.get("advisory_state")
+    )
     reason = _coerce_string(record.get("reason"))
     reviewer_notes = _coerce_string(record.get("reviewer_notes"))
-    suggested_problem_statement = _coerce_string(record.get("suggested_problem_statement"))
+    suggested_problem_statement = _coerce_string(
+        record.get("suggested_problem_statement")
+    )
     raw_file_roles = record.get("suggested_file_roles", record.get("file_roles"))
     if raw_file_roles is not None:
         suggested_file_roles = _coerce_file_roles(raw_file_roles)
@@ -160,10 +171,14 @@ def _coerce_suggestion(record: Mapping[str, Any]) -> TriageSuggestion | None:
     confidence = _coerce_float(record.get("confidence"))
 
     if (record.get("state") is not None and state is None) or (
-        record.get("recommended_state") is not None and _coerce_state(record.get("recommended_state")) is None
+        record.get("recommended_state") is not None
+        and _coerce_state(record.get("recommended_state")) is None
     ):
         return None
-    if (record.get("advisory_state") is not None and _coerce_state(record.get("advisory_state")) is None):
+    if (
+        record.get("advisory_state") is not None
+        and _coerce_state(record.get("advisory_state")) is None
+    ):
         return None
 
     return TriageSuggestion(
@@ -185,7 +200,8 @@ def _coerce_records(payload: Any) -> tuple[LlmModelSpec, list[TriageSuggestion]]
             model_payload,
             default_name=_coerce_string(payload.get("model_name")) or "",
             default_provider=_coerce_string(payload.get("provider")) or "",
-            default_prompt_version=_coerce_string(payload.get("prompt_version")) or default_prompt_version,
+            default_prompt_version=_coerce_string(payload.get("prompt_version"))
+            or default_prompt_version,
         )
         candidates_payload = payload.get("candidates")
         if candidates_payload is None:
@@ -194,9 +210,20 @@ def _coerce_records(payload: Any) -> tuple[LlmModelSpec, list[TriageSuggestion]]
             else:
                 candidate_records = []
                 for maybe_id, maybe_value in payload.items():
-                    if not isinstance(maybe_id, str) or not maybe_id or not isinstance(maybe_value, Mapping):
+                    if (
+                        not isinstance(maybe_id, str)
+                        or not maybe_id
+                        or not isinstance(maybe_value, Mapping)
+                    ):
                         continue
-                    if maybe_id in {"schema_version", "model", "generated_at", "model_name", "provider", "prompt_version"}:
+                    if maybe_id in {
+                        "schema_version",
+                        "model",
+                        "generated_at",
+                        "model_name",
+                        "provider",
+                        "prompt_version",
+                    }:
                         continue
                     candidate_value = dict(maybe_value)
                     candidate_value["candidate_id"] = maybe_id
@@ -238,7 +265,9 @@ def _coerce_records(payload: Any) -> tuple[LlmModelSpec, list[TriageSuggestion]]
     return model, []
 
 
-def parse_triage_payload(payload: Any, *, default_name: str, default_provider: str) -> tuple[LlmModelSpec, dict[str, TriageSuggestion]]:
+def parse_triage_payload(
+    payload: Any, *, default_name: str, default_provider: str
+) -> tuple[LlmModelSpec, dict[str, TriageSuggestion]]:
     model, records = _coerce_records(payload)
     hints: dict[str, TriageSuggestion] = {}
     for suggestion in records:
@@ -291,15 +320,21 @@ def load_triage_payload(
             if isinstance(row, Mapping):
                 records.append(row)
         payload = {"candidates": records}
-    model, hints = parse_triage_payload(payload, default_name=default_name, default_provider=default_provider)
+    model, hints = parse_triage_payload(
+        payload, default_name=default_name, default_provider=default_provider
+    )
     return model, hints
 
 
 def _sorted_hints(hints: Iterable[TriageSuggestion]) -> list[dict[str, Any]]:
-    return [hint.to_dict() for hint in sorted(hints, key=lambda item: item.candidate_id)]
+    return [
+        hint.to_dict() for hint in sorted(hints, key=lambda item: item.candidate_id)
+    ]
 
 
-def write_triage_payload(path: Path, model: LlmModelSpec, hints: Mapping[str, TriageSuggestion]) -> None:
+def write_triage_payload(
+    path: Path, model: LlmModelSpec, hints: Mapping[str, TriageSuggestion]
+) -> None:
     if not hints:
         return
     payload = {

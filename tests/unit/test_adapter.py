@@ -45,7 +45,11 @@ class TestGenerateAdapter:
         assert Path(result["adapter_path"]).exists()
 
     def test_specs_json_is_valid_json_with_required_keys(self, tmp_path):
-        plan = {"python_version": "3.10", "install": ["pip install -e ."], "test_cmd_base": "pytest"}
+        plan = {
+            "python_version": "3.10",
+            "install": ["pip install -e ."],
+            "test_cmd_base": "pytest",
+        }
         result = generate_adapter("a/b", plan, out_root=tmp_path)
         spec = json.loads(Path(result["specs_path"]).read_text())
         for key in ("repo", "python_version", "install", "test_cmd_base", "parser"):
@@ -54,7 +58,12 @@ class TestGenerateAdapter:
 
     def test_adapter_py_is_importable_and_get_spec_returns_dict(self, tmp_path):
         import importlib.util
-        plan = {"python_version": "3.11", "install": ["pip install -e ."], "test_cmd_base": "pytest"}
+
+        plan = {
+            "python_version": "3.11",
+            "install": ["pip install -e ."],
+            "test_cmd_base": "pytest",
+        }
         result = generate_adapter("owner/proj", plan, out_root=tmp_path)
         spec_path = Path(result["adapter_path"])
         mod_spec = importlib.util.spec_from_file_location("adapter_test", spec_path)
@@ -68,11 +77,17 @@ class TestGenerateAdapter:
         assert adapter_spec["repo"] == "owner/proj"
 
     def test_generation_is_deterministic(self, tmp_path):
-        plan = {"python_version": "3.11", "install": ["pip install -e ."], "test_cmd_base": "pytest"}
+        plan = {
+            "python_version": "3.11",
+            "install": ["pip install -e ."],
+            "test_cmd_base": "pytest",
+        }
         r1 = generate_adapter("x/y", plan, out_root=tmp_path / "a")
         r2 = generate_adapter("x/y", plan, out_root=tmp_path / "b")
         assert Path(r1["specs_path"]).read_text() == Path(r2["specs_path"]).read_text()
-        assert Path(r1["adapter_path"]).read_text() == Path(r2["adapter_path"]).read_text()
+        assert (
+            Path(r1["adapter_path"]).read_text() == Path(r2["adapter_path"]).read_text()
+        )
 
     def test_repo_slug_with_special_chars_produces_valid_filename(self, tmp_path):
         plan = {"python_version": "3.11", "install": [], "test_cmd_base": "pytest"}

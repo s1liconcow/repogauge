@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from repogauge.mining import classify_file
 
 
@@ -43,4 +41,3 @@ def test_classify_unknown_file():
     result = classify_file("random/binary.bin")
     assert result.role == "unknown"
     assert "No explicit role rule matched" in result.reason
-
