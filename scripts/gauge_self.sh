@@ -26,7 +26,7 @@ EXPORT_OUT="$OUT_DIR/export"
 EVAL_OUT="$OUT_DIR/eval"
 
 echo "==> mine: scanning up to $MAX_COMMITS commits"
-repogauge mine "$REPO_ROOT" \
+uv run repogauge mine "$REPO_ROOT" \
     --out "$MINE_OUT" \
     --max-commits "$MAX_COMMITS" \
     --llm-mode off
@@ -36,24 +36,40 @@ REVIEW_ARGS=(review "$MINE_OUT/candidates.jsonl" --out "$REVIEW_OUT" --llm-mode 
 if [[ -n "$DECISIONS_FILE" ]]; then
     REVIEW_ARGS+=(--decisions "$DECISIONS_FILE")
 fi
-repogauge "${REVIEW_ARGS[@]}"
+uv run repogauge "${REVIEW_ARGS[@]}"
 
 echo "==> export: materializing dataset"
-repogauge export "$REVIEW_OUT/reviewed.jsonl" \
+uv run repogauge export "$REVIEW_OUT/reviewed.jsonl" \
     --out "$EXPORT_OUT" \
     --llm-mode off
 
 echo "==> eval: running gold evaluation"
-repogauge eval "$EXPORT_OUT" \
+if uv run repogauge eval "$EXPORT_OUT" \
     --gold \
-    --out "$EVAL_OUT"
+    --out "$EVAL_OUT"; then
+    EVAL_OK=1
+else
+    EVAL_OK=0
+fi
 
 echo ""
-echo "Artifacts written to $OUT_DIR:"
-echo "  mine/repo_profile.json"
-echo "  mine/candidates.jsonl"
-echo "  review/reviewed.jsonl"
-echo "  review/review.html"
-echo "  export/dataset/dataset.jsonl"
-echo "  export/dataset/predictions.gold.jsonl"
-echo "  eval/validation.jsonl"
+if [[ "$EVAL_OK" -eq 1 ]]; then
+    echo "Artifacts written to $OUT_DIR:"
+    echo "  mine/repo_profile.json"
+    echo "  mine/candidates.jsonl"
+    echo "  review/reviewed.jsonl"
+    echo "  review/review.html"
+    echo "  export/dataset/dataset.jsonl"
+    echo "  export/dataset/predictions.gold.jsonl"
+    echo "  eval/validation.jsonl"
+else
+    echo "Artifacts written to $OUT_DIR:"
+    echo "  mine/repo_profile.json"
+    echo "  mine/candidates.jsonl"
+    echo "  review/reviewed.jsonl"
+    echo "  review/review.html"
+    echo "  export/dataset/dataset.jsonl"
+    echo "  export/dataset/predictions.gold.jsonl"
+    echo ""
+    echo "WARNING: eval step failed (swebench not installed — run 'pip install swebench' to enable harness evaluation)"
+fi
