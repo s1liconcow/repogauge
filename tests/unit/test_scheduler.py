@@ -90,11 +90,15 @@ class ReplayAdapter(SolverAdapter):
 class CaptureAdapter(SolverAdapter):
     """Adapter that records request inputs for assertions."""
 
-    def __init__(self, statuses: list[str], patch: str = "", timed: float = 0.0) -> None:
+    def __init__(
+        self, statuses: list[str], patch: str = "", timed: float = 0.0
+    ) -> None:
         self._statuses = list(statuses)
         self._patch = patch
         self._timed = timed
-        self.prepare_requests: list[tuple[tuple[str, str], dict[str, object] | None]] = []
+        self.prepare_requests: list[
+            tuple[tuple[str, str], dict[str, object] | None]
+        ] = []
 
     def prepare_request(
         self,
@@ -270,7 +274,11 @@ def test_scheduler_preserves_dataset_row_in_prepare_request(tmp_path: Path) -> N
     scheduler = SolverScheduler(config=SolverSchedulerConfig(default_solver_budget=1))
     adapter = CaptureAdapter([SolverAttemptState.SUCCEEDED])
     dataset_rows = {
-        "i-1": {"instance_id": "i-1", "repo": "sample/repo", "problem_statement": "fix me"}
+        "i-1": {
+            "instance_id": "i-1",
+            "repo": "sample/repo",
+            "problem_statement": "fix me",
+        }
     }
 
     summary = scheduler.run(
@@ -281,11 +289,16 @@ def test_scheduler_preserves_dataset_row_in_prepare_request(tmp_path: Path) -> N
 
     assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
     assert adapter.prepare_requests == [
-        (("run-1:i-1:solver-a:0:attempt-1", "run-1:i-1:solver-a:0"), dataset_rows["i-1"])
+        (
+            ("run-1:i-1:solver-a:0:attempt-1", "run-1:i-1:solver-a:0"),
+            dataset_rows["i-1"],
+        )
     ]
 
 
-def test_scheduler_applies_solver_budget_and_marks_terminal_state(tmp_path: Path) -> None:
+def test_scheduler_applies_solver_budget_and_marks_terminal_state(
+    tmp_path: Path,
+) -> None:
     job = _job(job_id="run-1:i-1:solver-b:0", solver_id="solver-b")
     scheduler = SolverScheduler(config=SolverSchedulerConfig(default_solver_budget=1))
     adapter = CaptureAdapter([SolverAttemptState.INVALID_PATCH])
