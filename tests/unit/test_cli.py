@@ -663,6 +663,7 @@ solvers:
             self.assertTrue(Path(paths["analyze_report_csv"]).exists())
             self.assertTrue(Path(paths["analyze_report_parquet"]).exists())
             self.assertTrue(Path(paths["analyze_report_html"]).exists())
+            self.assertTrue(Path(paths["router_train"]).exists())
             self.assertEqual(manifest["step_statuses"]["execute"], "succeeded")
 
             summary = json.loads(
@@ -671,6 +672,100 @@ solvers:
             self.assertEqual(summary["metadata"]["attempt_rows"], 2)
             self.assertEqual(summary["metadata"]["instance_result_rows"], 2)
             self.assertEqual(len(summary["summary"]), 1)
+            self.assertEqual(summary["metadata"]["router_training_rows"], 2)
+
+    def test_train_router_writes_report_from_router_training_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            run_root = Path(workspace) / "unit-run"
+            run_root.mkdir()
+            router_train_path = run_root / "router_train.parquet"
+            from repogauge.runner.router import (
+                build_router_training_rows,
+                write_router_training_rows,
+            )
+
+            attempts = [
+                {
+                    "attempt_id": "a-1",
+                    "attempt_index": 1,
+                    "instance_id": "inst-1",
+                    "solver_id": "solver-cheap",
+                    "duration_ms": 10,
+                    "cost": {"total_cost": 1.0},
+                    "attempt_state": "succeeded",
+                    "resolved": True,
+                    "harness_outcome": "resolved",
+                    "repo": "owner/repo",
+                    "base_commit": "abc123",
+                    "version": "1.0.0",
+                    "problem_statement": "Fix inst-1",
+                    "task_feature_version": "task-features-v1",
+                    "task_feature_hash": "hash-inst-1",
+                    "task_cluster": "len=short|signal=neutral|version=semantic",
+                    "task_features": {"repo": "owner/repo"},
+                    "prompt_policy_hash": "prompt-cheap",
+                    "tool_policy_hash": "tool-cheap",
+                    "solver_config_hash": "config-cheap",
+                },
+                {
+                    "attempt_id": "b-1",
+                    "attempt_index": 1,
+                    "instance_id": "inst-1",
+                    "solver_id": "solver-expensive",
+                    "duration_ms": 12,
+                    "cost": {"total_cost": 12.0},
+                    "attempt_state": "succeeded",
+                    "resolved": True,
+                    "harness_outcome": "resolved",
+                    "repo": "owner/repo",
+                    "base_commit": "abc123",
+                    "version": "1.0.0",
+                    "problem_statement": "Fix inst-1",
+                    "task_feature_version": "task-features-v1",
+                    "task_feature_hash": "hash-inst-1",
+                    "task_cluster": "len=short|signal=neutral|version=semantic",
+                    "task_features": {"repo": "owner/repo"},
+                    "prompt_policy_hash": "prompt-expensive",
+                    "tool_policy_hash": "tool-expensive",
+                    "solver_config_hash": "config-expensive",
+                },
+            ]
+            instance_results = [
+                {
+                    "instance_id": "inst-1",
+                    "solver_id": "solver-cheap",
+                    "harness_outcome": "resolved",
+                    "resolved": True,
+                },
+                {
+                    "instance_id": "inst-1",
+                    "solver_id": "solver-expensive",
+                    "harness_outcome": "resolved",
+                    "resolved": True,
+                },
+            ]
+            write_router_training_rows(
+                router_train_path,
+                build_router_training_rows(attempts, instance_results),
+            )
+
+            report_out = Path(workspace) / "router_report_out"
+            result = main(
+                [
+                    "train-router",
+                    str(router_train_path),
+                    "--out",
+                    str(report_out),
+                ]
+            )
+            self.assertEqual(result, 0)
+            report_path = report_out / "router_report.json"
+            self.assertTrue(report_path.exists())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["instance_count"], 1)
+            self.assertEqual(report["cheap_solver_id"], "solver-cheap")
+            self.assertEqual(len(report["policies"]), 4)
+            self.assertEqual(report["policies"][0]["policy"], "always_cheap")
 
     def test_analyze_fails_when_attempts_missing(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

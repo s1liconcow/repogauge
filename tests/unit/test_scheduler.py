@@ -288,6 +288,14 @@ class SleepyAdapter(SolverAdapter):
 def _read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         return []
+    if path.suffix == ".parquet":
+        try:
+            import pyarrow.parquet as pq  # type: ignore
+
+            table = pq.read_table(path)
+            return table.to_pylist()
+        except Exception:
+            pass
     return [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()

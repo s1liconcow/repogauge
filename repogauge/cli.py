@@ -36,6 +36,11 @@ from repogauge.runner.analyze import (
 from repogauge.runner.features import TASK_FEATURE_VERSION
 from repogauge.runner.matrix import MatrixConfigurationError, load_matrix_config
 from repogauge.runner.adapters import SolverAdapterError, build_solver_adapters
+from repogauge.runner.router import (
+    build_router_training_rows,
+    run_router_training,
+    write_router_training_rows,
+)
 from repogauge.runner.scheduler import (
     SolverAttemptState,
     SolverScheduler,
@@ -1254,6 +1259,8 @@ def _run_command(namespace: argparse.Namespace) -> int:
         try:
             attempt_rows = load_attempt_rows(attempts_path)
             instance_results = load_instance_result_rows(instance_results_path)
+            router_rows = build_router_training_rows(attempt_rows, instance_results)
+            router_train_path = run_root / "router_train.parquet"
             summary_rows = summarize_attempt_metrics(
                 attempts=attempt_rows,
                 instance_results=instance_results,
@@ -1276,6 +1283,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "task_feature_version": TASK_FEATURE_VERSION,
                     "attempt_rows": len(attempt_rows),
                     "instance_result_rows": len(instance_results),
+                    "router_training_rows": len(router_rows),
                 },
             )
             write_summary_csv(
@@ -1298,8 +1306,10 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "task_feature_version": TASK_FEATURE_VERSION,
                     "attempt_rows": len(attempt_rows),
                     "instance_result_rows": len(instance_results),
+                    "router_training_rows": len(router_rows),
                 },
             )
+            write_router_training_rows(router_train_path, router_rows)
 
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
             manifest.mark_step(
@@ -1312,6 +1322,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.artifact_paths["analyze_report_csv"] = str(report_csv_path)
             manifest.artifact_paths["analyze_report_parquet"] = str(report_parquet_path)
             manifest.artifact_paths["analyze_report_html"] = str(report_html_path)
+            manifest.artifact_paths["router_train"] = str(router_train_path)
             manifest.artifact_paths["analyze_attempts"] = str(attempts_path)
             manifest.artifact_paths["analyze_instance_results"] = str(
                 instance_results_path
@@ -1324,6 +1335,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 "attempt_rows": len(attempt_rows),
                 "instance_result_rows": len(instance_results),
                 "summary_rows": len(summary_rows),
+                "router_training_rows": len(router_rows),
                 "source": str(analyze_root),
             }
             manifest.mark_step(
@@ -1355,6 +1367,159 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.finish(
                 status="failed",
                 metadata={"reason": "analyze_failed", "error": str(exc)},
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            return 1
+
+    if command == "train-router":
+        if not namespace.path:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed", metadata={"reason": "missing_router_training_input"}
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": "missing router training path",
+                },
+                events_path,
+            )
+            return 1
+
+        source = Path(namespace.path).resolve()
+        router_train_path: Path | None
+        if source.is_file():
+            router_train_path = source
+        else:
+            candidates = [
+                source / "router_train.parquet",
+                source / "analyze" / "router_train.parquet",
+            ]
+            router_train_path = next((candidate for candidate in candidates if candidate.exists()), None)
+
+        if router_train_path is None or not router_train_path.exists():
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={
+                    "reason": "router_training_input_not_found",
+                    "path": str(source),
+                },
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": f"router training artifact not found: {source}",
+                },
+                events_path,
+            )
+            return 1
+
+        report_out_root = (
+            Path(namespace.out).resolve() if namespace.out else router_train_path.parent
+        )
+
+        manifest.mark_step(
+            "inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp
+        )
+        try:
+            report = run_router_training(
+                router_train_path,
+                out_root=report_out_root,
+            )
+            report_path = Path(report["router_report_path"])
+            manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+            manifest.mark_step(
+                "execute",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.artifact_paths["router_train"] = str(router_train_path)
+            manifest.artifact_paths["router_report"] = str(report_path)
+            manifest.metadata["train_router"] = {
+                "router_train_path": str(router_train_path),
+                "router_report_path": str(report_path),
+                "instance_count": report["instance_count"],
+                "report": report["report"],
+            }
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.finish(status="succeeded", metadata={"reason": "train_router_complete"})
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                },
+                events_path,
+            )
+            return 0
+        except Exception as exc:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={"reason": "train_router_failed", "error": str(exc)},
             )
             manifest.mark_step(
                 "finish",

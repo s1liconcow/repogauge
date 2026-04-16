@@ -13,6 +13,14 @@ from .adapters import (
     build_solver_adapters,
 )
 from .features import TASK_FEATURE_VERSION, TaskFeatureBundle, build_task_feature_bundle
+from .router import (
+    build_router_training_rows,
+    evaluate_router_baselines,
+    load_router_training_rows,
+    run_router_training,
+    write_router_report,
+    write_router_training_rows,
+)
 from .scheduler import (
     SolverAdapter,
     SolverAdapterRequest,
@@ -49,6 +57,12 @@ __all__ = [
     "TASK_FEATURE_VERSION",
     "TaskFeatureBundle",
     "build_task_feature_bundle",
+    "build_router_training_rows",
+    "evaluate_router_baselines",
+    "load_router_training_rows",
+    "run_router_training",
+    "write_router_report",
+    "write_router_training_rows",
     "SolverAdapterError",
     "SolverAdapter",
     "SolverAdapterRequest",
