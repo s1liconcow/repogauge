@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Run repogauge against this repository.
 # Usage: scripts/gauge_self.sh [--out DIR] [--max-commits N] [--decisions FILE]
+#                               [--eval-workers N] [--eval-batch-size N]
+#                               [--eval-max-parallel-batches N]
+#                               [--eval-workers-per-batch N] [--eval-timeout SECONDS]
 
 set -euo pipefail
 
@@ -10,12 +13,22 @@ OUT_DIR="$REPO_ROOT/out"
 # resolve the git root by walking up from the output directory.
 MAX_COMMITS=100
 DECISIONS_FILE=""
+EVAL_WORKERS=4
+EVAL_BATCH_SIZE=32
+EVAL_MAX_PARALLEL_BATCHES=1
+EVAL_WORKERS_PER_BATCH=1
+EVAL_TIMEOUT=120
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --out)        OUT_DIR="$2";       shift 2 ;;
-        --max-commits) MAX_COMMITS="$2";  shift 2 ;;
-        --decisions)  DECISIONS_FILE="$2"; shift 2 ;;
+        --out) OUT_DIR="$2"; shift 2 ;;
+        --max-commits) MAX_COMMITS="$2"; shift 2 ;;
+        --decisions) DECISIONS_FILE="$2"; shift 2 ;;
+        --eval-workers) EVAL_WORKERS="$2"; shift 2 ;;
+        --eval-batch-size) EVAL_BATCH_SIZE="$2"; shift 2 ;;
+        --eval-max-parallel-batches) EVAL_MAX_PARALLEL_BATCHES="$2"; shift 2 ;;
+        --eval-workers-per-batch) EVAL_WORKERS_PER_BATCH="$2"; shift 2 ;;
+        --eval-timeout) EVAL_TIMEOUT="$2"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -44,9 +57,17 @@ uv run repogauge export "$REVIEW_OUT/reviewed.jsonl" \
     --llm-mode off
 
 echo "==> eval: running gold evaluation"
-if uv run repogauge eval "$EXPORT_OUT" \
-    --gold \
-    --out "$EVAL_OUT"; then
+EVAL_ARGS=(
+    eval "$EXPORT_OUT"
+    --gold
+    --out "$EVAL_OUT"
+    --workers "$EVAL_WORKERS"
+    --batch-size "$EVAL_BATCH_SIZE"
+    --max-parallel-batches "$EVAL_MAX_PARALLEL_BATCHES"
+    --workers-per-batch "$EVAL_WORKERS_PER_BATCH"
+    --timeout "$EVAL_TIMEOUT"
+)
+if uv run repogauge "${EVAL_ARGS[@]}"; then
     EVAL_OK=1
 else
     EVAL_OK=0

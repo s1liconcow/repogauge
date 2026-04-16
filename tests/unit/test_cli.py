@@ -427,6 +427,77 @@ class TestCliSurface(unittest.TestCase):
                 mock_eval.call_args.kwargs["gold_if_missing"],
                 "explicit predictions should disable gold generation",
             )
+            self.assertEqual(mock_eval.call_args.kwargs["workers"], 4)
+            judge_config = mock_eval.call_args.kwargs["judge_config"]
+            self.assertEqual(judge_config.batch_size, 32)
+            self.assertEqual(judge_config.max_parallel_batches, 1)
+            self.assertEqual(judge_config.workers_per_batch, 1)
+
+    def test_eval_parallelism_flags_override_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_path = Path(workspace) / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            predictions_path = Path(workspace) / "predictions.jsonl"
+            predictions_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "model_name_or_path": "agent",
+                        "model_patch": "diff",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            out_root = Path(workspace) / "out"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                )
+                result = main(
+                    [
+                        "eval",
+                        str(dataset_path),
+                        "--predictions",
+                        str(predictions_path),
+                        "--out",
+                        str(out_root),
+                        "--workers",
+                        "6",
+                        "--batch-size",
+                        "8",
+                        "--max-parallel-batches",
+                        "3",
+                        "--workers-per-batch",
+                        "2",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            mock_eval.assert_called_once()
+            self.assertEqual(mock_eval.call_args.kwargs["workers"], 6)
+            judge_config = mock_eval.call_args.kwargs["judge_config"]
+            self.assertEqual(judge_config.batch_size, 8)
+            self.assertEqual(judge_config.max_parallel_batches, 3)
+            self.assertEqual(judge_config.workers_per_batch, 2)
 
     def test_eval_manifest_records_batched_artifact_paths(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
