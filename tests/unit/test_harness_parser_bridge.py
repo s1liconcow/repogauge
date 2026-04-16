@@ -24,7 +24,9 @@ XML = """\
 """
 
 
-def test_parse_repogauge_junit_accepts_path_and_payload_variants(tmp_path: Path) -> None:
+def test_parse_repogauge_junit_accepts_path_and_payload_variants(
+    tmp_path: Path,
+) -> None:
     xml_path = tmp_path / "results.xml"
     xml_path.write_text(textwrap.dedent(XML), encoding="utf-8")
 
@@ -48,4 +50,3 @@ def test_parse_repogauge_junit_rejects_unknown_payload():
 def test_parse_repogauge_junit_propagates_parse_error_for_malformed_xml():
     with pytest.raises(JUnitParseError, match="malformed"):
         parse_repogauge_junit("<not valid xml")
-
