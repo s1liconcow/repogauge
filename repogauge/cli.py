@@ -171,7 +171,7 @@ def _build_parser() -> argparse.ArgumentParser:
             cmd.add_argument(
                 "--container-runtime",
                 choices=["docker", "podman"],
-                default="docker",
+                default="podman",
                 help="Container runtime backing the Docker-compatible API.",
             )
             cmd.add_argument(
@@ -1133,7 +1133,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     max_parallel_batches=getattr(namespace, "max_parallel_batches", 1),
                     workers_per_batch=getattr(namespace, "workers_per_batch", 1),
                 ),
-                container_runtime=getattr(namespace, "container_runtime", "docker"),
+                container_runtime=getattr(namespace, "container_runtime", "podman"),
                 container_host=getattr(namespace, "container_host", None),
             )
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)

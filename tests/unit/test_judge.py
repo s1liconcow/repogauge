@@ -102,6 +102,7 @@ def test_prepare_batches_and_ordered_merge(tmp_path: Path) -> None:
             workers=1,
             timeout_seconds=120,
             gold_if_missing=False,
+            container_runtime="docker",
             judge_config=JudgeSchedulerConfig(
                 batch_size=2,
                 max_parallel_batches=2,
@@ -182,6 +183,7 @@ def test_run_harness_evaluation_marks_missing_predictions_as_skipped(
             workers=1,
             timeout_seconds=120,
             gold_if_missing=False,
+            container_runtime="docker",
             judge_config=JudgeSchedulerConfig(batch_size=32),
         )
 
@@ -323,7 +325,7 @@ def test_invoke_swebench_harness_uses_local_instance_images(tmp_path: Path) -> N
         )
 
     assert result == {"resolved_ids": ["inst-a"]}
-    assert docker_env["DOCKER_HOST"] is None
+    assert docker_env["DOCKER_HOST"] == "unix:///tmp/podman.sock"
     assert calls["build_env_images"]["client"] is fake_client
     assert calls["build_env_images"]["namespace"] is None
     assert calls["run_instances"]["namespace"] is None

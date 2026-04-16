@@ -899,7 +899,7 @@ def _invoke_swebench_harness(
     out_root: Path,
     workers: int,
     timeout_seconds: int,
-    container_runtime: str = "docker",
+    container_runtime: str = "podman",
     container_host: str | None = None,
 ) -> Any:
     """Call the swebench 4.x ``run_instances`` API."""
@@ -986,7 +986,7 @@ def run_harness_evaluation(
     timeout_seconds: int = 120,
     gold_if_missing: bool = False,
     judge_config: JudgeSchedulerConfig | None = None,
-    container_runtime: str = "docker",
+    container_runtime: str = "podman",
     container_host: str | None = None,
 ) -> HarnessRunSummary:
     """Run official SWE-bench harness and normalize outputs.
