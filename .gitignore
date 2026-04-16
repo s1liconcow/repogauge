@@ -3,6 +3,7 @@ __pycache__/
 .repogauge
 out/
 .e2e_tmp/
+**/__pycache__
 
 # bv (beads viewer) local config and caches
 .bv/
