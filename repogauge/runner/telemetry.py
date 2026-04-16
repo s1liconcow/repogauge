@@ -27,8 +27,9 @@ class AttemptTelemetry:
     attempt_id: str
     provider: str
     started_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-        + "Z"
+        default_factory=lambda: (
+            datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+        )
     )
     ended_at: Optional[str] = None
     usage: UsageSnapshot = field(default_factory=UsageSnapshot)

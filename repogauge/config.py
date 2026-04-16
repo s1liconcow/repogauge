@@ -51,8 +51,9 @@ class RepoProfile(ContractRecord):
     install_cmds: List[str] = field(default_factory=list)
     test_cmds: List[str] = field(default_factory=list)
     updated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-        + "Z"
+        default_factory=lambda: (
+            datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+        )
     )
     metadata: Dict[str, Any] = field(default_factory=dict)
 
