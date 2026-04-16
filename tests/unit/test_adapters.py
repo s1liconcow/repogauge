@@ -57,6 +57,12 @@ def _solver(*, adapter: str = SOLVER_ADAPTER_MOCK) -> MatrixSolver:
 
 class TestAdapters(unittest.TestCase):
     def test_build_solver_adapters_constructs_mock_adapter(self) -> None:
+        instance_row = {
+            "instance_id": "repo__sample-1",
+            "repo": "repo",
+            "base_commit": "abc123",
+            "problem_statement": "fix bug",
+        }
         adapters = build_solver_adapters(
             solvers=(_solver(),),
             providers=(_provider(),),
@@ -68,6 +74,7 @@ class TestAdapters(unittest.TestCase):
             job=_job(job_id="run-1:repo__sample-1:solver-a:0"),
             attempt_id="run-1:repo__sample-1:solver-a:0:attempt-1",
             attempt_index=1,
+            instance_row=instance_row,
         )
         result = adapter.execute_attempt(request)
         self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
@@ -95,11 +102,41 @@ class TestAdapters(unittest.TestCase):
             )
 
     def test_build_solver_adapters_rejects_unsupported_adapter(self) -> None:
+        instance_row = {
+            "instance_id": "repo__sample-1",
+            "repo": "repo",
+            "base_commit": "abc123",
+            "problem_statement": "fix bug",
+        }
+        openai_adapters = build_solver_adapters(
+            solvers=(_solver(adapter=SOLVER_ADAPTER_OPENAI_RESPONSES),),
+            providers=(_provider(),),
+        )
+        self.assertEqual(list(openai_adapters.keys()), ["solver-a"])
+
+        adapter = openai_adapters["solver-a"]
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:1"),
+            attempt_id="run-1:repo__sample-1:solver-a:1:attempt-1",
+            attempt_index=1,
+            instance_row=instance_row,
+        )
+        result = adapter.execute_attempt(request)
+        self.assertEqual(result.status, SolverAttemptState.FAILED)
+
+    def test_build_solver_adapters_rejects_unknown_adapter(self) -> None:
+        provider = MatrixProvider(
+            provider_id="mock",
+            kind="mock",
+            config={},
+            redacted_config={},
+            raw={},
+        )
         with self.assertRaisesRegex(
             SolverAdapterError,
-            "not implemented in this release",
+            "unsupported solver adapter",
         ):
             build_solver_adapters(
-                solvers=(_solver(adapter=SOLVER_ADAPTER_OPENAI_RESPONSES),),
-                providers=(_provider(),),
+                solvers=(_solver(adapter="bogus"),),
+                providers=(provider,),
             )
