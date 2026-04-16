@@ -350,6 +350,8 @@ def _register_adapter_maps(adapter_context: Mapping[str, Any]) -> Dict[str, Any]
         return {}
 
     candidates = (
+        "swebench.harness.constants",
+        "swebench.harness.log_parsers",
         "swebench.harness.test_spec",
         "swebench.harness.test_spec.test_spec",
     )
@@ -633,6 +635,10 @@ def _invoke_swebench_harness(
 
     run_id = f"repogauge-{out_root.parent.name}-{out_root.name}"
     client = docker_module.from_env()
+    # Repogauge materializes local, repo-specific datasets. Passing a namespace
+    # makes swebench treat instance images as remote and attempt a docker pull
+    # like ``swebench/sweb.eval...<instance_id>``, which fails for local runs.
+    namespace = None
 
     print("repogauge eval: building environment images", file=sys.stderr)
     run_module.build_env_images(
@@ -640,7 +646,7 @@ def _invoke_swebench_harness(
         instances,
         force_rebuild=False,
         max_workers=workers,
-        namespace="swebench",
+        namespace=namespace,
         instance_image_tag="latest",
         env_image_tag="latest",
     )
@@ -662,13 +668,13 @@ def _invoke_swebench_harness(
             max_workers=workers,
             run_id=run_id,
             timeout=timeout_seconds,
-            namespace="swebench",
+            namespace=namespace,
         )
         report_path = run_module.make_run_report(
             predictions,
             instances,
             run_id,
-            namespace="swebench",
+            namespace=namespace,
         )
         return json.loads(report_path.read_text())
     finally:

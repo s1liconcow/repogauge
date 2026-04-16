@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
+import types
 from unittest.mock import patch
 
 from repogauge.runner.judge import (
     HarnessRunSummary,
     JudgeBatchResult,
     JudgeSchedulerConfig,
+    _invoke_swebench_harness,
+    _register_adapter_maps,
     run_harness_evaluation,
     _parse_harness_results,
     _result_row_from_instance,
@@ -224,3 +228,140 @@ def test_parse_harness_results_supports_swebench_4x_id_lists() -> None:
     assert rows[2]["reason"] == "harness error"
     assert rows[3]["status"] == "error"
     assert rows[3]["reason"] == "incomplete"
+
+
+def test_invoke_swebench_harness_uses_local_instance_images(tmp_path: Path) -> None:
+    dataset_rows = [_dataset_row(instance_id="inst-a", model="solver-x")]
+    predictions_rows = [
+        {
+            "instance_id": "inst-a",
+            "model_name_or_path": "solver-x",
+            "model_patch": "diff",
+        }
+    ]
+    dataset_path = tmp_path / "dataset.jsonl"
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+        encoding="utf-8",
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in predictions_rows),
+        encoding="utf-8",
+    )
+
+    out_root = tmp_path / "eval"
+    out_root.mkdir()
+    report_path = out_root / "report.json"
+    report_path.write_text(json.dumps({"resolved_ids": ["inst-a"]}), encoding="utf-8")
+
+    fake_client = object()
+    docker_module = types.ModuleType("docker")
+    docker_module.from_env = lambda: fake_client
+
+    run_module = types.ModuleType("swebench.harness.run_evaluation")
+
+    calls: dict[str, dict] = {}
+
+    def fake_build_env_images(client, instances, **kwargs):
+        calls["build_env_images"] = {
+            "client": client,
+            "instances": instances,
+            **kwargs,
+        }
+
+    def fake_run_instances(**kwargs):
+        calls["run_instances"] = kwargs
+
+    def fake_make_run_report(predictions, instances, run_id, **kwargs):
+        calls["make_run_report"] = {
+            "predictions": predictions,
+            "instances": instances,
+            "run_id": run_id,
+            **kwargs,
+        }
+        return report_path
+
+    run_module.build_env_images = fake_build_env_images
+    run_module.run_instances = fake_run_instances
+    run_module.make_run_report = fake_make_run_report
+
+    swebench_pkg = types.ModuleType("swebench")
+    harness_pkg = types.ModuleType("swebench.harness")
+    swebench_pkg.harness = harness_pkg
+    harness_pkg.run_evaluation = run_module
+
+    with patch.dict(
+        sys.modules,
+        {
+            "docker": docker_module,
+            "swebench": swebench_pkg,
+            "swebench.harness": harness_pkg,
+            "swebench.harness.run_evaluation": run_module,
+        },
+    ):
+        result = _invoke_swebench_harness(
+            dataset_path=dataset_path,
+            predictions_path=predictions_path,
+            out_root=out_root,
+            workers=2,
+            timeout_seconds=120,
+        )
+
+    assert result == {"resolved_ids": ["inst-a"]}
+    assert calls["build_env_images"]["client"] is fake_client
+    assert calls["build_env_images"]["namespace"] is None
+    assert calls["run_instances"]["namespace"] is None
+    assert calls["make_run_report"]["namespace"] is None
+
+
+def test_register_adapter_maps_patches_grading_source_modules() -> None:
+    constants_module = types.ModuleType("swebench.harness.constants")
+    constants_module.MAP_REPO_TO_EXT = {}
+    constants_module.MAP_REPO_VERSION_TO_SPECS = {}
+
+    log_parsers_module = types.ModuleType("swebench.harness.log_parsers")
+    log_parsers_module.MAP_REPO_TO_PARSER = {}
+
+    test_spec_module = types.ModuleType("swebench.harness.test_spec.test_spec")
+    test_spec_module.MAP_REPO_TO_EXT = constants_module.MAP_REPO_TO_EXT
+    test_spec_module.MAP_REPO_VERSION_TO_SPECS = (
+        constants_module.MAP_REPO_VERSION_TO_SPECS
+    )
+    test_spec_module.MAP_REPO_TO_PARSER = log_parsers_module.MAP_REPO_TO_PARSER
+
+    test_spec_package = types.ModuleType("swebench.harness.test_spec")
+    test_spec_package.MAP_REPO_TO_EXT = constants_module.MAP_REPO_TO_EXT
+    test_spec_package.MAP_REPO_VERSION_TO_SPECS = (
+        constants_module.MAP_REPO_VERSION_TO_SPECS
+    )
+    test_spec_package.MAP_REPO_TO_PARSER = log_parsers_module.MAP_REPO_TO_PARSER
+
+    adapter_context = {
+        "maps": {
+            "repo_to_ext": {"owner/repo": "py"},
+            "repo_version_to_specs": {
+                "owner/repo": {"v1": {"test_cmd": "python -m pytest"}}
+            },
+            "repo_to_parser": {"owner/repo": object()},
+        }
+    }
+
+    with patch.dict(
+        sys.modules,
+        {
+            "swebench.harness.constants": constants_module,
+            "swebench.harness.log_parsers": log_parsers_module,
+            "swebench.harness.test_spec": test_spec_package,
+            "swebench.harness.test_spec.test_spec": test_spec_module,
+        },
+    ):
+        patched = _register_adapter_maps(adapter_context)
+
+    assert patched["MAP_REPO_TO_EXT"] == {"owner/repo": "py"}
+    assert constants_module.MAP_REPO_TO_EXT["owner/repo"] == "py"
+    assert (
+        constants_module.MAP_REPO_VERSION_TO_SPECS["owner/repo"]["v1"]["test_cmd"]
+        == "python -m pytest"
+    )
+    assert "owner/repo" in log_parsers_module.MAP_REPO_TO_PARSER
