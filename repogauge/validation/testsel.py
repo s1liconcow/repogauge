@@ -13,7 +13,7 @@ _TEST_NODE_RE = re.compile(
 _TEST_CLASS_RE = re.compile(r"^\+\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:(]")
 _PYTEST_CMD_PREFIX = "python -m pytest"
 _JUNIT_XML_PLACEHOLDER = "{junit_xml}"
-_JUNIT_XML_FLAGS = ("--junit-xml=", "--junitxml=")
+_JUNIT_XML_FLAGS = ("--junit-xml", "--junitxml")
 
 
 def _dedupe(values: List[str]) -> List[str]:
@@ -53,13 +53,11 @@ def _is_pytest_cmd(test_cmd_base: str) -> bool:
 def _command_has_flag(parts: List[str], flag: str) -> bool:
     if not parts:
         return False
-    if flag.endswith("="):
-        return any(
-            part.startswith(junit_flag)
-            for part in parts
-            for junit_flag in _JUNIT_XML_FLAGS
-        )
-    return flag in parts
+    return any(part == flag or part.startswith(f"{flag}=") for part in parts)
+
+
+def _command_has_junit_flag(parts: List[str]) -> bool:
+    return any(_command_has_flag(parts, flag) for flag in _JUNIT_XML_FLAGS)
 
 
 def _build_pytest_targeted_cmd(test_cmd_base: str) -> str:
@@ -76,7 +74,7 @@ def _build_pytest_targeted_cmd(test_cmd_base: str) -> str:
         parts.append("--tb=no")
     if not _command_has_flag(parts, "-q"):
         parts.append("-q")
-    if not _command_has_flag(parts, "--junit-xml="):
+    if not _command_has_junit_flag(parts):
         parts.append(f"--junit-xml={_JUNIT_XML_PLACEHOLDER}")
 
     return " ".join(parts)

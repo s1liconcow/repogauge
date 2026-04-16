@@ -45,6 +45,8 @@ from repogauge.validation.evidence import (
 from repogauge.validation.testsel import build_targeted_test_plan
 
 
+_JUNIT_XML_FLAGS = ("--junit-xml", "--junitxml")
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -86,6 +88,35 @@ def _resolve_test_cmd(test_cmd_base: str) -> List[str]:
     return parts
 
 
+def _normalize_junit_output_flag(
+    base_cmd: List[str], junit_xml: Path
+) -> Tuple[List[str], Path]:
+    """Return a command with a concrete junit output path.
+
+    Pytest supports both `--junit-xml` and `--junitxml` variants,
+    each in either space- or equals-separated form.
+    """
+    junit_output = Path(junit_xml)
+    junit_output_str = str(junit_output)
+    cmd = list(base_cmd)
+
+    for index, part in enumerate(cmd):
+        for flag in _JUNIT_XML_FLAGS:
+            prefix = f"{flag}="
+            if part == flag:
+                if index + 1 >= len(cmd):
+                    cmd.append(junit_output_str)
+                else:
+                    cmd[index + 1] = junit_output_str
+                return cmd, junit_output
+            if part.startswith(prefix):
+                cmd[index] = f"{prefix}{junit_output_str}"
+                return cmd, junit_output
+
+    cmd.append(f"--junit-xml={junit_output_str}")
+    return cmd, junit_output
+
+
 class PytestExecutionError(RuntimeError):
     """Raised when deterministic pytest attempts fail to produce parseable output."""
 
@@ -120,7 +151,8 @@ def _pytest_command_attempts(test_cmd_base: str) -> List[List[str]]:
 
     # A common recovery path when `pytest` is not on PATH: call it through
     # the current interpreter as ``python -m pytest``.
-    if primary[0] == "pytest":
+    command_name = Path(primary[0]).name.lower()
+    if command_name in {"pytest", "pytest.exe"}:
         corrected = [sys.executable, "-m", "pytest"] + primary[1:]
         if corrected not in attempts:
             attempts.append(corrected)
@@ -149,20 +181,21 @@ def _run_pytest(
     """
     env = {**os.environ, "PYTHONPATH": str(worktree)}
     attempts: List[Dict[str, Any]] = []
-    junit_flag = f"--junit-xml={junit_xml}"
     raw = ""
     last_parse_error: str | None = None
 
     for index, base_cmd in enumerate(_pytest_command_attempts(test_cmd_base)):
-        if junit_xml.exists():
+        pytest_cmd, junit_xml_to_read = _normalize_junit_output_flag(base_cmd, junit_xml)
+
+        if junit_xml_to_read.exists():
             try:
-                junit_xml.unlink()
+                junit_xml_to_read.unlink()
             except OSError:
                 pass
 
         cmd = (
-            base_cmd
-            + ["--tb=no", "-q", junit_flag]
+            pytest_cmd
+            + ["--tb=no", "-q"]
             + (test_files if test_files else [])
         )
         result = run_command(
@@ -180,7 +213,7 @@ def _run_pytest(
         }
 
         try:
-            outcomes = parse_junit_xml(junit_xml)
+            outcomes = parse_junit_xml(junit_xml_to_read)
         except JUnitParseError as exc:
             last_parse_error = str(exc)
             attempt_entry.update(

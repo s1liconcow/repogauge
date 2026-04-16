@@ -269,20 +269,21 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
 
 def _resolve_eval_paths(source: Path) -> tuple[Path, Path]:
     """Return (dataset_path, gold_predictions_path) from a dataset path or directory."""
-    if source.is_file() or source.name == "dataset.jsonl":
+    if source.is_file():
         dataset = source
         predictions = source.parent / "predictions.gold.jsonl"
     elif source.is_dir():
-        direct_dataset = source / "dataset.jsonl"
-        direct_predictions = source / "predictions.gold.jsonl"
         nested_dataset = source / "dataset" / "dataset.jsonl"
         nested_predictions = source / "dataset" / "predictions.gold.jsonl"
-        if direct_dataset.exists():
-            dataset = direct_dataset
-            predictions = direct_predictions
-        elif nested_dataset.exists():
+        direct_dataset = source / "dataset.jsonl"
+        direct_predictions = source / "predictions.gold.jsonl"
+
+        if nested_dataset.exists():
             dataset = nested_dataset
             predictions = nested_predictions
+        elif direct_dataset.exists():
+            dataset = direct_dataset
+            predictions = direct_predictions
         else:
             dataset = direct_dataset
             predictions = direct_predictions

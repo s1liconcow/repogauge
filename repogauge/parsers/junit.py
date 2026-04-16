@@ -14,7 +14,8 @@ from repogauge.validation.junit_parser import (
 
 
 def _existing_path_from_text(report: str) -> Path | None:
-    if "\n" in report or "\r" in report:
+    report = report.strip()
+    if not report or "\n" in report or "\r" in report:
         return None
     try:
         path = Path(report)
@@ -87,7 +88,10 @@ def parse_repogauge_junit(
             value = report.get(key)
             if value is None:
                 continue
-            return parse_repogauge_junit(value, test_spec)
+            try:
+                return parse_repogauge_junit(value, test_spec)
+            except TypeError:
+                continue
 
     raise TypeError(
         f"unsupported report payload for parser: {type(report).__name__}; "

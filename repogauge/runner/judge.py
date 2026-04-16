@@ -293,6 +293,16 @@ def _instance_log_paths(
     }
 
 
+def _swebench_namespace() -> str | None:
+    """Return the image namespace for local Repogauge SWE-bench evaluation.
+
+    Repogauge materializes local repo-specific datasets, so image lookups must stay
+    local (no remote namespace prefix) to avoid pulling remote images.
+    """
+
+    return None
+
+
 def _extract_failure_summary(run_instance_log_path: Path) -> str | None:
     if not run_instance_log_path.exists():
         return None
@@ -923,7 +933,7 @@ def _invoke_swebench_harness(
     # Repogauge materializes local, repo-specific datasets. Passing a namespace
     # makes swebench treat instance images as remote and attempt a docker pull
     # like ``swebench/sweb.eval...<instance_id>``, which fails for local runs.
-    namespace = None
+    namespace = _swebench_namespace()
     env_overrides = {}
     if resolved_container_host:
         env_overrides["DOCKER_HOST"] = resolved_container_host

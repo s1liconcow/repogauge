@@ -84,7 +84,7 @@ DOCKER_SPECS = {docker_specs_repr}
 
 MAP_REPO_TO_EXT = {map_repo_to_ext_repr}
 MAP_REPO_VERSION_TO_SPECS = {map_repo_version_specs_repr}
-MAP_REPO_TO_PARSER = {map_repo_to_parser_repr}
+MAP_REPO_TO_PARSER = {{REPO: parse_repogauge_junit}}
 
 
 def get_spec() -> dict:
@@ -147,8 +147,6 @@ def _swebench_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _render_adapter(spec: Dict[str, Any]) -> str:
-    map_repo = repr(spec["repo"])
-    map_repo_to_parser = f"{{{map_repo}: parse_repogauge_junit}}"
     return _ADAPTER_TEMPLATE.format(
         repo=spec["repo"],
         repo_repr=repr(spec["repo"]),
@@ -169,7 +167,6 @@ def _render_adapter(spec: Dict[str, Any]) -> str:
                 }
             }
         ),
-        map_repo_to_parser_repr=map_repo_to_parser,
     )
 
 

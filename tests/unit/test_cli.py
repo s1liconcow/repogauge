@@ -362,6 +362,80 @@ class TestCliSurface(unittest.TestCase):
                 predictions_path,
             )
 
+    def test_eval_prefers_nested_dataset_directory_when_root_has_dataset_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_root = Path(workspace) / "artifact"
+            dataset_root.mkdir()
+
+            root_dataset_path = dataset_root / "dataset.jsonl"
+            root_dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__root",
+                        "patch": "diff --git a/root b/root\n+print('root')",
+                        "repo": "repo-root",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            dataset_dir = dataset_root / "dataset"
+            dataset_dir.mkdir()
+            nested_dataset_path = dataset_dir / "dataset.jsonl"
+            nested_predictions_path = dataset_dir / "predictions.gold.jsonl"
+            nested_dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__nested",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo-nested",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            nested_predictions_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__nested",
+                        "model_name_or_path": "gold",
+                        "model_patch": "diff",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            out_root = Path(workspace) / "out"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                )
+                result = main(
+                    ["eval", str(dataset_root), "--gold", "--out", str(out_root)]
+                )
+
+            self.assertEqual(result, 0)
+            mock_eval.assert_called_once()
+            self.assertEqual(
+                Path(mock_eval.call_args.kwargs["dataset_path"]),
+                nested_dataset_path,
+            )
+            self.assertEqual(
+                Path(mock_eval.call_args.kwargs["predictions_path"]),
+                nested_predictions_path,
+            )
+
     def test_eval_requires_predictions_or_gold(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             dataset_path = Path(workspace) / "dataset.jsonl"

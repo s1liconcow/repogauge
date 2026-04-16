@@ -122,3 +122,37 @@ def test_build_targeted_test_inputs_prefers_function_nodes() -> None:
     inputs = build_targeted_test_inputs(test_patch)
 
     assert inputs == ["tests/unit/test_nested.py::TestNested::test_case"]
+
+
+def test_build_targeted_test_plan_keeps_existing_junit_xml_space_flag() -> None:
+    test_patch = (
+        "diff --git a/tests/unit/test_thing.py b/tests/unit/test_thing.py\n"
+        "--- a/tests/unit/test_thing.py\n"
+        "+++ b/tests/unit/test_thing.py\n"
+        "@@ -1,1 +1,2 @@\n"
+        "+import pytest\n"
+    )
+
+    cmd, inputs = build_targeted_test_plan(
+        "pytest --junitxml my-tests.xml", test_patch
+    )
+
+    assert cmd == "pytest --junitxml my-tests.xml --tb=no -q"
+    assert inputs == ["tests/unit/test_thing.py"]
+
+
+def test_build_targeted_test_plan_keeps_existing_junitxml_space_flag() -> None:
+    test_patch = (
+        "diff --git a/tests/unit/test_thing.py b/tests/unit/test_thing.py\n"
+        "--- a/tests/unit/test_thing.py\n"
+        "+++ b/tests/unit/test_thing.py\n"
+        "@@ -1,1 +1,2 @@\n"
+        "+import pytest\n"
+    )
+
+    cmd, inputs = build_targeted_test_plan(
+        "pytest --junit-xml my-tests.xml", test_patch
+    )
+
+    assert cmd == "pytest --junit-xml my-tests.xml --tb=no -q"
+    assert inputs == ["tests/unit/test_thing.py"]

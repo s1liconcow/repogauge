@@ -246,6 +246,48 @@ class PrepareErrorAdapter(ReplayAdapter):
         )
 
 
+class MetadataAwareAdapter(SolverAdapter):
+    """Adapter that returns fixed metadata from execute attempts."""
+
+    def __init__(self, statuses: list[str], telemetry: list[dict[str, object]]) -> None:
+        self._statuses = list(statuses)
+        self._telemetry = telemetry
+
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+    ) -> SolverAdapterRequest:
+        return SolverAdapterRequest(
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            job=job,
+            instance_row=instance_row,
+        )
+
+    def execute_attempt(
+        self, request: SolverAdapterRequest
+    ) -> SolverAdapterResult:
+        status = (
+            self._statuses[min(request.attempt_index - 1, len(self._statuses) - 1)]
+            if self._statuses
+            else SolverAttemptState.FAILED
+        )
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=status,
+            model_patch="diff --git a/x b/x\n+ok" if status == SolverAttemptState.SUCCEEDED else None,
+            raw_output="ok",
+            usage_source="response.usage",
+            cost_source="response.cost",
+            usage={"input_tokens": 1},
+            cost={"total_cost": 0.1},
+            metadata={"telemetry": list(self._telemetry)},
+        )
+
 class TelemetryErrorAdapter(CaptureAdapter):
     def __init__(
         self, statuses: list[str], patch: str = "", timed: float = 0.0

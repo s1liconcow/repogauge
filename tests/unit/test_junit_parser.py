@@ -158,3 +158,17 @@ class TestParseJunitXml:
         results = parse_junit_xml(xml)
         assert results["tests/a.py::test_x"] == OUTCOME_PASS
         assert results["tests/b.py::test_y"] == OUTCOME_FAIL
+
+
+    def test_file_attribute_without_classname_still_resolves_to_test_path(self, tmp_path):
+        xml = _write_xml(
+            tmp_path / "results.xml",
+            """\
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuite>
+              <testcase file="tests/unit/test_file_only.py" name="test_file_variant"/>
+            </testsuite>
+        """,
+        )
+        results = parse_junit_xml(xml)
+        assert results["tests/unit/test_file_only.py::test_file_variant"] == OUTCOME_PASS

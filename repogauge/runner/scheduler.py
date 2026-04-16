@@ -309,9 +309,7 @@ def _serialize_attempt_row(
 
 
 def _safe_attempt_log_dir(root: Path, attempt_id: str) -> Path:
-    safe_id = "".join(
-        c if c.isalnum() or c in {"-", "_", ":"} else "-" for c in attempt_id
-    )
+    safe_id = "".join(c if c.isalnum() or c in {"-", "_", ":"} else "-" for c in attempt_id)
     if not safe_id:
         safe_id = "attempt"
     return root / safe_id
@@ -684,7 +682,13 @@ class SolverScheduler:
                         telemetry = (({"error": f"telemetry_error: {exc}"}),)
 
                     metadata = dict(result.metadata)
-                    metadata["telemetry"] = list(telemetry)
+                    adapter_telemetry = metadata.get("telemetry")
+                    if telemetry:
+                        metadata["telemetry"] = list(telemetry)
+                    elif isinstance(adapter_telemetry, list):
+                        metadata["telemetry"] = list(adapter_telemetry)
+                    else:
+                        metadata["telemetry"] = []
                     result = SolverAdapterResult(
                         attempt_id=result.attempt_id,
                         status=result.status,

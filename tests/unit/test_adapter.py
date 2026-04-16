@@ -87,7 +87,11 @@ class TestGenerateAdapter:
         assert mod.PARSER == "junit"
         assert mod.MODULE_NAME == "owner_proj"
         assert mod.MAP_REPO_TO_EXT["owner/proj"] == "py"
-        assert mod.registration_context()["repo"] == "owner/proj"
+        context = mod.registration_context()
+        assert context["repo"] == "owner/proj"
+        assert context["maps"]["repo_to_ext"] == mod.MAP_REPO_TO_EXT
+        assert context["maps"]["repo_version_to_specs"] == mod.MAP_REPO_VERSION_TO_SPECS
+        assert context["maps"]["repo_to_parser"] == mod.MAP_REPO_TO_PARSER
         adapter_spec = mod.get_spec()
         assert isinstance(adapter_spec, dict)
         assert adapter_spec["repo"] == "owner/proj"

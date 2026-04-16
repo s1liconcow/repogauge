@@ -259,7 +259,7 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.cost, {"total_cost": 0.5})
         self.assertEqual(result.stderr_output, "")
 
-    def test_codex_cli_adapter_preserves_stderr_on_failure(self) -> None:
+    def test_codex_cli_adapter_preserves_usage_and_cost_on_failure(self) -> None:
         provider = _provider_for_command("/bin/echo")
         adapter = CodexCLIAdapter(
             solver_id="solver-a",
@@ -268,8 +268,8 @@ class TestAdapters(unittest.TestCase):
             behavior={"model": "gpt-5.4"},
         )
         request = adapter.prepare_request(
-            job=_job(job_id="run-1:repo__sample-1:solver-a:5"),
-            attempt_id="run-1:repo__sample-1:solver-a:5:attempt-1",
+            job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+            attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
             attempt_index=1,
             instance_row={
                 "instance_id": "repo__sample-1",
@@ -296,8 +296,12 @@ class TestAdapters(unittest.TestCase):
 
         self.assertEqual(result.status, SolverAttemptState.FAILED)
         self.assertEqual(result.exit_reason, "boom")
-        self.assertEqual(result.stderr_output, "boom")
+        self.assertEqual(result.usage_source, "codex_cli.event.usage")
+        self.assertEqual(result.cost_source, "codex_cli.event.cost")
+        self.assertEqual(result.usage, {"input_tokens": 5})
+        self.assertEqual(result.cost, {"total_cost": 0.5})
         self.assertEqual(result.raw_output, output)
+        self.assertEqual(result.stderr_output, "boom")
 
     def test_codex_cli_adapter_disables_ambient_codex_config(self) -> None:
         provider = _provider_for_command("codex")

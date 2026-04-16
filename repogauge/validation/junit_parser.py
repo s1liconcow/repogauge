@@ -55,7 +55,16 @@ def _split_classname(classname: str) -> tuple[str, str]:
     return path, class_chain
 
 
-def _canonical_id(classname: str, name: str) -> str:
+def _normalize_file_path(file_path: str) -> str:
+    """Normalize a file attribute from JUnit into a test-path-style string."""
+    normalized = (file_path or "").replace('\\', '/')
+    idx = normalized.rfind('/tests/')
+    if idx >= 0:
+        normalized = normalized[idx + 1 :]
+    return normalized
+
+
+def _canonical_id(classname: str, name: str, file_path: str = "") -> str:
     """Build a canonical pytest node ID from JUnit classname + test name.
 
     Returns one of::
@@ -66,6 +75,8 @@ def _canonical_id(classname: str, name: str) -> str:
     pytest encodes parametrized cases as ``name[param]``; we preserve that as-is.
     """
     if not classname:
+        if file_path:
+            return f"{file_path}::{name}"
         return name
     path, class_chain = _split_classname(classname)
     if not path:
@@ -116,10 +127,12 @@ def parse_junit_xml_content(xml_text: str) -> Dict[str, str]:
     for suite in suites:
         for testcase in suite.findall("testcase"):
             classname = (testcase.get("classname") or "").strip()
+            file_path = (testcase.get("file") or "").strip()
+            normalized_file_path = _normalize_file_path(file_path) if file_path else ""
             name = (testcase.get("name") or "").strip()
             if not name:
                 continue
-            test_id = _canonical_id(classname, name)
+            test_id = _canonical_id(classname, name, normalized_file_path)
             results[test_id] = _outcome_of(testcase)
 
     return results

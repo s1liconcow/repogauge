@@ -332,6 +332,101 @@ def test_invoke_swebench_harness_uses_local_instance_images(tmp_path: Path) -> N
     assert calls["make_run_report"]["namespace"] is None
 
 
+def test_invoke_swebench_harness_uses_local_instance_images_with_docker_runtime(
+    tmp_path: Path,
+) -> None:
+    dataset_rows = [_dataset_row(instance_id="inst-a", model="solver-x")]
+    predictions_rows = [
+        {
+            "instance_id": "inst-a",
+            "model_name_or_path": "solver-x",
+            "model_patch": "diff",
+        }
+    ]
+    dataset_path = tmp_path / "dataset.jsonl"
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+        encoding="utf-8",
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in predictions_rows),
+        encoding="utf-8",
+    )
+
+    out_root = tmp_path / "eval"
+    out_root.mkdir()
+    report_path = out_root / "report.json"
+    report_path.write_text(json.dumps({"resolved_ids": ["inst-a"]}), encoding="utf-8")
+
+    fake_client = object()
+    docker_module = types.ModuleType("docker")
+    docker_env: dict[str, str | None] = {}
+
+    def fake_from_env():
+        docker_env["DOCKER_HOST"] = os.environ.get("DOCKER_HOST")
+        return fake_client
+
+    docker_module.from_env = fake_from_env
+
+    run_module = types.ModuleType("swebench.harness.run_evaluation")
+
+    calls: dict[str, dict] = {}
+
+    def fake_build_env_images(client, instances, **kwargs):
+        calls["build_env_images"] = {
+            "client": client,
+            "instances": instances,
+            **kwargs,
+        }
+
+    def fake_run_instances(**kwargs):
+        calls["run_instances"] = kwargs
+
+    def fake_make_run_report(predictions, instances, run_id, **kwargs):
+        calls["make_run_report"] = {
+            "predictions": predictions,
+            "instances": instances,
+            "run_id": run_id,
+            **kwargs,
+        }
+        return report_path
+
+    run_module.build_env_images = fake_build_env_images
+    run_module.run_instances = fake_run_instances
+    run_module.make_run_report = fake_make_run_report
+
+    swebench_pkg = types.ModuleType("swebench")
+    harness_pkg = types.ModuleType("swebench.harness")
+    swebench_pkg.harness = harness_pkg
+    harness_pkg.run_evaluation = run_module
+
+    with patch.dict(
+        sys.modules,
+        {
+            "docker": docker_module,
+            "swebench": swebench_pkg,
+            "swebench.harness": harness_pkg,
+            "swebench.harness.run_evaluation": run_module,
+        },
+    ):
+        with patch.dict(os.environ, {"DOCKER_HOST": "tcp://remote-docker:2375"}):
+            result = _invoke_swebench_harness(
+                dataset_path=dataset_path,
+                predictions_path=predictions_path,
+                out_root=out_root,
+                workers=2,
+                timeout_seconds=120,
+                container_runtime="docker",
+            )
+
+    assert result == {"resolved_ids": ["inst-a"]}
+    assert docker_env["DOCKER_HOST"] == "tcp://remote-docker:2375"
+    assert calls["build_env_images"]["namespace"] is None
+    assert calls["run_instances"]["namespace"] is None
+    assert calls["make_run_report"]["namespace"] is None
+
+
 def test_invoke_swebench_harness_uses_podman_socket_override(tmp_path: Path) -> None:
     dataset_rows = [_dataset_row(instance_id="inst-a", model="solver-x")]
     predictions_rows = [

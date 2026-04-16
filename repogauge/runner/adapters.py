@@ -904,12 +904,14 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         usage_source = ""
         cost_source = ""
         output = command_result.stdout
+        telemetry_events: list[dict[str, Any]] = []
 
         text = ""
-        if command_result.success:
+        if output.strip():
             parsed = _parse_json_lines(output)
             text_parts = []
             for event in parsed:
+                telemetry_events.append(event)
                 if "usage" in event and isinstance(event["usage"], Mapping):
                     usage = dict(event["usage"])
                     usage_source = "codex_cli.event.usage"
@@ -926,6 +928,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             if not text and output.strip():
                 text = output.strip()
 
+        metadata = {"telemetry": telemetry_events}
         if command_result.timed_out:
             return SolverAdapterResult(
                 attempt_id=request.attempt_id,
@@ -938,6 +941,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                 cost_source=cost_source,
                 usage=usage,
                 cost=cost,
+                metadata=metadata,
             )
 
         if not command_result.success:
@@ -956,6 +960,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                 cost_source=cost_source,
                 usage=usage,
                 cost=cost,
+                metadata=metadata,
             )
 
         return SolverAdapterResult(
@@ -969,6 +974,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             cost_source=cost_source,
             usage=usage,
             cost=cost,
+            metadata=metadata,
         )
 
 

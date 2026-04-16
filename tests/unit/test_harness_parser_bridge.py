@@ -56,6 +56,48 @@ def test_parse_repogauge_junit_accepts_optional_test_spec_argument(
     }
 
 
+def test_parse_repogauge_junit_accepts_leading_trailing_whitespace_path(
+    tmp_path: Path,
+) -> None:
+    xml_path = tmp_path / "results.xml"
+    xml_path.write_text(textwrap.dedent(XML), encoding="utf-8")
+
+    parsed = parse_repogauge_junit(f" {xml_path} \n")
+
+    assert parsed == {
+        "tests/unit/test_foo.py::test_ok": OUTCOME_PASS,
+        "tests/unit/test_foo.py::test_fail": OUTCOME_FAIL,
+    }
+
+
+def test_parse_repogauge_junit_handles_nested_mapping_payloads(
+    tmp_path: Path,
+) -> None:
+    xml_path = tmp_path / "results.xml"
+    xml_path.write_text(textwrap.dedent(XML), encoding="utf-8")
+
+    parsed = parse_repogauge_junit({"output": {"junit_xml": xml_path}})
+
+    assert parsed == {
+        "tests/unit/test_foo.py::test_ok": OUTCOME_PASS,
+        "tests/unit/test_foo.py::test_fail": OUTCOME_FAIL,
+    }
+
+
+def test_parse_repogauge_junit_falls_back_to_next_candidate_if_previous_is_unsupported(
+    tmp_path: Path,
+) -> None:
+    xml_path = tmp_path / "results.xml"
+    xml_path.write_text(textwrap.dedent(XML), encoding="utf-8")
+
+    parsed = parse_repogauge_junit({"output": 123, "junit_xml": xml_path})
+
+    assert parsed == {
+        "tests/unit/test_foo.py::test_ok": OUTCOME_PASS,
+        "tests/unit/test_foo.py::test_fail": OUTCOME_FAIL,
+    }
+
+
 def test_parse_repogauge_junit_falls_back_to_pytest_log_parsing() -> None:
     parsed = parse_repogauge_junit(
         """

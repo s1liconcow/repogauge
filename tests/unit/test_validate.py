@@ -20,6 +20,13 @@ def test_pytest_command_attempts_falls_back_to_interpreter_invocation() -> None:
     assert attempts[1][0].endswith("python") or attempts[1][0].endswith("python3")
 
 
+def test_pytest_command_attempts_falls_back_for_path_based_pytest() -> None:
+    attempts = _pytest_command_attempts(".venv/bin/pytest --tb=no tests/unit")
+    assert attempts[0] == [".venv/bin/pytest", "--tb=no", "tests/unit"]
+    assert attempts[1][0].endswith("python") or attempts[1][0].endswith("python3")
+    assert attempts[1][1:] == ["-m", "pytest", "--tb=no", "tests/unit"]
+
+
 def test_run_pytest_falls_back_when_junit_xml_missing(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
