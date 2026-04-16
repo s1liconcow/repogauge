@@ -1,0 +1,19 @@
+run_id: repogauge-codex-cli
+dataset:
+  path: ../out/export/dataset/dataset.jsonl
+providers:
+  codex:
+    kind: codex_cli
+    command: codex
+execution:
+  repeats: 1
+  seed: 13
+solvers:
+  - id: codex-cli
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.4
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true

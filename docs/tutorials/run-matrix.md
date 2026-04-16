@@ -37,3 +37,21 @@ The provided `examples/matrix.yaml` intentionally stays simple:
 
 If you add real providers, replace the `mock` section with the provider you
 actually want and keep `--llm-mode` aligned with your environment policy.
+
+## 5) Codex CLI example
+
+The repo also includes a Codex CLI matrix at `examples/matrix.codex-cli.yaml`:
+
+```bash
+uv run repogauge run examples/matrix.codex-cli.yaml \
+  --dataset /path/to/dataset/dataset.jsonl \
+  --out out/run \
+  --llm-mode off
+```
+
+That matrix expects a `codex` executable on `PATH` and runs:
+
+- provider kind `codex_cli`
+- provider command `codex`
+- solver adapter `codex_cli`
+- model `gpt-5.4`
