@@ -5,7 +5,7 @@ from .planner import (
     RunManifest,
     plan_jobs,
     write_jobs,
-    write_matrix_copy,
+    write_matrix_snapshot,
     write_run_manifest,
 )
 from .adapters import (
@@ -56,7 +56,7 @@ __all__ = [
     "RunManifest",
     "plan_jobs",
     "write_jobs",
-    "write_matrix_copy",
+    "write_matrix_snapshot",
     "write_run_manifest",
     "build_solver_adapters",
     "TASK_FEATURE_VERSION",

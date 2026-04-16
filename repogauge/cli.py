@@ -52,7 +52,7 @@ from repogauge.runner.planner import (
     RunManifest,
     plan_jobs,
     write_jobs,
-    write_matrix_copy,
+    write_matrix_snapshot,
     write_run_manifest,
 )
 
@@ -1654,7 +1654,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             attempts_out = run_root / "attempts.jsonl"
             attempts_parquet_out = run_root / "attempts.parquet"
             run_summary_out = run_root / "run_summary.json"
-            write_matrix_copy(matrix_out, Path(matrix.matrix_path))
+            write_matrix_snapshot(matrix_out, matrix)
             write_jobs(jobs, jobs_out)
             run_manifest = RunManifest.from_matrix(
                 matrix=matrix,

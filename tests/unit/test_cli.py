@@ -4,6 +4,7 @@ import json
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
+import yaml
 from repogauge.runner.judge import HarnessRunSummary
 
 from repogauge.cli import _build_parser
@@ -479,6 +480,7 @@ dataset:
 providers:
   mock:
     kind: local
+    api_key: super-secret
 execution:
   repeats: 2
   seed: 7
@@ -530,8 +532,17 @@ solvers:
             self.assertEqual(run_manifest["provider_count"], 1)
             self.assertEqual(len(run_manifest["providers"]), 1)
             self.assertEqual(run_manifest["providers"][0]["provider_id"], "mock")
+            self.assertEqual(
+                run_manifest["providers"][0]["config"]["api_key"], "<redacted>"
+            )
             self.assertEqual(len(run_manifest["solvers"]), 1)
             self.assertEqual(run_manifest["solvers"][0]["solver_id"], "solver-a")
+
+            matrix_snapshot = yaml.safe_load(matrix_copy.read_text(encoding="utf-8"))
+            self.assertEqual(
+                matrix_snapshot["providers"]["mock"]["api_key"], "<redacted>"
+            )
+            self.assertNotIn("super-secret", matrix_copy.read_text(encoding="utf-8"))
 
             manifest_payload = json.loads(
                 (out / "manifest.json").read_text(encoding="utf-8")

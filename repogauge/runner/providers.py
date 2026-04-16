@@ -29,6 +29,28 @@ PROVIDER_KIND_ALIAS = {
 }
 
 REDACTION_PLACEHOLDER = "<redacted>"
+_SENSITIVE_PROVIDER_KEYS = {
+    "access_token",
+    "api_key",
+    "auth_token",
+    "client_secret",
+    "password",
+    "private_key",
+    "refresh_token",
+    "secret",
+    "token",
+}
+_SENSITIVE_PROVIDER_SUFFIXES = (
+    "_access_token",
+    "_api_key",
+    "_auth_token",
+    "_client_secret",
+    "_password",
+    "_private_key",
+    "_refresh_token",
+    "_secret",
+    "_token",
+)
 
 
 class ProviderConfigurationError(ValueError):
@@ -125,6 +147,18 @@ def _resolve_secret_value(value: Any, *, root: Path) -> tuple[bool, Any]:
     return False, value
 
 
+def _is_sensitive_provider_key(key: Any) -> bool:
+    if not isinstance(key, str):
+        return False
+
+    normalized = key.strip().lower()
+    if not normalized:
+        return False
+    if normalized in _SENSITIVE_PROVIDER_KEYS:
+        return True
+    return any(normalized.endswith(suffix) for suffix in _SENSITIVE_PROVIDER_SUFFIXES)
+
+
 def _coerce_mapping(value: Any, *, field_name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ProviderConfigurationError(f"{field_name} must be a mapping")
@@ -165,7 +199,7 @@ def normalize_provider(
             continue
 
         resolved[key] = value
-        redacted[key] = value
+        redacted[key] = REDACTION_PLACEHOLDER if _is_sensitive_provider_key(key) else value
 
     return ProviderConfig(
         provider_id=provider_id,

@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable
+
+import yaml
 
 from repogauge.config import REPOGAUGE_SCHEMA_VERSION
 from .matrix import (
@@ -263,9 +266,24 @@ def write_run_manifest(manifest: RunManifest, path: Path) -> None:
     )
 
 
-def write_matrix_copy(path: Path, matrix_path: Path) -> None:
+def write_matrix_snapshot(path: Path, matrix: MatrixConfig) -> None:
+    # Persist a normalized snapshot so run artifacts stay reproducible without
+    # copying inline secrets back out of the source matrix file.
+    snapshot = deepcopy(matrix.raw)
+    if isinstance(snapshot, dict):
+        snapshot["providers"] = {
+            provider.provider_id: {
+                "kind": provider.kind,
+                **dict(provider.redacted_config),
+            }
+            for provider in matrix.providers
+        }
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(matrix_path.read_text(encoding="utf-8"), encoding="utf-8")
+    path.write_text(
+        yaml.safe_dump(snapshot, sort_keys=False, allow_unicode=False),
+        encoding="utf-8",
+    )
 
 
 __all__ = [
@@ -273,6 +291,6 @@ __all__ = [
     "RunManifest",
     "plan_jobs",
     "write_jobs",
-    "write_matrix_copy",
+    "write_matrix_snapshot",
     "write_run_manifest",
 ]

@@ -236,6 +236,34 @@ solvers:
         assert provider.redacted_config["api_key"] == "<redacted>"
 
 
+def test_inline_provider_secrets_are_redacted_in_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        matrix_text = """
+dataset:
+  path: dataset.jsonl
+providers:
+  local:
+    kind: local
+    api_key: super-secret
+solvers:
+  - id: solver-a
+    provider: local
+    model: fake
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        matrix = load_matrix_config(matrix_path)
+        provider = matrix.providers[0]
+        assert provider.config["api_key"] == "super-secret"
+        assert provider.redacted_config["api_key"] == "<redacted>"
+
+
 def test_missing_provider_secret_is_rejected() -> None:
     with tempfile.TemporaryDirectory() as workspace:
         root = Path(workspace)
