@@ -1126,6 +1126,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 },
                 events_path,
             )
+            print(f"repogauge eval: error: {exc}", file=sys.stderr)
             return 1
 
     if command == "analyze":
