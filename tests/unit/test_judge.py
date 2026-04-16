@@ -31,9 +31,15 @@ def _dataset_row(
 
 def test_prepare_batches_and_ordered_merge(tmp_path: Path) -> None:
     dataset_rows = [
-        _dataset_row(instance_id="inst-a", model="solver-x", repo="repo-a", version="1"),
-        _dataset_row(instance_id="inst-b", model="solver-x", repo="repo-a", version="1"),
-        _dataset_row(instance_id="inst-c", model="solver-y", repo="repo-a", version="1"),
+        _dataset_row(
+            instance_id="inst-a", model="solver-x", repo="repo-a", version="1"
+        ),
+        _dataset_row(
+            instance_id="inst-b", model="solver-x", repo="repo-a", version="1"
+        ),
+        _dataset_row(
+            instance_id="inst-c", model="solver-y", repo="repo-a", version="1"
+        ),
     ]
     predictions_rows = [
         {
@@ -100,7 +106,10 @@ def test_prepare_batches_and_ordered_merge(tmp_path: Path) -> None:
     assert mock_run_batch.call_count == 2
 
     validation = [
-        json.loads(line) for line in (tmp_path / "validation.jsonl").read_text(encoding="utf-8").splitlines()
+        json.loads(line)
+        for line in (tmp_path / "validation.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     assert [row["instance_id"] for row in validation] == [
         "inst-a",
@@ -116,7 +125,9 @@ def test_prepare_batches_and_ordered_merge(tmp_path: Path) -> None:
     assert batch_results["batch_count"] == 2
 
 
-def test_run_harness_evaluation_marks_missing_predictions_as_skipped(tmp_path: Path) -> None:
+def test_run_harness_evaluation_marks_missing_predictions_as_skipped(
+    tmp_path: Path,
+) -> None:
     dataset_rows = [
         _dataset_row(instance_id="inst-a", model="solver-x"),
         _dataset_row(instance_id="inst-b", model="solver-x"),
@@ -170,7 +181,9 @@ def test_run_harness_evaluation_marks_missing_predictions_as_skipped(tmp_path: P
 
     lines = [
         json.loads(line)
-        for line in (tmp_path / "validation.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (tmp_path / "validation.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     assert lines[0]["instance_id"] == "inst-a"
     assert lines[0]["status"] == "resolved"
