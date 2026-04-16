@@ -119,6 +119,33 @@ def registration_context() -> dict:
 '''
 
 
+def _swebench_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert our internal spec to the key names swebench 4.x expects."""
+    install_cmds = spec.get("install", [])
+    if isinstance(install_cmds, list):
+        install_str = " && ".join(install_cmds) if install_cmds else "pip install -e ."
+    else:
+        install_str = install_cmds or "pip install -e ."
+
+    pre_install = list(spec.get("pre_install", []))
+    # Ensure uv is available in the conda environment when the install uses it.
+    if "uv" in install_str and "pip install uv" not in pre_install:
+        pre_install = ["pip install uv"] + pre_install
+
+    return {
+        "python": spec["python_version"],
+        "python_version": spec["python_version"],
+        "pre_install": pre_install,
+        "install": install_str,
+        "test_cmd": spec["test_cmd_base"],
+        "test_cmd_base": spec["test_cmd_base"],
+        "build": spec["build"],
+        "parser": spec["parser"],
+        "strategy_name": spec["strategy_name"],
+        "docker_specs": spec["docker_specs"],
+    }
+
+
 def _render_adapter(spec: Dict[str, Any]) -> str:
     map_repo = repr(spec["repo"])
     map_repo_to_parser = f"{{{map_repo}: parse_repogauge_junit}}"
@@ -138,15 +165,7 @@ def _render_adapter(spec: Dict[str, Any]) -> str:
         map_repo_version_specs_repr=repr(
             {
                 spec["repo"]: {
-                    spec["version"]: {
-                        "docker_specs": {"python_version": spec["python_version"]},
-                        "pre_install": spec["pre_install"],
-                        "install": spec["install"],
-                        "build": spec["build"],
-                        "test_cmd_base": spec["test_cmd_base"],
-                        "parser": spec["parser"],
-                        "strategy_name": spec["strategy_name"],
-                    }
+                    spec["version"]: _swebench_spec(spec),
                 }
             }
         ),
