@@ -1,1 +1,1 @@
-def add(a, b):\n    return a + b\n
+def add(a, b):\n    return a + b\n\n
