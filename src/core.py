@@ -1,2 +1,2 @@
 def value():
-    return 42
+    return 1
