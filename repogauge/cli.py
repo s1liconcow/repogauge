@@ -1130,9 +1130,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 gold_if_missing=gold_if_missing,
                 judge_config=JudgeSchedulerConfig(
                     batch_size=getattr(namespace, "batch_size", 32),
-                    max_parallel_batches=getattr(
-                        namespace, "max_parallel_batches", 1
-                    ),
+                    max_parallel_batches=getattr(namespace, "max_parallel_batches", 1),
                     workers_per_batch=getattr(namespace, "workers_per_batch", 1),
                 ),
                 container_runtime=getattr(namespace, "container_runtime", "docker"),

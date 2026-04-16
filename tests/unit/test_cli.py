@@ -432,9 +432,7 @@ class TestCliSurface(unittest.TestCase):
             self.assertEqual(judge_config.batch_size, 32)
             self.assertEqual(judge_config.max_parallel_batches, 1)
             self.assertEqual(judge_config.workers_per_batch, 1)
-            self.assertEqual(
-                mock_eval.call_args.kwargs["container_runtime"], "docker"
-            )
+            self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "docker")
             self.assertIsNone(mock_eval.call_args.kwargs["container_host"])
 
     def test_eval_parallelism_flags_override_defaults(self) -> None:
@@ -502,9 +500,7 @@ class TestCliSurface(unittest.TestCase):
             self.assertEqual(judge_config.batch_size, 8)
             self.assertEqual(judge_config.max_parallel_batches, 3)
             self.assertEqual(judge_config.workers_per_batch, 2)
-            self.assertEqual(
-                mock_eval.call_args.kwargs["container_runtime"], "docker"
-            )
+            self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "docker")
             self.assertIsNone(mock_eval.call_args.kwargs["container_host"])
 
     def test_eval_container_runtime_flags_override_defaults(self) -> None:
@@ -563,9 +559,7 @@ class TestCliSurface(unittest.TestCase):
 
             self.assertEqual(result, 0)
             mock_eval.assert_called_once()
-            self.assertEqual(
-                mock_eval.call_args.kwargs["container_runtime"], "podman"
-            )
+            self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "podman")
             self.assertEqual(
                 mock_eval.call_args.kwargs["container_host"],
                 "unix:///tmp/podman.sock",
