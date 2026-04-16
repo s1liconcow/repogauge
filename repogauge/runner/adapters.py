@@ -84,7 +84,9 @@ def _coerce_int(value: Any, *, field_name: str, default: int | None = None) -> i
             raise SolverAdapterError(
                 f"{field_name} must be an integer, got {value!r}"
             ) from exc
-    raise SolverAdapterError(f"{field_name} must be an integer, got {type(value).__name__}")
+    raise SolverAdapterError(
+        f"{field_name} must be an integer, got {type(value).__name__}"
+    )
 
 
 def _safe_parse_json(text: str) -> Any:
@@ -154,7 +156,9 @@ def _extract_patch_from_text(raw_output: str) -> str:
                 return normalized if normalized.endswith("\n") else normalized + "\n"
             break
 
-    for candidate in _extract_text_candidates(payload if isinstance(payload, Mapping) else {}):
+    for candidate in _extract_text_candidates(
+        payload if isinstance(payload, Mapping) else {}
+    ):
         if candidate and "diff --git" in candidate:
             normalized = candidate.strip("\n")
             return normalized if normalized.endswith("\n") else normalized + "\n"
@@ -171,7 +175,9 @@ def _extract_patch_from_text(raw_output: str) -> str:
                 code = chunk[6:end].strip()
                 if "diff --git" in code:
                     normalized = code.strip("\n")
-                    return normalized if normalized.endswith("\n") else normalized + "\n"
+                    return (
+                        normalized if normalized.endswith("\n") else normalized + "\n"
+                    )
 
     return ""
 
@@ -203,10 +209,10 @@ def _build_prompt(
     row = _coerce_mapping(instance_row, field_name="instance_row")
     prompt = [
         f"Solver {solver_id}, attempt {attempt_index}.",
-        f"Repository: {row.get('repo','')}".strip(),
-        f"Instance: {row.get('instance_id','')}".strip(),
-        f"Base commit: {row.get('base_commit','')}".strip(),
-        f"Problem statement: {row.get('problem_statement','')}".strip(),
+        f"Repository: {row.get('repo', '')}".strip(),
+        f"Instance: {row.get('instance_id', '')}".strip(),
+        f"Base commit: {row.get('base_commit', '')}".strip(),
+        f"Problem statement: {row.get('problem_statement', '')}".strip(),
         f"Model: {model}".strip(),
         "Return a unified diff rooted at repository root with diff --git headers.",
     ]
@@ -221,7 +227,9 @@ def _build_prompt(
     return "\n".join(prompt) + "\n"
 
 
-def _parse_usage_cost(payload: Mapping[str, Any] | list[Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
+def _parse_usage_cost(
+    payload: Mapping[str, Any] | list[Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(payload, Mapping):
         return {}, {}
     usage: Mapping[str, Any] = _coerce_usage(payload.get("usage"))
@@ -281,7 +289,9 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
     ) -> None:
         self.solver_id = _coerce_text(solver_id, field_name="solver_id")
         self.provider_id = _coerce_text(provider_id, field_name="provider_id")
-        self.provider_config = _coerce_mapping(provider_config, field_name="provider_config")
+        self.provider_config = _coerce_mapping(
+            provider_config, field_name="provider_config"
+        )
         self.behavior = _coerce_mapping(behavior, field_name="solver.behavior")
         self.model = _coerce_text(
             model or self.behavior.get("model"),
@@ -387,14 +397,18 @@ class MockSolverAdapter(_BaseConcreteSolverAdapter):
             model="mock",
         )
 
-        raw_statuses = self.behavior.get("mock_statuses", [SolverAttemptState.SUCCEEDED])
+        raw_statuses = self.behavior.get(
+            "mock_statuses", [SolverAttemptState.SUCCEEDED]
+        )
         if not isinstance(raw_statuses, list):
             raise SolverAdapterError("mock_statuses must be a list")
         if not raw_statuses:
             raise SolverAdapterError("mock_statuses cannot be empty")
         statuses = []
         for status in raw_statuses:
-            normalized = _coerce_text(status, field_name="mock_status", default="").lower()
+            normalized = _coerce_text(
+                status, field_name="mock_status", default=""
+            ).lower()
             if normalized not in self._VALID_STATUSES:
                 raise SolverAdapterError(
                     f"unsupported mock status: {status}; expected one of {sorted(self._VALID_STATUSES)}"
@@ -413,7 +427,9 @@ class MockSolverAdapter(_BaseConcreteSolverAdapter):
         )
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
-        status = self.mock_statuses[(request.attempt_index - 1) % len(self.mock_statuses)]
+        status = self.mock_statuses[
+            (request.attempt_index - 1) % len(self.mock_statuses)
+        ]
         if status == SolverAttemptState.SUCCEEDED:
             return SolverAdapterResult(
                 attempt_id=request.attempt_id,
@@ -487,9 +503,7 @@ class AnthropicAgentSDKAdapter(_BaseConcreteSolverAdapter):
             attempt_index=request.attempt_index,
             instance_row=request.instance_row or {},
         )
-        url = urllib.parse.urljoin(
-            self.base_url.rstrip("/") + "/", "v1/messages"
-        )
+        url = urllib.parse.urljoin(self.base_url.rstrip("/") + "/", "v1/messages")
         payload = {
             "model": self.model,
             "max_tokens": _coerce_int(
@@ -527,8 +541,12 @@ class AnthropicAgentSDKAdapter(_BaseConcreteSolverAdapter):
                 exit_reason=str(exc),
             )
 
-        text = self._coerce_output_text(_coerce_mapping(response, field_name="response"))
-        usage, cost = _parse_usage_cost(_coerce_mapping(response, field_name="response"))
+        text = self._coerce_output_text(
+            _coerce_mapping(response, field_name="response")
+        )
+        usage, cost = _parse_usage_cost(
+            _coerce_mapping(response, field_name="response")
+        )
         return SolverAdapterResult(
             attempt_id=request.attempt_id,
             status=SolverAttemptState.SUCCEEDED,
@@ -728,7 +746,9 @@ class OpenAICompatibleAdapter(_BaseConcreteSolverAdapter):
         if isinstance(choices, list) and choices:
             first = choices[0]
             if isinstance(first, Mapping):
-                msg = _coerce_mapping(first.get("message"), field_name="response.choices[0].message")
+                msg = _coerce_mapping(
+                    first.get("message"), field_name="response.choices[0].message"
+                )
                 content = msg.get("content")
                 if isinstance(content, str):
                     text = content
@@ -784,7 +804,9 @@ def _coerce_cli_command(config: Mapping[str, Any]) -> _CLIAdapterConfig:
     if isinstance(raw, (list, tuple)):
         if not raw:
             raise SolverAdapterError("provider.command cannot be empty")
-        return _CLIAdapterConfig(command=str(raw[0]), cli_args=tuple(str(v) for v in raw[1:]))
+        return _CLIAdapterConfig(
+            command=str(raw[0]), cli_args=tuple(str(v) for v in raw[1:])
+        )
     raise SolverAdapterError("provider.command must be a string or list")
 
 
@@ -904,7 +926,9 @@ def build_solver_adapters(
         provider_config = _coerce_mapping(
             provider.config, field_name=f"provider '{solver.provider_id}'.config"
         )
-        behavior = _coerce_mapping(solver.behavior, field_name=f"solver '{solver.solver_id}'.behavior")
+        behavior = _coerce_mapping(
+            solver.behavior, field_name=f"solver '{solver.solver_id}'.behavior"
+        )
         adapter_name = solver.adapter
         if adapter_name == SOLVER_ADAPTER_MOCK:
             adapter: SolverAdapter = MockSolverAdapter(
@@ -948,9 +972,7 @@ def build_solver_adapters(
                 behavior=behavior,
             )
         else:
-            raise SolverAdapterError(
-                f"unsupported solver adapter: {adapter_name}"
-            )
+            raise SolverAdapterError(f"unsupported solver adapter: {adapter_name}")
         adapters[solver.solver_id] = adapter
 
     return adapters
