@@ -13,6 +13,7 @@ from repogauge.runner.judge import (
     HarnessEvaluationError,
     JudgeBatchResult,
     JudgeSchedulerConfig,
+    _ensure_container_runtime,
     _invoke_swebench_harness,
     _register_adapter_maps,
     run_harness_evaluation,
@@ -399,66 +400,114 @@ def test_invoke_swebench_harness_uses_podman_socket_override(tmp_path: Path) -> 
     assert os.environ.get("DOCKER_HOST") is None
 
 
-def test_invoke_swebench_harness_errors_when_podman_socket_missing(
+def test_ensure_container_runtime_starts_podman_service_when_needed(
     tmp_path: Path,
 ) -> None:
-    dataset_rows = [_dataset_row(instance_id="inst-a", model="solver-x")]
-    predictions_rows = [
-        {
-            "instance_id": "inst-a",
-            "model_name_or_path": "solver-x",
-            "model_patch": "diff",
-        }
-    ]
-    dataset_path = tmp_path / "dataset.jsonl"
-    dataset_path.write_text(
-        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
-        encoding="utf-8",
-    )
-    predictions_path = tmp_path / "predictions.jsonl"
-    predictions_path.write_text(
-        "".join(json.dumps(row, sort_keys=True) + "\n" for row in predictions_rows),
-        encoding="utf-8",
-    )
+    podman_socket = tmp_path / "podman.sock"
+    service_calls: list[list[str]] = []
 
-    out_root = tmp_path / "eval"
-    out_root.mkdir()
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.stderr = types.SimpleNamespace(read=lambda: "")
+            self._terminated = False
 
-    missing_socket = tmp_path / "missing" / "podman.sock"
-    docker_module = types.ModuleType("docker")
-    docker_module.from_env = lambda: object()
-    run_module = types.ModuleType("swebench.harness.run_evaluation")
-    run_module.build_env_images = lambda *args, **kwargs: None
-    run_module.run_instances = lambda **kwargs: None
-    run_module.make_run_report = lambda *args, **kwargs: out_root / "report.json"
+        def poll(self) -> int | None:
+            return None
 
-    swebench_pkg = types.ModuleType("swebench")
-    harness_pkg = types.ModuleType("swebench.harness")
-    swebench_pkg.harness = harness_pkg
-    harness_pkg.run_evaluation = run_module
+        def terminate(self) -> None:
+            self._terminated = True
 
-    with patch.dict(
-        sys.modules,
-        {
-            "docker": docker_module,
-            "swebench": swebench_pkg,
-            "swebench.harness": harness_pkg,
-            "swebench.harness.run_evaluation": run_module,
-        },
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+        def kill(self) -> None:
+            self._terminated = True
+
+    process = _FakeProcess()
+
+    def fake_popen(args, **kwargs):
+        service_calls.append(list(args))
+        return process
+
+    with (
+        patch(
+            "repogauge.runner.judge._is_unix_socket_reachable",
+            side_effect=[False, True],
+        ),
+        patch("repogauge.runner.judge.subprocess.Popen", side_effect=fake_popen),
     ):
-        with patch.dict(os.environ, {}, clear=False):
-            with pytest.raises(HarnessEvaluationError) as exc_info:
-                _invoke_swebench_harness(
-                    dataset_path=dataset_path,
-                    predictions_path=predictions_path,
-                    out_root=out_root,
-                    workers=2,
-                    timeout_seconds=120,
-                    container_runtime="podman",
-                    container_host=f"unix://{missing_socket}",
-                )
+        with _ensure_container_runtime(
+            container_runtime="podman",
+            container_host=f"unix://{podman_socket}",
+        ) as resolved_host:
+            assert resolved_host == f"unix://{podman_socket}"
 
-    assert "podman socket not found" in str(exc_info.value)
+    assert service_calls == [
+        ["podman", "system", "service", "--time", "0", f"unix://{podman_socket}"]
+    ]
+    assert process._terminated is True
+
+
+def test_ensure_container_runtime_reuses_existing_podman_service(
+    tmp_path: Path,
+) -> None:
+    podman_socket = tmp_path / "podman.sock"
+
+    with (
+        patch("repogauge.runner.judge._is_unix_socket_reachable", return_value=True),
+        patch("repogauge.runner.judge.subprocess.Popen") as mock_popen,
+    ):
+        with _ensure_container_runtime(
+            container_runtime="podman",
+            container_host=f"unix://{podman_socket}",
+        ) as resolved_host:
+            assert resolved_host == f"unix://{podman_socket}"
+
+    mock_popen.assert_not_called()
+
+
+def test_ensure_container_runtime_uses_tmp_socket_for_default_podman() -> None:
+    with patch("repogauge.runner.judge._is_unix_socket_reachable", return_value=True):
+        with _ensure_container_runtime(
+            container_runtime="podman",
+            container_host=None,
+        ) as resolved_host:
+            assert resolved_host == "unix:///tmp/podman.sock"
+
+
+def test_ensure_container_runtime_errors_when_podman_service_fails(
+    tmp_path: Path,
+) -> None:
+    podman_socket = tmp_path / "podman.sock"
+
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.stderr = types.SimpleNamespace(read=lambda: "boom")
+
+        def poll(self) -> int | None:
+            return 1
+
+        def terminate(self) -> None:
+            raise AssertionError("terminate should not be called for exited process")
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 1
+
+        def kill(self) -> None:
+            raise AssertionError("kill should not be called for exited process")
+
+    with (
+        patch("repogauge.runner.judge._is_unix_socket_reachable", return_value=False),
+        patch("repogauge.runner.judge.subprocess.Popen", return_value=_FakeProcess()),
+        pytest.raises(HarnessEvaluationError) as exc_info,
+    ):
+        with _ensure_container_runtime(
+            container_runtime="podman",
+            container_host=f"unix://{podman_socket}",
+        ):
+            pass
+
+    assert "failed to start podman system service" in str(exc_info.value)
 
 
 def test_register_adapter_maps_patches_grading_source_modules() -> None:

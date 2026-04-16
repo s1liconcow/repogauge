@@ -11,7 +11,10 @@ from contextlib import contextmanager
 import importlib.util
 import json
 import os
+import socket
+import subprocess
 import sys
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -83,10 +86,7 @@ def _resolve_container_host(
     if explicit:
         return explicit
     if runtime == "podman":
-        runtime_dir = _coerce_text(os.getenv("XDG_RUNTIME_DIR"))
-        if runtime_dir:
-            return f"unix://{runtime_dir}/podman/podman.sock"
-        return f"unix:///run/user/{os.getuid()}/podman/podman.sock"
+        return "unix:///tmp/podman.sock"
     return None
 
 
@@ -109,21 +109,95 @@ def _temporary_environment(overrides: Mapping[str, str | None]) -> Iterator[None
                 os.environ[key] = value
 
 
-def _validate_container_runtime(
-    *, container_runtime: str, container_host: str | None
-) -> None:
-    runtime = _coerce_text(container_runtime).lower() or "docker"
+def _unix_socket_path(container_host: str | None) -> Path | None:
     host = _coerce_text(container_host)
-    if runtime != "podman" or not host or not host.startswith("unix://"):
-        return
-    socket_path = Path(host.removeprefix("unix://"))
-    if socket_path.exists():
-        return
-    raise HarnessEvaluationError(
-        "podman socket not found at "
-        f"{socket_path}. Start it with `systemctl --user enable --now podman.socket` "
-        "or pass --container-host with a reachable Docker-compatible endpoint."
+    if not host.startswith("unix://"):
+        return None
+    return Path(host.removeprefix("unix://"))
+
+
+def _is_unix_socket_reachable(socket_path: Path) -> bool:
+    if not socket_path.exists():
+        return False
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(0.2)
+        sock.connect(str(socket_path))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+@contextmanager
+def _ensure_container_runtime(
+    *, container_runtime: str, container_host: str | None
+) -> Iterator[str | None]:
+    runtime = _coerce_text(container_runtime).lower() or "docker"
+    host = _resolve_container_host(
+        container_runtime=runtime,
+        container_host=container_host,
     )
+    if runtime != "podman":
+        yield host
+        return
+
+    socket_path = _unix_socket_path(host)
+    if socket_path is None:
+        yield host
+        return
+    if _is_unix_socket_reachable(socket_path):
+        yield host
+        return
+
+    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    if socket_path.exists():
+        try:
+            socket_path.unlink()
+        except OSError as exc:
+            raise HarnessEvaluationError(
+                f"podman socket exists but is not reachable: {socket_path}"
+            ) from exc
+
+    print(f"repogauge eval: starting podman service at {host}", file=sys.stderr)
+    try:
+        process = subprocess.Popen(
+            ["podman", "system", "service", "--time", "0", host],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise HarnessEvaluationError(
+            "podman executable not found; install Podman or use --container-runtime docker"
+        ) from exc
+
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if _is_unix_socket_reachable(socket_path):
+                yield host
+                return
+            if process.poll() is not None:
+                break
+            time.sleep(0.1)
+
+        stderr_output = ""
+        if process.poll() is not None and process.stderr is not None:
+            stderr_output = process.stderr.read().strip()
+        raise HarnessEvaluationError(
+            "failed to start podman system service"
+            + (f": {stderr_output}" if stderr_output else "")
+        )
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
 
 
 def _iter_chunks(values: list[Any], size: int) -> Iterable[list[Any]]:
@@ -709,10 +783,6 @@ def _invoke_swebench_harness(
         container_runtime=container_runtime,
         container_host=container_host,
     )
-    _validate_container_runtime(
-        container_runtime=container_runtime,
-        container_host=resolved_container_host,
-    )
     # Repogauge materializes local, repo-specific datasets. Passing a namespace
     # makes swebench treat instance images as remote and attempt a docker pull
     # like ``swebench/sweb.eval...<instance_id>``, which fails for local runs.
@@ -863,28 +933,34 @@ def run_harness_evaluation(
     batch_results: list[JudgeBatchResult] = []
     if batches:
         try:
-            with ThreadPoolExecutor(max_workers=config.max_parallel_batches) as pool:
-                futures = {
-                    pool.submit(
-                        _run_batch,
-                        batch_index=index,
-                        batch_key=batch_key,
-                        rows=rows,
-                        out_root=out_root,
-                        workers=workers * config.workers_per_batch,
-                        timeout_seconds=timeout_seconds,
-                        container_runtime=container_runtime,
-                        container_host=container_host,
-                    ): batch_key
-                    for index, (batch_key, rows) in enumerate(batches)
-                }
-                for future in as_completed(futures):
-                    try:
-                        batch_results.append(future.result())
-                    except Exception as exc:
-                        raise HarnessEvaluationError(
-                            f"official harness batch execution failed: {exc}"
-                        ) from exc
+            with _ensure_container_runtime(
+                container_runtime=container_runtime,
+                container_host=container_host,
+            ) as resolved_container_host:
+                with ThreadPoolExecutor(
+                    max_workers=config.max_parallel_batches
+                ) as pool:
+                    futures = {
+                        pool.submit(
+                            _run_batch,
+                            batch_index=index,
+                            batch_key=batch_key,
+                            rows=rows,
+                            out_root=out_root,
+                            workers=workers * config.workers_per_batch,
+                            timeout_seconds=timeout_seconds,
+                            container_runtime=container_runtime,
+                            container_host=resolved_container_host,
+                        ): batch_key
+                        for index, (batch_key, rows) in enumerate(batches)
+                    }
+                    for future in as_completed(futures):
+                        try:
+                            batch_results.append(future.result())
+                        except Exception as exc:
+                            raise HarnessEvaluationError(
+                                f"official harness batch execution failed: {exc}"
+                            ) from exc
         except HarnessEvaluationError:
             raise
         except (

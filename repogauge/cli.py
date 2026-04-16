@@ -176,7 +176,7 @@ def _build_parser() -> argparse.ArgumentParser:
             )
             cmd.add_argument(
                 "--container-host",
-                help="Docker-compatible socket/host override, for example unix:///run/user/1000/podman/podman.sock.",
+                help="Docker-compatible socket/host override, for example unix:///tmp/podman.sock.",
             )
         if name == "run":
             cmd.add_argument(
