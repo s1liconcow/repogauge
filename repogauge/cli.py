@@ -1427,7 +1427,9 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 source / "router_train.parquet",
                 source / "analyze" / "router_train.parquet",
             ]
-            router_train_path = next((candidate for candidate in candidates if candidate.exists()), None)
+            router_train_path = next(
+                (candidate for candidate in candidates if candidate.exists()), None
+            )
 
         if router_train_path is None or not router_train_path.exists():
             manifest.mark_step(
@@ -1497,7 +1499,9 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                 + "Z",
             )
-            manifest.finish(status="succeeded", metadata={"reason": "train_router_complete"})
+            manifest.finish(
+                status="succeeded", metadata={"reason": "train_router_complete"}
+            )
             manifest.write(manifest_path)
             log_event(
                 {

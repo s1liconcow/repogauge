@@ -182,13 +182,9 @@ def _aggregate_solver_instance_rows(
             ),
             "failure_reason": final_attempt.get("failure_reason"),
             "exit_reason": _coerce_str(final_attempt.get("exit_reason")),
-            "prompt_policy_hash": _coerce_str(
-                final_attempt.get("prompt_policy_hash")
-            ),
+            "prompt_policy_hash": _coerce_str(final_attempt.get("prompt_policy_hash")),
             "tool_policy_hash": _coerce_str(final_attempt.get("tool_policy_hash")),
-            "solver_config_hash": _coerce_str(
-                final_attempt.get("solver_config_hash")
-            ),
+            "solver_config_hash": _coerce_str(final_attempt.get("solver_config_hash")),
             "repo": _instance_value(
                 representative,
                 "repo",
@@ -205,9 +201,7 @@ def _aggregate_solver_instance_rows(
                 "version",
                 "instance_version",
             ),
-            "problem_statement": _coerce_str(
-                representative.get("problem_statement")
-            ),
+            "problem_statement": _coerce_str(representative.get("problem_statement")),
             "task_feature_version": _coerce_str(
                 representative.get("task_feature_version")
             ),
@@ -361,9 +355,7 @@ def build_router_training_rows(
     for instance_id in sorted(by_instance):
         solver_rows = sorted(
             by_instance[instance_id],
-            key=lambda row: (
-                _coerce_str(row.get("solver_id")),
-            ),
+            key=lambda row: (_coerce_str(row.get("solver_id")),),
         )
         cheap_row = _pick_solver_row(solver_rows, cheap_solver_id)
         expensive_row = _pick_solver_row(
@@ -380,7 +372,9 @@ def build_router_training_rows(
 
         instance_meta = cheap_row or expensive_row
         task_features = build_task_feature_bundle(instance_meta)
-        resolved_rows = [row for row in solver_rows if _coerce_bool(row.get("resolved"))]
+        resolved_rows = [
+            row for row in solver_rows if _coerce_bool(row.get("resolved"))
+        ]
         oracle_row = (
             min(
                 resolved_rows,
@@ -431,9 +425,17 @@ def build_router_training_rows(
         failure_policy = _policy_result(
             resolved=cheap_resolved or expensive_resolved,
             cost_usd=_coerce_float(cheap_row.get("total_cost_usd"))
-            + (_coerce_float(expensive_row.get("total_cost_usd")) if failure_escalated else 0.0),
+            + (
+                _coerce_float(expensive_row.get("total_cost_usd"))
+                if failure_escalated
+                else 0.0
+            ),
             latency_ms=_coerce_int(cheap_row.get("total_duration_ms"))
-            + (_coerce_int(expensive_row.get("total_duration_ms")) if failure_escalated else 0),
+            + (
+                _coerce_int(expensive_row.get("total_duration_ms"))
+                if failure_escalated
+                else 0
+            ),
             escalated=failure_escalated,
             solver_id=expensive_solver_id if failure_escalated else cheap_solver_id,
         )
@@ -468,7 +470,9 @@ def build_router_training_rows(
                 "base_commit": _instance_value(
                     instance_meta, "base_commit", "instance_base_commit"
                 ),
-                "version": _instance_value(instance_meta, "version", "instance_version"),
+                "version": _instance_value(
+                    instance_meta, "version", "instance_version"
+                ),
                 "problem_statement": _coerce_str(
                     instance_meta.get("problem_statement")
                 ),
@@ -504,13 +508,9 @@ def build_router_training_rows(
                 ),
                 "expensive_failure_reason": expensive_row.get("failure_reason"),
                 "expensive_exit_reason": _coerce_str(expensive_row.get("exit_reason")),
-                "expensive_prompt_policy_hash": expensive_row.get(
-                    "prompt_policy_hash"
-                ),
+                "expensive_prompt_policy_hash": expensive_row.get("prompt_policy_hash"),
                 "expensive_tool_policy_hash": expensive_row.get("tool_policy_hash"),
-                "expensive_solver_config_hash": expensive_row.get(
-                    "solver_config_hash"
-                ),
+                "expensive_solver_config_hash": expensive_row.get("solver_config_hash"),
                 "oracle_resolved": _coerce_bool(oracle_row.get("resolved"))
                 if oracle_row
                 else False,
@@ -523,9 +523,7 @@ def build_router_training_rows(
                 "oracle_latency_ms": _coerce_int(oracle_row.get("total_duration_ms"))
                 if oracle_row and _coerce_bool(oracle_row.get("resolved"))
                 else None,
-                "oracle_harness_outcome": _coerce_str(
-                    oracle_row.get("harness_outcome")
-                )
+                "oracle_harness_outcome": _coerce_str(oracle_row.get("harness_outcome"))
                 if oracle_row
                 else "",
                 "policy_always_cheap_resolved": cheap_policy["resolved"],
@@ -604,7 +602,9 @@ def _summarize_policy(rows: list[dict[str, Any]], prefix: str) -> dict[str, Any]
             escalated_count += 1
 
     total_instances = len(rows)
-    oracle_resolved_count = sum(1 for row in rows if _coerce_bool(row.get("oracle_resolved")))
+    oracle_resolved_count = sum(
+        1 for row in rows if _coerce_bool(row.get("oracle_resolved"))
+    )
     oracle_resolve_rate = (
         oracle_resolved_count / total_instances if total_instances else 0.0
     )
@@ -622,7 +622,9 @@ def _summarize_policy(rows: list[dict[str, Any]], prefix: str) -> dict[str, Any]
         if total_instances
         else 0.0,
         "escalated_count": escalated_count,
-        "escalation_rate": escalated_count / total_instances if total_instances else 0.0,
+        "escalation_rate": escalated_count / total_instances
+        if total_instances
+        else 0.0,
         "oracle_resolved_count": oracle_resolved_count,
         "oracle_resolve_rate": oracle_resolve_rate,
         "resolve_gap_vs_oracle": oracle_resolve_rate - resolve_rate,

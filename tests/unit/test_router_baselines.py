@@ -146,7 +146,9 @@ def test_build_router_training_rows_exports_baselines_and_labels() -> None:
     assert first["policy_always_expensive_resolved"] is True
     assert first["policy_cheap_then_escalate_on_failure_escalated"] is False
     assert (
-        first["policy_cheap_then_escalate_on_invalid_patch_timeout_no_progress_escalated"]
+        first[
+            "policy_cheap_then_escalate_on_invalid_patch_timeout_no_progress_escalated"
+        ]
         is False
     )
     second = rows[1]
@@ -154,7 +156,9 @@ def test_build_router_training_rows_exports_baselines_and_labels() -> None:
     assert second["policy_always_cheap_resolved"] is False
     assert second["policy_cheap_then_escalate_on_failure_resolved"] is True
     assert (
-        second["policy_cheap_then_escalate_on_invalid_patch_timeout_no_progress_escalated"]
+        second[
+            "policy_cheap_then_escalate_on_invalid_patch_timeout_no_progress_escalated"
+        ]
         is True
     )
     assert second["solver_outcomes"][0]["solver_id"] == "solver-cheap"
