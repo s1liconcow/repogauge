@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from os import PathLike
+from pathlib import Path
 import hashlib
 import json
 from typing import Any, Dict, Iterable, Mapping
+
+from .providers import (
+    ProviderConfigurationError,
+    normalize_provider,
+)
+from .solvers import SolverConfig, SolverConfigurationError, normalize_solver
 
 
 class MatrixConfigurationError(ValueError):
@@ -68,9 +74,7 @@ def _normalize_relative_path(matrix_dir: Path, value: Any) -> Path:
 def _read_yaml(path: Path) -> Dict[str, Any]:
     try:
         import yaml
-    except (
-        ModuleNotFoundError
-    ) as exc:  # pragma: no cover - optional dependency fallback
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency fallback
         raise MatrixConfigurationError(
             "PyYAML is required to parse matrix.yaml; install pyyaml"
         ) from exc
@@ -102,15 +106,42 @@ def _normalize_providers(value: Any) -> dict[str, Mapping[str, Any]]:
 @dataclass(frozen=True)
 class MatrixProvider:
     provider_id: str
+    kind: str
     config: Mapping[str, Any] = field(default_factory=dict)
+    redacted_config: Mapping[str, Any] = field(default_factory=dict)
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def resolved(self) -> Mapping[str, Any]:
+        return self.config
+
+    def to_run_manifest_dict(self) -> dict[str, Any]:
+        return {
+            "provider_id": self.provider_id,
+            "kind": self.kind,
+            "config": self.redacted_config,
+        }
 
 
 @dataclass(frozen=True)
 class MatrixSolver:
     solver_id: str
     provider_id: str
+    adapter: str
     prompt_policy: Mapping[str, Any] = field(default_factory=dict)
     tool_policy: Mapping[str, Any] = field(default_factory=dict)
+    behavior: Mapping[str, Any] = field(default_factory=dict)
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_run_manifest_dict(self) -> dict[str, Any]:
+        return {
+            "solver_id": self.solver_id,
+            "provider_id": self.provider_id,
+            "adapter": self.adapter,
+            "prompt_policy": self.prompt_policy,
+            "tool_policy": self.tool_policy,
+            "config": self.behavior,
+        }
 
 
 @dataclass(frozen=True)
@@ -150,22 +181,10 @@ def _stable_policy_hash(payload: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
-def _normalize_solver(value: Any) -> MatrixSolver:
-    payload = _coerce_mapping(value, field_name="solver")
-    solver_id = _coerce_str(payload.get("id"))
-    provider_id = _coerce_str(payload.get("provider"))
-    prompt_policy = _coerce_mapping(
-        payload.get("prompt_policy"), field_name="solver.prompt_policy"
-    )
-    tool_policy = _coerce_mapping(
-        payload.get("tool_policy"), field_name="solver.tool_policy"
-    )
-    return MatrixSolver(
-        solver_id=solver_id,
-        provider_id=provider_id,
-        prompt_policy=prompt_policy,
-        tool_policy=tool_policy,
-    )
+def _coerce_solver_list(value: Any) -> tuple[Any, ...]:
+    if not isinstance(value, list) or not value:
+        raise MatrixConfigurationError("solvers must be a non-empty list")
+    return tuple(value)
 
 
 def _load_execution_config(raw_execution: Any) -> MatrixExecution:
@@ -238,23 +257,49 @@ def load_matrix_config(
         field_name="dataset.exclude_instance_ids",
     )
 
-    providers_raw = _normalize_providers(raw.get("providers", {}))
-    providers = tuple(
-        MatrixProvider(_coerce_str(k), dict(v)) for k, v in providers_raw.items()
-    )
-    solver_rows = raw.get("solvers")
-    if not isinstance(solver_rows, list) or not solver_rows:
-        raise MatrixConfigurationError("solvers must be a non-empty list")
-
-    solvers = []
-    provider_ids = {provider.provider_id for provider in providers}
-    for row in solver_rows:
-        solver = _normalize_solver(row)
-        if solver.provider_id not in provider_ids:
-            raise MatrixConfigurationError(
-                f"solver '{solver.solver_id}' references unknown provider '{solver.provider_id}'"
+    provider_rows = _normalize_providers(raw.get("providers", {}))
+    provider_rows_list: list[MatrixProvider] = []
+    for provider_id, payload in provider_rows.items():
+        try:
+            provider_config = normalize_provider(
+                provider_id, payload, matrix_root=matrix_path.parent
             )
-        solvers.append(solver)
+        except ProviderConfigurationError as exc:
+            raise MatrixConfigurationError(str(exc)) from exc
+        provider_rows_list.append(
+            MatrixProvider(
+                provider_id=provider_config.provider_id,
+                kind=provider_config.kind,
+                config=provider_config.resolved,
+                redacted_config=provider_config.redacted,
+                raw=dict(provider_config.raw),
+            )
+        )
+
+    provider_kinds = {provider.provider_id: provider.kind for provider in provider_rows_list}
+
+    solver_rows = raw.get("solvers")
+    if solver_rows is None:
+        solver_rows = []
+    solver_payloads = _coerce_solver_list(solver_rows)
+    solvers: list[MatrixSolver] = []
+    for row in solver_payloads:
+        try:
+            solver = normalize_solver(row, provider_kinds=provider_kinds)
+        except SolverConfigurationError as exc:
+            raise MatrixConfigurationError(str(exc)) from exc
+
+        solvers.append(
+            MatrixSolver(
+                solver_id=solver.solver_id,
+                provider_id=solver.provider_id,
+                adapter=solver.adapter,
+                prompt_policy=solver.prompt_policy,
+                tool_policy=solver.tool_policy,
+                behavior=solver.behavior,
+                raw=dict(solver.raw),
+            )
+        )
 
     execution = _load_execution_config(raw.get("execution"))
 
@@ -267,7 +312,7 @@ def load_matrix_config(
             exclude_instance_ids=tuple(exclude_instance_ids),
         ),
         execution=execution,
-        providers=providers,
+        providers=tuple(provider_rows_list),
         solvers=tuple(solvers),
         fairness=_coerce_mapping(raw.get("fairness"), field_name="fairness"),
         raw=raw,

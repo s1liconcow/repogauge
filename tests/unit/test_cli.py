@@ -444,6 +444,10 @@ solvers:
             self.assertEqual(run_manifest["dataset_path"], str(dataset_path.resolve()))
             self.assertEqual(run_manifest["solver_count"], 1)
             self.assertEqual(run_manifest["provider_count"], 1)
+            self.assertEqual(len(run_manifest["providers"]), 1)
+            self.assertEqual(run_manifest["providers"][0]["provider_id"], "mock")
+            self.assertEqual(len(run_manifest["solvers"]), 1)
+            self.assertEqual(run_manifest["solvers"][0]["solver_id"], "solver-a")
 
     def test_run_rejects_unknown_solver_provider(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

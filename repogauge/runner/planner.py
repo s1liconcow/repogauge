@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import random
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable
@@ -14,6 +14,7 @@ from repogauge.config import REPOGAUGE_SCHEMA_VERSION
 from .matrix import (
     MatrixConfig,
     MatrixConfigurationError,
+    MatrixProvider,
     MatrixSolver,
     _stable_policy_hash,
 )
@@ -63,6 +64,8 @@ class RunManifest:
     solver_count: int
     provider_count: int
     job_count: int
+    providers: tuple[dict[str, Any], ...]
+    solvers: tuple[dict[str, Any], ...]
 
     @classmethod
     def from_matrix(
@@ -99,6 +102,10 @@ class RunManifest:
             solver_count=len(matrix.solvers),
             provider_count=len(matrix.providers),
             job_count=len(jobs),
+            providers=tuple(
+                provider.to_run_manifest_dict() for provider in matrix.providers
+            ),
+            solvers=tuple(solver.to_run_manifest_dict() for solver in matrix.solvers),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -146,14 +153,28 @@ def _read_instance_ids(path: Path) -> list[str]:
     return rows
 
 
-def _solve_seed_hash(solver: MatrixSolver, seed: int, instance_id: str) -> str:
+def _providers_by_id(matrix: MatrixConfig) -> dict[str, MatrixProvider]:
+    return {provider.provider_id: provider for provider in matrix.providers}
+
+
+def _solve_seed_hash(
+    solver: MatrixSolver,
+    *,
+    provider: MatrixProvider,
+    seed: int,
+    instance_id: str,
+) -> str:
     payload = {
         "solver_id": solver.solver_id,
         "provider_id": solver.provider_id,
+        "provider_kind": provider.kind,
+        "adapter": solver.adapter,
         "seed": seed,
         "instance_id": instance_id,
         "prompt_policy": dict(solver.prompt_policy),
         "tool_policy": dict(solver.tool_policy),
+        "behavior": dict(solver.behavior),
+        "provider_config": dict(provider.config),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -185,10 +206,12 @@ def plan_jobs(matrix: MatrixConfig) -> list[PlannedRunJob]:
         shuffle=matrix.execution.shuffle,
         seed=matrix.execution.shuffle_seed,
     )
+    providers_by_id = _providers_by_id(matrix)
 
     jobs: list[PlannedRunJob] = []
     for instance_id in instances:
         for solver in matrix.solvers:
+            provider = providers_by_id[solver.provider_id]
             prompt_policy_hash = _stable_policy_hash(dict(solver.prompt_policy))
             tool_policy_hash = _stable_policy_hash(dict(solver.tool_policy))
             for seed in matrix.execution.seeds:
@@ -203,11 +226,20 @@ def plan_jobs(matrix: MatrixConfig) -> list[PlannedRunJob]:
                         seed=seed,
                         prompt_policy_hash=prompt_policy_hash,
                         tool_policy_hash=tool_policy_hash,
-                        solver_config_hash=_solve_seed_hash(solver, seed, instance_id),
+                        solver_config_hash=_solve_seed_hash(
+                            solver,
+                            provider=provider,
+                            seed=seed,
+                            instance_id=instance_id,
+                        ),
                         dataset_path=matrix.dataset.path,
                         matrix_path=matrix.matrix_path,
                         metadata={
                             "provider": solver.provider_id,
+                            "provider_kind": provider.kind,
+                            "provider_config": dict(provider.redacted_config),
+                            "solver_adapter": solver.adapter,
+                            "solver_config": dict(solver.behavior),
                             "prompt_policy": dict(solver.prompt_policy),
                             "tool_policy": dict(solver.tool_policy),
                         },

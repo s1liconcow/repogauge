@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -169,3 +170,125 @@ solvers:
             raise AssertionError("expected MatrixConfigurationError")
         except MatrixConfigurationError as exc:
             assert "unknown provider" in str(exc)
+
+
+def test_load_matrix_resolves_provider_secrets_from_environment() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        matrix_text = """
+run_id: matrix-secrets
+dataset:
+  path: dataset.jsonl
+providers:
+  openai:
+    kind: openai_responses
+    api_key: env:REPOGAUGE_TEST_OPENAI_KEY
+solvers:
+  - id: solver-a
+    provider: openai
+    model: gpt-fake
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        os.environ["REPOGAUGE_TEST_OPENAI_KEY"] = "secret-value"
+        try:
+            matrix = load_matrix_config(matrix_path)
+            provider = matrix.providers[0]
+            assert provider.config["api_key"] == "secret-value"
+            assert provider.redacted_config["api_key"] == "<redacted>"
+        finally:
+            os.environ.pop("REPOGAUGE_TEST_OPENAI_KEY", None)
+
+
+def test_load_matrix_resolves_provider_secrets_from_file() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        secret_path = root / "token.txt"
+        secret_path.write_text("file-secret", encoding="utf-8")
+
+        matrix_text = """
+dataset:
+  path: dataset.jsonl
+providers:
+  local:
+    kind: local
+    api_key_file: token.txt
+solvers:
+  - id: solver-a
+    provider: local
+    model: fake
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        matrix = load_matrix_config(matrix_path)
+        provider = matrix.providers[0]
+        assert provider.config["api_key"] == "file-secret"
+        assert provider.redacted_config["api_key"] == "<redacted>"
+
+
+def test_missing_provider_secret_is_rejected() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        matrix_text = """
+dataset:
+  path: dataset.jsonl
+providers:
+  openai:
+    kind: openai_responses
+    api_key: env:MISSING_REPOGAUGE_TEST_OPENAI_KEY
+solvers:
+  - id: solver-a
+    provider: openai
+    model: fake
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        os.environ.pop("MISSING_REPOGAUGE_TEST_OPENAI_KEY", None)
+        try:
+            load_matrix_config(matrix_path)
+            raise AssertionError("expected MatrixConfigurationError")
+        except MatrixConfigurationError as exc:
+            assert "missing required environment variable" in str(exc)
+
+
+def test_solver_adapter_must_be_compatible_with_provider_kind() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        matrix_text = """
+dataset:
+  path: dataset.jsonl
+providers:
+  openai:
+    kind: openai_responses
+solvers:
+  - id: solver-a
+    provider: openai
+    adapter: codex_cli
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        try:
+            load_matrix_config(matrix_path)
+            raise AssertionError("expected MatrixConfigurationError")
+        except MatrixConfigurationError as exc:
+            assert "incompatible" in str(exc)
