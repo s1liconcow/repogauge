@@ -769,8 +769,59 @@ def _run_command(namespace: argparse.Namespace) -> int:
 
         if namespace.predictions:
             predictions_path = Path(namespace.predictions).resolve()
-        elif namespace.gold or True:  # default to gold when no explicit predictions
+            gold_if_missing = False
+            if not predictions_path.exists():
+                manifest.finish(
+                    status="failed",
+                    metadata={
+                        "reason": "predictions_not_found",
+                        "path": str(predictions_path),
+                    },
+                )
+                manifest.mark_step(
+                    "finish",
+                    ManifestStepStatus.FAILED,
+                    ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                    + "Z",
+                )
+                manifest.write(manifest_path)
+                log_event(
+                    {
+                        "event": "command.finish",
+                        "command": command,
+                        "status": manifest.status,
+                        "timestamp": manifest.ended_at,
+                        "error": f"predictions not found: {predictions_path}",
+                    },
+                    events_path,
+                )
+                return 1
+        elif namespace.gold:
             predictions_path = gold_predictions
+            gold_if_missing = True
+        else:
+            manifest.finish(
+                status="failed",
+                metadata={"reason": "predictions_not_specified"},
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": "either --predictions or --gold is required",
+                },
+                events_path,
+            )
+            return 1
 
         if not dataset_path.exists():
             manifest.finish(
@@ -796,7 +847,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
             return 1
 
-        if not predictions_path.exists():
+        if not gold_if_missing and not predictions_path.exists():
             manifest.finish(
                 status="failed",
                 metadata={
@@ -827,15 +878,14 @@ def _run_command(namespace: argparse.Namespace) -> int:
             "inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp
         )
 
-        # --- Load adapter (per-repo harness settings) ----------------------------
-        adapter_spec: dict | None = None
+        # --- Load/locate adapter (per-repo harness settings) -------------------
         adapter_path: Path | None = None
-        if getattr(namespace, "adapter", None):
-            adapter_path = Path(namespace.adapter).resolve()
-            if not adapter_path.exists():
+        if namespace.adapter:
+            candidate = Path(namespace.adapter).resolve()
+            if not candidate.exists():
                 manifest.finish(
                     status="failed",
-                    metadata={"reason": "adapter_not_found", "path": str(adapter_path)},
+                    metadata={"reason": "adapter_not_found", "path": str(candidate)},
                 )
                 manifest.mark_step(
                     "finish",
@@ -850,74 +900,72 @@ def _run_command(namespace: argparse.Namespace) -> int:
                         "command": command,
                         "status": manifest.status,
                         "timestamp": manifest.ended_at,
-                        "error": f"adapter not found: {adapter_path}",
+                        "error": f"adapter not found: {candidate}",
                     },
                     events_path,
                 )
-                print(
-                    f"repogauge eval: error: adapter not found: {adapter_path}",
-                    file=sys.stderr,
-                )
-                print(
-                    "repogauge eval: hint: run `repogauge export` first to generate the adapter",
-                    file=sys.stderr,
-                )
                 return 1
+            adapter_path = candidate
         else:
-            # Auto-discover adapter_*.py in the source directory.
-            adapter_candidates = sorted(source.glob("adapter_*.py"))
-            if adapter_candidates:
-                adapter_path = adapter_candidates[0]
+            seen_dirs: set[Path] = set()
+            search_roots: list[Path] = [source]
+            if source.is_file():
+                search_roots.append(source.parent)
+            search_roots.extend(source.parents[:3])
+            for root in search_roots:
+                if root in seen_dirs:
+                    continue
+                seen_dirs.add(root)
+                if not root.is_dir():
+                    continue
+                candidates = sorted(root.glob("adapter_*.py"))
+                if candidates:
+                    adapter_path = candidates[0]
+                    break
+
+            if adapter_path is None and source.name == "dataset":
+                for root in [source.parent, source.parent.parent]:
+                    if not root.is_dir():
+                        continue
+                    candidates = sorted(root.glob("adapter_*.py"))
+                    if candidates:
+                        adapter_path = candidates[0]
+                        break
 
         if adapter_path is not None:
-            try:
-                import importlib.util as _ilu
-
-                _mod_spec = _ilu.spec_from_file_location(
-                    "_repogauge_adapter", adapter_path
-                )
-                _mod = _ilu.module_from_spec(_mod_spec)
-                _mod_spec.loader.exec_module(_mod)
-                adapter_spec = _mod.get_spec()
-                print(f"repogauge eval: adapter={adapter_path}", file=sys.stderr)
-                print(
-                    f"repogauge eval: harness=local-pytest  "
-                    f"repo={adapter_spec.get('repo')}  "
-                    f"python={adapter_spec.get('python_version')}  "
-                    f"test_cmd={adapter_spec.get('test_cmd_base')}",
-                    file=sys.stderr,
-                )
-                specs_path = adapter_path.parent / "specs.json"
-                if specs_path.exists():
-                    print(f"repogauge eval: specs={specs_path}", file=sys.stderr)
-            except Exception as exc:
-                print(
-                    f"repogauge eval: warning: could not load adapter {adapter_path}: {exc}",
-                    file=sys.stderr,
-                )
-                print(
-                    "repogauge eval: hint: re-run `repogauge export` to regenerate the adapter",
-                    file=sys.stderr,
-                )
+            print(f"repogauge eval: adapter={adapter_path}", file=sys.stderr)
+            specs_path = adapter_path.parent / "specs.json"
+            if specs_path.exists():
+                print(f"repogauge eval: specs={specs_path}", file=sys.stderr)
         else:
             print(
-                "repogauge eval: no adapter found; run `repogauge export` to generate one (using default harness settings)",
+                "repogauge eval: no adapter found; attempting built-in SWE-bench behavior",
                 file=sys.stderr,
             )
 
         print(f"repogauge eval: dataset={dataset_path}", file=sys.stderr)
         print(f"repogauge eval: predictions={predictions_path}", file=sys.stderr)
-        print("repogauge eval: dispatching to local-pytest harness", file=sys.stderr)
+        print(
+            "repogauge eval: dispatching to official SWE-bench harness", file=sys.stderr
+        )
+
+        if gold_if_missing and not predictions_path.exists():
+            print(
+                "repogauge eval: generating gold predictions from dataset",
+                file=sys.stderr,
+            )
 
         try:
-            from repogauge.validation.validate import run_eval
+            from repogauge.runner.judge import run_harness_evaluation
 
-            eval_summary = run_eval(
+            eval_summary = run_harness_evaluation(
                 dataset_path=dataset_path,
                 predictions_path=predictions_path,
                 out_root=out_root,
+                adapter_path=adapter_path,
+                workers=1,
                 timeout_seconds=getattr(namespace, "timeout", 120),
-                adapter_spec=adapter_spec,
+                gold_if_missing=gold_if_missing,
             )
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
             manifest.mark_step(
@@ -926,9 +974,15 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                 + "Z",
             )
-            manifest.artifact_paths["validation"] = eval_summary["validation_path"]
+            manifest.artifact_paths["validation"] = eval_summary.validation_path
             manifest.metadata["eval"] = {
-                k: v for k, v in eval_summary.items() if k != "validation_path"
+                "total": eval_summary.total,
+                "resolved": eval_summary.resolved,
+                "not_resolved": eval_summary.not_resolved,
+                "error": eval_summary.error,
+                "skipped": eval_summary.skipped,
+                "resolve_rate": eval_summary.resolve_rate,
+                "harness_output": eval_summary.harness_output,
             }
             manifest.mark_step(
                 "finish",
@@ -947,9 +1001,9 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 },
                 events_path,
             )
-            total = eval_summary["total"]
-            resolved = eval_summary["resolved"]
-            rate = eval_summary["resolve_rate"]
+            total = eval_summary.total
+            resolved = eval_summary.resolved
+            rate = eval_summary.resolve_rate
             print(
                 f"repogauge eval: {resolved}/{total} resolved ({rate:.1%})",
                 file=sys.stderr,

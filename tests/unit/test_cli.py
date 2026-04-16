@@ -4,6 +4,7 @@ import json
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
+from repogauge.runner.judge import HarnessRunSummary
 
 from repogauge.cli import _build_parser
 from repogauge.cli import main
@@ -235,6 +236,121 @@ class TestCliSurface(unittest.TestCase):
                 self.assertTrue(
                     Path(paths[key]).exists(), f"missing artifact for {key}"
                 )
+
+    def test_eval_with_missing_gold_file_allows_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_path = Path(workspace) / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            out_root = Path(workspace) / "out"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                )
+                result = main(
+                    ["eval", str(dataset_path), "--gold", "--out", str(out_root)]
+                )
+
+            self.assertEqual(result, 0)
+            mock_eval.assert_called_once()
+            self.assertTrue(
+                mock_eval.call_args.kwargs["gold_if_missing"],
+                "gold flag should enable missing-predictions generation",
+            )
+
+    def test_eval_requires_predictions_or_gold(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_path = Path(workspace) / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            out_root = Path(workspace) / "out"
+            result = main(["eval", str(dataset_path), "--out", str(out_root)])
+            self.assertEqual(result, 1)
+
+    def test_eval_with_predictions_calls_harness_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_path = Path(workspace) / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            predictions_path = Path(workspace) / "predictions.jsonl"
+            predictions_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "model_name_or_path": "agent",
+                        "model_patch": "diff",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            out_root = Path(workspace) / "out"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                )
+                result = main(
+                    [
+                        "eval",
+                        str(dataset_path),
+                        "--predictions",
+                        str(predictions_path),
+                        "--out",
+                        str(out_root),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            mock_eval.assert_called_once()
+            self.assertFalse(
+                mock_eval.call_args.kwargs["gold_if_missing"],
+                "explicit predictions should disable gold generation",
+            )
 
 
 if __name__ == "__main__":
