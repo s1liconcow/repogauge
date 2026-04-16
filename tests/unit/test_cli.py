@@ -337,7 +337,9 @@ class TestCliSurface(unittest.TestCase):
                     resolve_rate=1.0,
                     harness_output="official_swebench",
                 )
-                result = main(["eval", str(dataset_dir), "--gold", "--out", str(out_root)])
+                result = main(
+                    ["eval", str(dataset_dir), "--gold", "--out", str(out_root)]
+                )
 
             self.assertEqual(result, 0)
             mock_eval.assert_called_once()
