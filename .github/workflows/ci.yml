@@ -20,7 +20,7 @@ jobs:
         with:
           version: "latest"
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --frozen
       - name: Run unit tests
         run: uv run python -m pytest tests/unit -q
   e2e:
@@ -36,6 +36,6 @@ jobs:
         with:
           version: "latest"
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --frozen
       - name: Run e2e self-gauge test
         run: uv run python -m pytest tests/e2e/test_self_gauge.py -q

@@ -32,7 +32,13 @@ Common startup and execution issues and fast checks.
 
 ## Performance / cache concerns
 
-- Environment signatures and run-level caches are derived from repository signals;
-  cache invalidation should happen when toolchain or repo topology changes.
+- `mine --resume` only reuses a prior run when the scan inputs match exactly.
+  Changing `--commit-range`, `--max-commits`, or the output directory invalidates
+  the resume path.
+- Environment-signature caches are keyed from repository and toolchain signals,
+  so they should invalidate when the repo topology, Python version, test runner
+  shape, or dependency set changes.
+- Model-response caches are provider-specific. Invalidate them when the model
+  name, provider kind, prompt template, or repository snapshot changes.
 - For expensive provider calls, switch matrix profiles between `mock` and real
   providers rather than reusing stale provider config.

@@ -21,6 +21,22 @@ What v1 is not:
 - Hosted service or database-backed workflow orchestration.
 - Remote model calls by default.
 
+## Release guarantees
+
+The current release is meant to be usable without hidden services or model
+calls. The guarantees we treat as release-critical are:
+
+- `repogauge mine`, `review`, `export`, and `eval` all work with
+  `--llm-mode off`.
+- Exported datasets include both `dataset.jsonl` and the generated harness
+  adapter.
+- `repogauge eval --gold` resolves exported fixtures through the official
+  harness wrapper.
+- Remote model use is opt-in; repository contents are not sent externally unless
+  the user explicitly enables a provider.
+- Local resume and cache behavior is deterministic and invalidates when inputs,
+  repository topology, or toolchain signals change.
+
 See the architecture docs:
 
 - [docs/ADRs/0001-mvp-architecture.md](docs/ADRs/0001-mvp-architecture.md)
