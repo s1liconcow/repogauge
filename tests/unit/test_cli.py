@@ -595,6 +595,113 @@ solvers:
             self.assertEqual(result, 1)
             self.assertFalse((out / "matrix").exists())
 
+    def test_analyze_generates_reports_and_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            run_root = Path(workspace) / "unit-run"
+            run_root.mkdir()
+            (run_root / "attempts.jsonl").write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            "run_id": "unit-run",
+                            "solver_id": "solver-a",
+                            "instance_id": "inst-1",
+                            "duration_ms": 100,
+                            "cost": {"total_cost": 2.0},
+                            "attempt_state": "succeeded",
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "run_id": "unit-run",
+                            "solver_id": "solver-a",
+                            "instance_id": "inst-2",
+                            "duration_ms": 120,
+                            "cost": {"total_cost": 6.0},
+                            "attempt_state": "succeeded",
+                        }
+                    )
+                    + "\n"
+                ),
+                encoding="utf-8",
+            )
+            (run_root / "validation.jsonl").write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            "instance_id": "inst-1",
+                            "solver_id": "solver-a",
+                            "status": "resolved",
+                            "resolved": True,
+                            "harness_outcome": "resolved",
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "instance_id": "inst-2",
+                            "solver_id": "solver-a",
+                            "status": "not_resolved",
+                            "resolved": False,
+                            "harness_outcome": "not_resolved",
+                        }
+                    )
+                    + "\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = main(["analyze", str(run_root)])
+            self.assertEqual(result, 0)
+
+            manifest_path = run_root / "analyze" / "manifest.json"
+            self.assertTrue(manifest_path.exists())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            paths = manifest["artifact_paths"]
+            self.assertTrue(Path(paths["analyze_summary"]).exists())
+            self.assertTrue(Path(paths["analyze_report_csv"]).exists())
+            self.assertTrue(Path(paths["analyze_report_parquet"]).exists())
+            self.assertTrue(Path(paths["analyze_report_html"]).exists())
+            self.assertEqual(manifest["step_statuses"]["execute"], "succeeded")
+
+            summary = json.loads(
+                Path(paths["analyze_summary"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["metadata"]["attempt_rows"], 2)
+            self.assertEqual(summary["metadata"]["instance_result_rows"], 2)
+            self.assertEqual(len(summary["summary"]), 1)
+
+    def test_analyze_fails_when_attempts_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            run_root = Path(workspace) / "empty-run"
+            run_root.mkdir()
+            (run_root / "validation.jsonl").write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            "instance_id": "inst-1",
+                            "solver_id": "solver-a",
+                            "status": "resolved",
+                            "resolved": True,
+                            "harness_outcome": "resolved",
+                        }
+                    )
+                    + "\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = main(["analyze", str(run_root)])
+            self.assertEqual(result, 1)
+
+            manifest = json.loads(
+                (run_root / "analyze" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["status"], "failed")
+            self.assertEqual(manifest["step_statuses"]["inspect"], "failed")
+            self.assertEqual(manifest["step_statuses"]["execute"], "skipped")
+
 
 if __name__ == "__main__":
     unittest.main()

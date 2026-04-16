@@ -24,6 +24,15 @@ from .logging_utils import log_event
 from .manifest import Manifest, ManifestStepStatus
 from .mining.inspect import inspect_repository
 from .mining.scan import scan_repository
+from repogauge.runner.analyze import (
+    load_attempt_rows,
+    load_instance_result_rows,
+    summarize_attempt_metrics,
+    write_summary_csv,
+    write_summary_html,
+    write_summary_json,
+    write_summary_parquet,
+)
 from repogauge.runner.matrix import MatrixConfigurationError, load_matrix_config
 from repogauge.runner.adapters import SolverAdapterError, build_solver_adapters
 from repogauge.runner.scheduler import (
@@ -137,6 +146,18 @@ def _build_parser() -> argparse.ArgumentParser:
                 "--dataset",
                 help="Dataset path override (defaults to matrix.yaml dataset.path).",
             )
+        if name == "analyze":
+            cmd.add_argument(
+                "--group-by",
+                default="solver_id",
+                help="Comma-separated dimensions to aggregate summaries by.",
+            )
+            cmd.add_argument(
+                "--expensive-cost-threshold",
+                default=1.0,
+                type=float,
+                help="Threshold for classifying expensive attempts in metrics.",
+            )
 
     return parser
 
@@ -151,6 +172,10 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
     payload = {
         "command": command,
         "path": namespace.path or "",
+        "group_by": namespace.group_by if command == "analyze" else "",
+        "expensive_cost_threshold": (
+            namespace.expensive_cost_threshold if command == "analyze" else 0.0
+        ),
         "config": namespace.config or "",
         "dataset": namespace.dataset if command == "run" else "",
         "run_id": namespace.run_id if command == "run" else "",
@@ -185,6 +210,15 @@ def _resolve_eval_paths(source: Path) -> tuple[Path, Path]:
         dataset = source
         predictions = source.parent / "predictions.gold.jsonl"
     return dataset, predictions
+
+
+def _parse_group_by(value: str) -> tuple[str, ...]:
+    if not value:
+        return ("solver_id",)
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if not parts:
+        return ("solver_id",)
+    return tuple(parts)
 
 
 def _resolve_repo_root(path_value: str | Path) -> Path:
@@ -223,7 +257,15 @@ def _load_dataset_rows(dataset_path: Path) -> dict[str, dict[str, object]]:
 
 def _run_command(namespace: argparse.Namespace) -> int:
     command = namespace.command
-    out_root = Path(namespace.out or Path(".") / ".repogauge" / command).resolve()
+    source = Path(namespace.path).resolve() if namespace.path else Path(".").resolve()
+    if command == "analyze":
+        run_root = source if source.is_dir() else source.parent
+        out_root = (
+            Path(namespace.out).resolve() if namespace.out else run_root / "analyze"
+        )
+    else:
+        run_root = Path(".")
+        out_root = Path(namespace.out or Path(".") / ".repogauge" / command).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
     manifest_path = out_root / "manifest.json"
@@ -1068,6 +1110,249 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
             manifest.finish(
                 status="failed", metadata={"reason": "eval_failed", "error": str(exc)}
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            return 1
+
+    if command == "analyze":
+        if not namespace.path:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed", metadata={"reason": "missing_analyze_input"}
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": "missing analyze input path",
+                },
+                events_path,
+            )
+            return 1
+
+        analyze_root = run_root if run_root.is_dir() else run_root.parent
+        if not analyze_root.is_dir():
+            analyze_root = Path(".").resolve()
+
+        attempts_path = None
+        for candidate in (
+            analyze_root / "attempts.jsonl",
+            analyze_root / "attempts.parquet",
+        ):
+            if candidate.exists():
+                attempts_path = candidate
+                break
+        if attempts_path is None:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={
+                    "reason": "analyze_missing_attempts",
+                    "path": str(analyze_root),
+                },
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": f"attempt artifacts not found in {analyze_root}",
+                },
+                events_path,
+            )
+            return 1
+
+        instance_results_path = None
+        for candidate in (
+            analyze_root / "instance_results.jsonl",
+            analyze_root / "validation.jsonl",
+        ):
+            if candidate.exists():
+                instance_results_path = candidate
+                break
+        if instance_results_path is None:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={
+                    "reason": "analyze_missing_instance_results",
+                    "path": str(analyze_root),
+                },
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": f"instance_results artifact not found in {analyze_root}",
+                },
+                events_path,
+            )
+            return 1
+
+        manifest.mark_step(
+            "inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp
+        )
+        try:
+            attempt_rows = load_attempt_rows(attempts_path)
+            instance_results = load_instance_result_rows(instance_results_path)
+            summary_rows = summarize_attempt_metrics(
+                attempts=attempt_rows,
+                instance_results=instance_results,
+                group_by=_parse_group_by(namespace.group_by),
+                expensive_cost_threshold=float(namespace.expensive_cost_threshold),
+            )
+
+            summary_path = out_root / "summary.json"
+            report_csv_path = out_root / "report.csv"
+            report_parquet_path = out_root / "report.parquet"
+            report_html_path = out_root / "report.html"
+
+            write_summary_json(
+                summary_path,
+                summary_rows,
+                metadata={
+                    "run_root": str(analyze_root),
+                    "group_by": _parse_group_by(namespace.group_by),
+                    "expensive_cost_threshold": namespace.expensive_cost_threshold,
+                    "attempt_rows": len(attempt_rows),
+                    "instance_result_rows": len(instance_results),
+                },
+            )
+            write_summary_csv(
+                report_csv_path,
+                summary_rows,
+                group_by=_parse_group_by(namespace.group_by),
+            )
+            write_summary_parquet(
+                report_parquet_path,
+                summary_rows,
+                group_by=_parse_group_by(namespace.group_by),
+            )
+            write_summary_html(
+                report_html_path,
+                summary_rows,
+                group_by=_parse_group_by(namespace.group_by),
+                metadata={
+                    "run_root": str(analyze_root),
+                    "group_by": _parse_group_by(namespace.group_by),
+                    "attempt_rows": len(attempt_rows),
+                    "instance_result_rows": len(instance_results),
+                },
+            )
+
+            manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+            manifest.mark_step(
+                "execute",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.artifact_paths["analyze_summary"] = str(summary_path)
+            manifest.artifact_paths["analyze_report_csv"] = str(report_csv_path)
+            manifest.artifact_paths["analyze_report_parquet"] = str(report_parquet_path)
+            manifest.artifact_paths["analyze_report_html"] = str(report_html_path)
+            manifest.artifact_paths["analyze_attempts"] = str(attempts_path)
+            manifest.artifact_paths["analyze_instance_results"] = str(
+                instance_results_path
+            )
+            manifest.artifact_paths["analyze_run_root"] = str(analyze_root)
+            manifest.metadata["analyze"] = {
+                "group_by": _parse_group_by(namespace.group_by),
+                "expensive_cost_threshold": namespace.expensive_cost_threshold,
+                "attempt_rows": len(attempt_rows),
+                "instance_result_rows": len(instance_results),
+                "summary_rows": len(summary_rows),
+                "source": str(analyze_root),
+            }
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.finish(status="succeeded", metadata={"reason": "analyze_complete"})
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                },
+                events_path,
+            )
+            return 0
+        except Exception as exc:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={"reason": "analyze_failed", "error": str(exc)},
             )
             manifest.mark_step(
                 "finish",

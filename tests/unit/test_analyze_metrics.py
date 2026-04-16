@@ -1,0 +1,159 @@
+"""Unit tests for deterministic solver attempt analysis metrics."""
+
+from __future__ import annotations
+
+from repogauge.runner.analyze import join_attempt_rows, summarize_attempt_metrics
+
+
+def _attempt_row(
+    solver_id: str,
+    instance_id: str,
+    *,
+    duration_ms: int,
+    cost: float | None,
+) -> dict:
+    row: dict[str, object] = {
+        "solver_id": solver_id,
+        "instance_id": instance_id,
+        "duration_ms": duration_ms,
+    }
+    if cost is not None:
+        row["cost"] = {"total_cost": cost}
+    return row
+
+
+def _eval_row(
+    solver_id: str,
+    instance_id: str,
+    *,
+    harness_outcome: str,
+    resolved: object,
+) -> dict:
+    return {
+        "solver_id": solver_id,
+        "instance_id": instance_id,
+        "harness_outcome": harness_outcome,
+        "resolved": resolved,
+    }
+
+
+def test_join_attempt_rows_merges_solver_instance_rows_and_costs() -> None:
+    attempts = [
+        _attempt_row("solver-a", "inst-1", duration_ms=25, cost=2.5),
+        _attempt_row("solver-a", "inst-2", duration_ms=10, cost=0.75),
+        _attempt_row("solver-b", "inst-1", duration_ms=17, cost=None),
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True),
+        _eval_row(
+            "solver-a", "inst-2", harness_outcome="not_resolved", resolved="false"
+        ),
+        _eval_row("solver-b", "inst-1", harness_outcome="passed", resolved=1),
+    ]
+
+    joined = join_attempt_rows(attempts, instance_results)
+
+    assert len(joined) == 3
+    first = joined[0]
+    assert first["resolved"] is True
+    assert first["harness_outcome"] == "resolved"
+    assert first["attempt_cost_usd"] == 2.5
+    assert joined[1]["resolved"] is False
+    assert joined[2]["resolved"] is True
+    assert joined[2]["harness_outcome"] == "passed"
+
+
+def test_summarize_attempt_metrics_with_zero_resolutions() -> None:
+    attempts = [
+        _attempt_row("solver-a", "inst-1", duration_ms=17, cost=1.5),
+        _attempt_row("solver-a", "inst-1", duration_ms=23, cost=2.0),
+        _attempt_row("solver-a", "inst-2", duration_ms=40, cost=4.0),
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="not_resolved", resolved=False),
+        _eval_row(
+            "solver-a",
+            "inst-2",
+            harness_outcome="error",
+            resolved="0",
+        ),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        expensive_cost_threshold=1.0,
+    )
+
+    assert len(summaries) == 1
+    summary = summaries[0]
+    assert summary.attempt_count == 3
+    assert summary.unique_instance_count == 2
+    assert summary.resolved_instance_count == 0
+    assert summary.raw_resolution_rate == 0.0
+    assert summary.total_cost_usd == 7.5
+    assert summary.resolved_cost_usd == 0.0
+    assert summary.cost_per_resolved_issue is None
+    assert summary.latency_ms_per_resolved_issue is None
+    assert summary.expensive_coverage == 0.0
+    assert summary.exclusive_expensive_win_rate == 0.0
+    assert summary.marginal_cost_per_extra_resolve is None
+
+
+def test_summarize_attempt_metrics_expensive_coverage_and_exclusive_win_rate() -> None:
+    attempts = [
+        _attempt_row("solver-a", "cheap", duration_ms=10, cost=0.5),
+        _attempt_row("solver-a", "cheap", duration_ms=22, cost=1.0),
+        _attempt_row("solver-a", "borderline", duration_ms=30, cost=11.0),
+        _attempt_row("solver-a", "expensive", duration_ms=40, cost=12.0),
+        _attempt_row("solver-a", "fail", duration_ms=8, cost=15.0),
+    ]
+    instance_results = [
+        _eval_row("solver-a", "cheap", harness_outcome="resolved", resolved=True),
+        _eval_row("solver-a", "borderline", harness_outcome="passed", resolved=True),
+        _eval_row("solver-a", "expensive", harness_outcome="resolved", resolved=1),
+        _eval_row("solver-a", "fail", harness_outcome="not_resolved", resolved=False),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        expensive_cost_threshold=10.0,
+    )
+
+    summary = summaries[0]
+    assert summary.resolved_instance_count == 3
+    assert summary.unique_instance_count == 4
+    assert summary.expensive_coverage == 2.0 / 3
+    assert summary.exclusive_expensive_win_rate == 2.0 / 3
+    assert summary.cost_per_resolved_issue == (0.5 + 11.0 + 12.0) / 3
+
+
+def test_summarize_attempt_metrics_marginal_cost_uses_only_resolved_instances() -> None:
+    attempts = [
+        _attempt_row("solver-a", "cheap", duration_ms=10, cost=2.0),
+        _attempt_row("solver-a", "cheap", duration_ms=7, cost=3.0),
+        _attempt_row("solver-a", "middle", duration_ms=11, cost=12.0),
+        _attempt_row("solver-a", "expensive", duration_ms=13, cost=18.0),
+        _attempt_row("solver-a", "missed", duration_ms=13, cost=100.0),
+    ]
+    instance_results = [
+        _eval_row("solver-a", "cheap", harness_outcome="resolved", resolved=True),
+        _eval_row("solver-a", "middle", harness_outcome="resolved", resolved=True),
+        _eval_row(
+            "solver-a", "expensive", harness_outcome="not_resolved", resolved="0"
+        ),
+        _eval_row("solver-a", "missed", harness_outcome="not_resolved", resolved=False),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        expensive_cost_threshold=5.0,
+    )
+
+    summary = summaries[0]
+    # Cheap and middle resolve; marginal is mean difference of sorted minimum resolved costs:
+    # min(cheap)=2.0, min(middle)=12.0 -> (12 - 2) / 1 = 10
+    assert summary.marginal_cost_per_extra_resolve == 10.0
+    assert summary.resolved_instance_count == 2
