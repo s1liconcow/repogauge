@@ -1,2 +1,1 @@
-def value():
-    return 2
+x = 1
