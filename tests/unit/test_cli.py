@@ -157,6 +157,37 @@ class TestCliSurface(unittest.TestCase):
             self.assertEqual(len(scan_payloads), 0)
             self.assertEqual(len(candidates_payloads), 0)
 
+    def test_mine_artifact_contract_is_recorded_in_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            repo = Path(workspace) / "repo"
+            repo.mkdir()
+            run_command(["git", "init", "-b", "main"], cwd=str(repo))
+            run_command(["git", "config", "user.name", "ci"], cwd=str(repo))
+            run_command(
+                ["git", "config", "user.email", "ci@example.com"], cwd=str(repo)
+            )
+            (repo / "pyproject.toml").write_text(
+                "[project]\nname = 'demo'\n", encoding="utf-8"
+            )
+
+            out = Path(workspace) / "mine_out"
+            result = main(["mine", str(repo), "--out", str(out)])
+            self.assertEqual(result, 0)
+
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            paths = manifest["artifact_paths"]
+
+            self.assertEqual(paths["manifest"], str(out / "manifest.json"))
+            self.assertEqual(paths["events"], str(out / "events.jsonl"))
+            self.assertEqual(paths["repo_profile"], str(out / "repo_profile.json"))
+            self.assertEqual(paths["scan"], str(out / "scan.jsonl"))
+            self.assertEqual(paths["candidates"], str(out / "candidates.jsonl"))
+
+            for key in ("manifest", "events", "repo_profile", "scan", "candidates"):
+                self.assertTrue(
+                    Path(paths[key]).exists(), f"missing artifact for {key}"
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -96,6 +96,23 @@ export/dataset/dataset.jsonl        SWE-bench-compatible instances
 export/dataset/predictions.gold.jsonl
 ```
 
+### Command artifact contract (current scaffold)
+
+For `--out` directory `./out`, the scaffold writes command-specific artifacts:
+
+- `manifest.json`
+  - command metadata and step status for each run invocation
+- `events.jsonl`
+  - machine-readable execution events for the same run
+- `repo_profile.json`, `scan.jsonl`, `candidates.jsonl` for `mine`
+- `reviewed.jsonl`, `review.md`, `review.html` for `review`
+- `materialized.jsonl`, `materialization_rejections.jsonl`, `dataset/dataset.jsonl`,
+  `dataset/predictions.gold.jsonl`, `adapter_<repo>.py`, `specs.json` for `export`
+- `validation.jsonl` for `eval`
+
+This list reflects what the v0.1 scaffold guarantees today; future stages
+extend it to include run-level and analysis artifacts.
+
 ### E2E integration test
 
 ```bash

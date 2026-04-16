@@ -7,6 +7,48 @@ results without re-reading source code.
 
 - `REPOGAUGE_SCHEMA_VERSION = "0.1.0"`
 
+## Command output artifacts (current scaffold)
+
+The command suite writes artifacts under the chosen `--out` directory. Command
+output paths are part of the public contract and should remain stable for tooling
+that depends on them.
+
+- `mine`
+
+  - `manifest.json`
+  - `events.jsonl`
+  - `repo_profile.json`
+  - `scan.jsonl`
+  - `candidates.jsonl`
+
+- `review`
+
+  - `manifest.json`
+  - `events.jsonl`
+  - `reviewed.jsonl`
+  - `review.md`
+  - `review.html`
+
+- `export`
+
+  - `manifest.json`
+  - `events.jsonl`
+  - `materialized.jsonl`
+  - `materialization_rejections.jsonl`
+  - `dataset/dataset.jsonl`
+  - `dataset/predictions.gold.jsonl`
+  - `adapter_<repo>.py` (generated when ready rows are non-empty)
+  - `specs.json` (generated with adapter)
+
+- `eval`
+
+  - `manifest.json`
+  - `events.jsonl`
+  - `validation.jsonl`
+
+All non-empty artifacts are recorded under `artifact_paths` in the corresponding
+`manifest.json` entry.
+
 ## General principles
 
 - Keep schema rows JSONL-friendly.
