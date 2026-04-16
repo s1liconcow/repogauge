@@ -11,6 +11,7 @@ import importlib.util
 import inspect
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
@@ -36,6 +37,179 @@ class HarnessRunSummary:
     skipped: int
     resolve_rate: float
     harness_output: str | None = None
+    results_path: str | None = None
+    instance_results_path: str | None = None
+
+
+@dataclass(frozen=True)
+class JudgeSchedulerConfig:
+    """Configuration for batched judge execution."""
+
+    batch_size: int = 32
+    max_parallel_batches: int = 1
+    workers_per_batch: int = 1
+
+
+@dataclass(frozen=True)
+class JudgeBatchResult:
+    """Normalized results emitted for a single harness batch."""
+
+    instance_rows: list[dict[str, Any]]
+    metadata: dict[str, Any]
+    batch_key: str
+
+
+def _iter_chunks(values: list[Any], size: int) -> Iterable[list[Any]]:
+    if size <= 0:
+        size = 1
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+def _write_jsonl_rows(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
+def _batch_key_for_prediction(
+    dataset_row: Mapping[str, Any],
+    prediction_row: Mapping[str, Any],
+) -> str:
+    solver_id = _coerce_text(prediction_row.get("model_name_or_path"))
+    repo_id = _coerce_text(dataset_row.get("repo"))
+    version_id = _coerce_text(dataset_row.get("version"))
+    return "|".join((solver_id, repo_id, version_id))
+
+
+def _coerce_judge_config(
+    config: JudgeSchedulerConfig | None,
+) -> JudgeSchedulerConfig:
+    config = config or JudgeSchedulerConfig()
+    if config.batch_size < 1:
+        raise HarnessEvaluationError("batch_size must be >= 1")
+    if config.max_parallel_batches < 1:
+        raise HarnessEvaluationError("max_parallel_batches must be >= 1")
+    if config.workers_per_batch < 1:
+        raise HarnessEvaluationError("workers_per_batch must be >= 1")
+    return config
+
+
+def _safe_batch_key(value: str) -> str:
+    if not value:
+        return "default"
+    safe = []
+    for ch in value:
+        if ch.isalnum() or ch in "-._":
+            safe.append(ch)
+        else:
+            safe.append("_")
+    return "".join(safe) or "default"
+
+
+def _prepare_prediction_index(
+    predictions_rows: list[Dict[str, Any]],
+) -> dict[str, Dict[str, Any]]:
+    by_id: dict[str, Dict[str, Any]] = {}
+    for prediction in predictions_rows:
+        instance_id = _coerce_text(prediction.get("instance_id"))
+        if not instance_id:
+            continue
+        by_id[instance_id] = dict(prediction)
+    return by_id
+
+
+def _prepare_batches(
+    *,
+    dataset_rows: list[Dict[str, Any]],
+    predictions_rows: list[Dict[str, Any]],
+    batch_size: int,
+) -> tuple[list[tuple[str, list[tuple[Dict[str, Any], Dict[str, Any]]]], list[dict[str, Any]]]:
+    prediction_by_id = _prepare_prediction_index(predictions_rows)
+    grouped: dict[str, list[tuple[Dict[str, Any], Dict[str, Any]]]] = {}
+    missing_prediction_rows: list[dict[str, Any]] = []
+
+    for dataset_row in dataset_rows:
+        instance_id = _coerce_text(dataset_row.get("instance_id"))
+        if not instance_id:
+            continue
+        prediction = prediction_by_id.get(instance_id)
+        if prediction is None:
+            missing_prediction_rows.append(
+                _result_row_from_instance(
+                    dataset_row=dataset_row,
+                    status="skipped",
+                    reason="missing_prediction",
+                )
+            )
+            continue
+        key = _batch_key_for_prediction(
+            dataset_row=dataset_row, prediction_row=prediction
+        )
+        grouped.setdefault(key, []).append((dataset_row, prediction))
+
+    batches: list[tuple[str, list[tuple[Dict[str, Any], Dict[str, Any]]]] = []
+    for key, pairs in grouped.items():
+        for chunk in _iter_chunks(pairs, batch_size):
+            batches.append((key, chunk))
+
+    return batches, missing_prediction_rows
+
+
+def _run_batch(
+    *,
+    batch_index: int,
+    batch_key: str,
+    rows: list[tuple[Dict[str, Any], Dict[str, Any]]],
+    out_root: Path,
+    workers: int,
+    timeout_seconds: int,
+) -> JudgeBatchResult:
+    batch_root = out_root / "judge_batches" / f"batch_{batch_index:04d}_{_safe_batch_key(batch_key)}"
+    dataset_path = batch_root / "dataset.jsonl"
+    predictions_path = batch_root / "predictions.jsonl"
+    dataset_rows = [dataset_row for dataset_row, _ in rows]
+    prediction_rows = [prediction_row for _, prediction_row in rows]
+
+    _write_jsonl_rows(
+        dataset_path,
+        (
+            dict(dataset_row)
+            for dataset_row in dataset_rows
+            if _coerce_text(dataset_row.get("instance_id"))
+        ),
+    )
+    _write_jsonl_rows(predictions_path, prediction_rows)
+
+    harness_result = _invoke_swebench_harness(
+        dataset_path=dataset_path,
+        predictions_path=predictions_path,
+        out_root=batch_root,
+        workers=workers,
+        timeout_seconds=timeout_seconds,
+    )
+    instance_rows, metadata = _parse_harness_results(harness_result, dataset_rows)
+
+    if not instance_rows:
+        instance_rows = [
+            _result_row_from_instance(
+                dataset_row=dataset_row,
+                status="error",
+                reason="missing harness per-instance results",
+            )
+            for dataset_row in dataset_rows
+        ]
+
+    for row in instance_rows:
+        row["metadata"] = dict(row.get("metadata", {}), **{"harness_output": metadata})
+
+    return JudgeBatchResult(
+        instance_rows=instance_rows,
+        metadata=metadata,
+        batch_key=batch_key,
+    )
 
 
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -441,6 +615,7 @@ def run_harness_evaluation(
     workers: int = 1,
     timeout_seconds: int = 120,
     gold_if_missing: bool = False,
+    judge_config: JudgeSchedulerConfig | None = None,
 ) -> HarnessRunSummary:
     """Run official SWE-bench harness and normalize outputs.
 
@@ -459,6 +634,8 @@ def run_harness_evaluation(
     """
     out_root.mkdir(parents=True, exist_ok=True)
     validation_path = out_root / "validation.jsonl"
+    results_path = out_root / "results.json"
+    instance_results_path = out_root / "instance_results.jsonl"
 
     dataset_rows = _read_jsonl(dataset_path)
     if not dataset_rows:
@@ -470,9 +647,16 @@ def run_harness_evaluation(
             error=0,
             skipped=0,
             resolve_rate=0.0,
+            results_path=str(results_path),
+            instance_results_path=str(instance_results_path),
             harness_output="dataset empty",
         )
         validation_path.write_text("", encoding="utf-8")
+        results_path.write_text(
+            json.dumps({"batches": []}, sort_keys=True),
+            encoding="utf-8",
+        )
+        instance_results_path.write_text("", encoding="utf-8")
         return summary
 
     adapter_module: object | None = None
@@ -503,47 +687,121 @@ def run_harness_evaluation(
                 f"predictions file not found: {predictions_path}"
             )
 
-    try:
-        harness_output = _invoke_swebench_harness(
-            dataset_path=dataset_path,
-            predictions_path=predictions_path,
-            out_root=out_root,
-            workers=workers,
-            timeout_seconds=timeout_seconds,
-        )
-    except Exception as exc:
-        raise HarnessEvaluationError(
-            f"official harness execution failed: {exc}"
-        ) from exc
-
-    output_payload = _discover_harness_output(out_root / "harness")
-    instance_rows, parsed_metadata = _parse_harness_results(
-        harness_output, dataset_rows
+    predictions_rows = _read_jsonl(predictions_path)
+    config = _coerce_judge_config(judge_config)
+    batches, missing_rows = _prepare_batches(
+        dataset_rows=dataset_rows,
+        predictions_rows=predictions_rows,
+        batch_size=config.batch_size,
     )
-    if not instance_rows:
-        if isinstance(output_payload, Iterable) and not isinstance(
-            output_payload, (str, bytes, dict)
-        ):
-            instance_rows, parsed_metadata = _parse_harness_results(
-                output_payload, dataset_rows
+
+    batch_results: list[JudgeBatchResult] = []
+    if batches:
+        try:
+            with ThreadPoolExecutor(max_workers=config.max_parallel_batches) as pool:
+                futures = {
+                    pool.submit(
+                        _run_batch,
+                        batch_index=index,
+                        batch_key=batch_key,
+                        rows=rows,
+                        out_root=out_root,
+                        workers=workers * config.workers_per_batch,
+                        timeout_seconds=timeout_seconds,
+                    ): batch_key
+                    for index, (batch_key, rows) in enumerate(batches)
+                }
+                for future in as_completed(futures):
+                    try:
+                        batch_results.append(future.result())
+                    except Exception as exc:
+                        raise HarnessEvaluationError(
+                            f"official harness batch execution failed: {exc}"
+                        ) from exc
+        except HarnessEvaluationError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive for unexpected pool errors
+            raise HarnessEvaluationError(
+                f"official harness batch execution failed: {exc}"
+            ) from exc
+
+    by_instance_id: dict[str, dict[str, Any]] = {}
+    for row in missing_rows:
+        iid = _coerce_text(row.get("instance_id"))
+        if iid:
+            by_instance_id[iid] = row
+
+    for batch in batch_results:
+        for row in batch.instance_rows:
+            iid = _coerce_text(row.get("instance_id"))
+            if not iid:
+                continue
+            row["metadata"] = dict(row.get("metadata", {}), **{"batch_key": batch.batch_key})
+            by_instance_id[iid] = row
+
+    instance_rows = []
+    for dataset_row in dataset_rows:
+        iid = _coerce_text(dataset_row.get("instance_id"))
+        if not iid:
+            continue
+        row = by_instance_id.get(iid)
+        if row is None:
+            instance_rows.append(
+                _result_row_from_instance(
+                    dataset_row=dataset_row,
+                    status="error",
+                    reason="no harness result for instance",
+                )
             )
+            continue
+        row["environment_strategy"] = (
+            row.get("environment_strategy")
+            or _coerce_text(dataset_row.get("version"))
+            or "default"
+        )
+        instance_rows.append(row)
 
     if not instance_rows:
-        # Fallback: surface one row per dataset with an explicit error status.
         instance_rows = [
             _result_row_from_instance(
                 dataset_row=row,
                 status="error",
-                reason="missing harness per-instance results",
+                reason="no harness instance results collected",
             )
             for row in dataset_rows
         ]
 
     for row in instance_rows:
-        row["metadata"] = dict(
-            row.get("metadata", {}), **{"harness_output": parsed_metadata}
-        )
+        existing_metadata = row.get("metadata")
+        if isinstance(existing_metadata, Mapping):
+            row["metadata"] = dict(existing_metadata)
 
+    results_payload = {
+        "batch_count": len(batch_results),
+        "batch_size": config.batch_size,
+        "max_parallel_batches": config.max_parallel_batches,
+        "workers_per_batch": config.workers_per_batch,
+        "batches": [
+            {
+                "batch_key": item.batch_key,
+                "instance_count": len(item.instance_rows),
+                "metadata": item.metadata,
+            }
+            for item in batch_results
+        ],
+    }
+
+    results_path.write_text(
+        json.dumps(results_payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    instance_results_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in instance_rows),
+        encoding="utf-8",
+    )
+
+    # Preserve fallback path for compatibility with existing callers that parse
+    # validation output as the canonical instance artifact.
     validation_path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in instance_rows),
         encoding="utf-8",
@@ -571,5 +829,7 @@ def run_harness_evaluation(
         skipped=skipped_count,
         resolve_rate=round(resolved / total, 3) if total else 0.0,
         harness_output="official_swebench",
+        results_path=str(results_path),
+        instance_results_path=str(instance_results_path),
     )
     return summary
