@@ -80,3 +80,23 @@ def test_build_environment_plan_chooses_minimum_python_version_on_conflict() -> 
     assert "python_version:conflict" in plan.provenance
     assert "python_version:chose-minimum" in plan.provenance
     assert plan.confidence < 1.0
+
+
+def test_build_environment_plan_augments_uv_sync_for_pytest_groups() -> None:
+    profile = {
+        "python_hints": {
+            "versions": ["3.10"],
+            "package_managers": ["uv", "pyproject"],
+        },
+        "install_hints": ["uv sync", "pip install -e ."],
+        "test_runner_hints": {"commands": ["pytest"]},
+    }
+
+    plan = build_environment_plan(profile)
+
+    assert plan.install == [
+        "uv sync --active --all-groups",
+        "python -m pip install pytest",
+    ]
+    assert "install:test-dependency:uv-all-groups" in plan.provenance
+    assert "install:test-dependency:pytest" in plan.provenance

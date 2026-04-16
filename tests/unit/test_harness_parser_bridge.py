@@ -42,6 +42,49 @@ def test_parse_repogauge_junit_accepts_path_and_payload_variants(
     }
 
 
+def test_parse_repogauge_junit_accepts_optional_test_spec_argument(
+    tmp_path: Path,
+) -> None:
+    xml_path = tmp_path / "results.xml"
+    xml_path.write_text(textwrap.dedent(XML), encoding="utf-8")
+
+    parsed = parse_repogauge_junit(xml_path, object())
+
+    assert parsed == {
+        "tests/unit/test_foo.py::test_ok": OUTCOME_PASS,
+        "tests/unit/test_foo.py::test_fail": OUTCOME_FAIL,
+    }
+
+
+def test_parse_repogauge_junit_falls_back_to_pytest_log_parsing() -> None:
+    parsed = parse_repogauge_junit(
+        """
+        + python -m pytest tests/unit/test_example.py
+        FAILED tests/unit/test_example.py::test_fails - AssertionError: boom
+        PASSED tests/unit/test_example.py::test_passes
+        """
+    )
+
+    assert parsed == {
+        "tests/unit/test_example.py::test_fails": "FAILED",
+        "tests/unit/test_example.py::test_passes": "PASSED",
+    }
+
+
+def test_parse_repogauge_junit_does_not_treat_multiline_logs_as_paths() -> None:
+    parsed = parse_repogauge_junit(
+        """
+        + python -m pytest tests/unit/test_adapter.py
+        ============================= test session starts ==============================
+        collected 1 item
+        tests/unit/test_adapter.py .                                            [100%]
+        ============================== 1 passed in 0.07s ===============================
+        """
+    )
+
+    assert parsed == {}
+
+
 def test_parse_repogauge_junit_rejects_unknown_payload():
     with pytest.raises(TypeError, match="unsupported report payload"):
         parse_repogauge_junit(123)

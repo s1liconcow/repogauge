@@ -107,7 +107,7 @@ def _build_install_commands(
 
     if "uv" in package_managers:
         provenance.append("install_strategy:uv")
-        return ["uv sync"], build, 0.95, "uv"
+        return ["uv sync --active"], build, 0.95, "uv"
 
     if "pipenv" in package_managers:
         provenance.append("install_strategy:pipenv")
@@ -137,13 +137,40 @@ def _build_install_commands(
     return ["pip install -e ."], build, 0.5, "fallback"
 
 
-_SELF_MANAGING_INSTALL_PREFIXES = ("poetry install", "uv sync", "pipenv install")
+_SELF_MANAGING_INSTALL_PREFIXES = ("poetry install", "pipenv install")
+
+
+def _augment_uv_install_for_pytest(
+    install: list[str],
+    provenance: list[str],
+) -> list[str]:
+    augmented: list[str] = []
+    for command in install:
+        if not command.startswith("uv sync"):
+            augmented.append(command)
+            continue
+        if any(
+            flag in command
+            for flag in ("--all-groups", "--group ", "--only-group", "--only-dev")
+        ):
+            augmented.append(command)
+            continue
+        provenance.append("install:test-dependency:uv-all-groups")
+        augmented.append(f"{command} --all-groups")
+    return augmented
 
 
 def _augment_for_pytest(
     install: list[str], test_cmd_base: str, provenance: list[str], confidence: float
 ) -> tuple[list[str], float]:
     if test_cmd_base not in {"pytest", "python -m pytest"}:
+        return install, confidence
+
+    if any(cmd.startswith("uv sync") for cmd in install):
+        install = _augment_uv_install_for_pytest(install, provenance)
+        if not any("pip install pytest" in command for command in install):
+            provenance.append("install:test-dependency:pytest")
+            install = install + ["python -m pip install pytest"]
         return install, confidence
 
     # Package managers like poetry, uv, and pipenv install dev dependencies
