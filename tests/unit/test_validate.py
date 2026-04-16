@@ -64,10 +64,14 @@ def test_run_pytest_falls_back_when_junit_xml_missing(tmp_path: Path) -> None:
     assert attempts[1]["status"] == "success"
 
 
-def test_eval_instance_executes_four_passes_in_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_eval_instance_executes_four_passes_in_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls: list[str] = []
 
-    def fake_build_targeted_test_plan(test_cmd: str, test_patch: str) -> tuple[str, list[str]]:
+    def fake_build_targeted_test_plan(
+        test_cmd: str, test_patch: str
+    ) -> tuple[str, list[str]]:
         assert test_cmd == "pytest --config"
         assert test_patch
         return ("python -m pytest", ["tests/test_eval.py"])
@@ -91,13 +95,22 @@ def test_eval_instance_executes_four_passes_in_order(monkeypatch: pytest.MonkeyP
         if label == "c":
             return fake_pass("c", {"tests/test_eval.py::fail": "pass"}, "run-c")
         if label == "b_rerun":
-            return fake_pass("b_rerun", {"tests/test_eval.py::fail": "fail"}, "run-b-rerun")
+            return fake_pass(
+                "b_rerun", {"tests/test_eval.py::fail": "fail"}, "run-b-rerun"
+            )
         if label == "c_rerun":
-            return fake_pass("c_rerun", {"tests/test_eval.py::fail": "pass"}, "run-c-rerun")
+            return fake_pass(
+                "c_rerun", {"tests/test_eval.py::fail": "pass"}, "run-c-rerun"
+            )
         raise AssertionError(f"unexpected label {label}")
 
-    monkeypatch.setattr("repogauge.validation.validate.build_targeted_test_plan", fake_build_targeted_test_plan)
-    monkeypatch.setattr("repogauge.validation.validate._run_validation_pass", fake_run_validation_pass)
+    monkeypatch.setattr(
+        "repogauge.validation.validate.build_targeted_test_plan",
+        fake_build_targeted_test_plan,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_validation_pass", fake_run_validation_pass
+    )
 
     outcome = _eval_instance(
         repo_root=tmp_path,
@@ -115,8 +128,12 @@ def test_eval_instance_executes_four_passes_in_order(monkeypatch: pytest.MonkeyP
     assert outcome["flake_runs"] == 2
 
 
-def test_eval_instance_marks_flaky_when_reruns_differ(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    def fake_build_targeted_test_plan(test_cmd: str, test_patch: str) -> tuple[str, list[str]]:
+def test_eval_instance_marks_flaky_when_reruns_differ(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_build_targeted_test_plan(
+        test_cmd: str, test_patch: str
+    ) -> tuple[str, list[str]]:
         return ("python -m pytest", ["tests/test_eval.py"])
 
     def fake_run_validation_pass(*, label: str, **kwargs: object) -> dict[str, object]:
@@ -163,8 +180,13 @@ def test_eval_instance_marks_flaky_when_reruns_differ(monkeypatch: pytest.Monkey
             }
         raise AssertionError(f"unexpected label {label}")
 
-    monkeypatch.setattr("repogauge.validation.validate.build_targeted_test_plan", fake_build_targeted_test_plan)
-    monkeypatch.setattr("repogauge.validation.validate._run_validation_pass", fake_run_validation_pass)
+    monkeypatch.setattr(
+        "repogauge.validation.validate.build_targeted_test_plan",
+        fake_build_targeted_test_plan,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_validation_pass", fake_run_validation_pass
+    )
 
     outcome = _eval_instance(
         repo_root=tmp_path,
@@ -186,7 +208,9 @@ def test_eval_instance_marks_flaky_when_reruns_differ(monkeypatch: pytest.Monkey
 def test_eval_instance_errors_before_run_c_on_pass_b_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_build_targeted_test_plan(test_cmd: str, test_patch: str) -> tuple[str, list[str]]:
+    def fake_build_targeted_test_plan(
+        test_cmd: str, test_patch: str
+    ) -> tuple[str, list[str]]:
         return ("python -m pytest", ["tests/test_eval.py"])
 
     calls: list[str] = []
@@ -211,8 +235,13 @@ def test_eval_instance_errors_before_run_c_on_pass_b_failure(
             }
         raise AssertionError(f"unexpected label {label}")
 
-    monkeypatch.setattr("repogauge.validation.validate.build_targeted_test_plan", fake_build_targeted_test_plan)
-    monkeypatch.setattr("repogauge.validation.validate._run_validation_pass", fake_run_validation_pass)
+    monkeypatch.setattr(
+        "repogauge.validation.validate.build_targeted_test_plan",
+        fake_build_targeted_test_plan,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_validation_pass", fake_run_validation_pass
+    )
 
     outcome = _eval_instance(
         repo_root=tmp_path,

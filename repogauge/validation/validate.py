@@ -293,7 +293,10 @@ def _run_validation_pass(
 
 
 def _is_flaky(
-    run_b: Dict[str, str], run_b_rerun: Dict[str, str], run_c: Dict[str, str], run_c_rerun: Dict[str, str]
+    run_b: Dict[str, str],
+    run_b_rerun: Dict[str, str],
+    run_c: Dict[str, str],
+    run_c_rerun: Dict[str, str],
 ) -> bool:
     """Return True when reruns are not stable."""
     return run_b != run_b_rerun or run_c != run_c_rerun
@@ -336,9 +339,9 @@ def _eval_instance(
             test_cmd_base=targeted_test_cmd,
         )
         if run_a["status"] == "failed":
-                return {
-                    "status": "error",
-                    "error": run_a["error"],
+            return {
+                "status": "error",
+                "error": run_a["error"],
                 "targeted_test_cmd": targeted_test_cmd,
                 "targeted_test_inputs": test_inputs,
                 "log_a": run_a["log"],
@@ -375,9 +378,9 @@ def _eval_instance(
             test_cmd_base=targeted_test_cmd,
         )
         if run_b["status"] == "failed":
-                return {
-                    "status": "error",
-                    "error": run_b["error"],
+            return {
+                "status": "error",
+                "error": run_b["error"],
                 "targeted_test_cmd": targeted_test_cmd,
                 "targeted_test_inputs": test_inputs,
                 "log_a": run_a["log"],
@@ -414,9 +417,9 @@ def _eval_instance(
             test_cmd_base=targeted_test_cmd,
         )
         if run_c["status"] == "failed":
-                return {
-                    "status": "error",
-                    "error": run_c["error"],
+            return {
+                "status": "error",
+                "error": run_c["error"],
                 "targeted_test_cmd": targeted_test_cmd,
                 "targeted_test_inputs": test_inputs,
                 "log_a": run_a["log"],
@@ -465,11 +468,11 @@ def _eval_instance(
         )
 
         if run_b_rerun["status"] == "failed" or run_c_rerun["status"] == "failed":
-                return {
-                    "status": "error",
-                    "error": run_b_rerun["error"]
-                    if run_b_rerun["status"] == "failed"
-                    else run_c_rerun["error"],
+            return {
+                "status": "error",
+                "error": run_b_rerun["error"]
+                if run_b_rerun["status"] == "failed"
+                else run_c_rerun["error"],
                 "targeted_test_cmd": targeted_test_cmd,
                 "targeted_test_inputs": test_inputs,
                 "log_a": run_a["log"],
@@ -493,10 +496,15 @@ def _eval_instance(
                 "resolved": False,
             }
 
-        if _is_flaky(run_b["outcomes"], run_b_rerun["outcomes"], run_c["outcomes"], run_c_rerun["outcomes"]):
-                return {
-                    "status": "flaky",
-                    "error": "rerun outcomes changed",
+        if _is_flaky(
+            run_b["outcomes"],
+            run_b_rerun["outcomes"],
+            run_c["outcomes"],
+            run_c_rerun["outcomes"],
+        ):
+            return {
+                "status": "flaky",
+                "error": "rerun outcomes changed",
                 "targeted_test_cmd": targeted_test_cmd,
                 "targeted_test_inputs": test_inputs,
                 "log_a": run_a["log"],
