@@ -113,7 +113,9 @@ class TestCliSurface(unittest.TestCase):
 
     def test_llm_mode_help_notes_review_only_behavior(self) -> None:
         subparsers_action = next(
-            action for action in self.parser._actions if getattr(action, "choices", None)
+            action
+            for action in self.parser._actions
+            if getattr(action, "choices", None)
         )
         help_text = subparsers_action.choices["run"].format_help()
         self.assertIn("Currently only affects", help_text)
