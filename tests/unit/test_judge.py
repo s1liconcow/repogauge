@@ -9,6 +9,7 @@ from repogauge.runner.judge import (
     JudgeBatchResult,
     JudgeSchedulerConfig,
     run_harness_evaluation,
+    _parse_harness_results,
     _result_row_from_instance,
 )
 
@@ -190,3 +191,36 @@ def test_run_harness_evaluation_marks_missing_predictions_as_skipped(
     assert lines[1]["instance_id"] == "inst-b"
     assert lines[1]["status"] == "skipped"
     assert lines[1]["reason"] == "missing_prediction"
+
+
+def test_parse_harness_results_supports_swebench_4x_id_lists() -> None:
+    dataset_rows = [
+        _dataset_row(instance_id="inst-a", model="solver-x"),
+        _dataset_row(instance_id="inst-b", model="solver-x"),
+        _dataset_row(instance_id="inst-c", model="solver-x"),
+        _dataset_row(instance_id="inst-d", model="solver-x"),
+    ]
+    harness_result = {
+        "resolved_ids": ["inst-a"],
+        "unresolved_ids": ["inst-b"],
+        "error_ids": ["inst-c"],
+        "incomplete_ids": ["inst-d"],
+    }
+
+    rows, metadata = _parse_harness_results(harness_result, dataset_rows)
+
+    assert metadata == harness_result
+    assert [row["instance_id"] for row in rows] == [
+        "inst-a",
+        "inst-b",
+        "inst-c",
+        "inst-d",
+    ]
+    assert rows[0]["status"] == "resolved"
+    assert rows[0]["resolved"] is True
+    assert rows[1]["status"] == "not_resolved"
+    assert rows[1]["resolved"] is False
+    assert rows[2]["status"] == "error"
+    assert rows[2]["reason"] == "harness error"
+    assert rows[3]["status"] == "error"
+    assert rows[3]["reason"] == "incomplete"

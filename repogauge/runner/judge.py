@@ -8,7 +8,6 @@ harness wrapper path used by ``repogauge eval``.
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import json
 import sys
 import uuid
@@ -456,23 +455,43 @@ def _parse_harness_results(
     if isinstance(harness_result, Mapping):
         metadata = dict(harness_result)
         candidate = harness_result
-        rows = candidate.get("results") or candidate.get("rows")
-        if isinstance(rows, list):
-            for raw in rows:
-                if not isinstance(raw, Mapping):
-                    continue
-                iid = _coerce_text(raw.get("instance_id"))
-                if not iid:
-                    continue
-                by_instance[iid] = {
-                    "status": _coerce_text(raw.get("status")) or "not_resolved",
-                    "resolved": raw.get("resolved"),
-                    "reason": _coerce_text(
-                        raw.get("reason") or raw.get("failure_reason")
-                    ),
-                    "error": raw.get("error"),
-                    "metadata": raw.get("metadata", {}),
-                }
+
+        # swebench 4.x format: separate resolved/unresolved/error id lists
+        if "resolved_ids" in candidate or "unresolved_ids" in candidate:
+            for iid in candidate.get("resolved_ids", []):
+                iid = _coerce_text(iid)
+                if iid:
+                    by_instance[iid] = {"status": "resolved", "resolved": True, "reason": None, "error": None, "metadata": {}}
+            for iid in candidate.get("unresolved_ids", []):
+                iid = _coerce_text(iid)
+                if iid:
+                    by_instance[iid] = {"status": "not_resolved", "resolved": False, "reason": None, "error": None, "metadata": {}}
+            for iid in candidate.get("error_ids", []):
+                iid = _coerce_text(iid)
+                if iid and iid not in by_instance:
+                    by_instance[iid] = {"status": "error", "resolved": False, "reason": "harness error", "error": "harness error", "metadata": {}}
+            for iid in candidate.get("incomplete_ids", []):
+                iid = _coerce_text(iid)
+                if iid and iid not in by_instance:
+                    by_instance[iid] = {"status": "error", "resolved": False, "reason": "incomplete", "error": "incomplete", "metadata": {}}
+        else:
+            rows = candidate.get("results") or candidate.get("rows")
+            if isinstance(rows, list):
+                for raw in rows:
+                    if not isinstance(raw, Mapping):
+                        continue
+                    iid = _coerce_text(raw.get("instance_id"))
+                    if not iid:
+                        continue
+                    by_instance[iid] = {
+                        "status": _coerce_text(raw.get("status")) or "not_resolved",
+                        "resolved": raw.get("resolved"),
+                        "reason": _coerce_text(
+                            raw.get("reason") or raw.get("failure_reason")
+                        ),
+                        "error": raw.get("error"),
+                        "metadata": raw.get("metadata", {}),
+                    }
 
     if isinstance(harness_result, list):
         for raw in harness_result:
@@ -573,50 +592,68 @@ def _invoke_swebench_harness(
     workers: int,
     timeout_seconds: int,
 ) -> Any:
-    """Call ``swebench.harness.run_evaluation`` with defensive kwargs."""
-    out_dir = out_root / "harness"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    """Call the swebench 4.x ``run_instances`` API."""
+    import os
 
+    import docker as docker_module  # type: ignore[import]
     import swebench.harness.run_evaluation as run_module  # type: ignore[import]
 
-    run_fn = getattr(run_module, "run_evaluation", None)
-    if run_fn is None:
-        raise HarnessEvaluationError(
-            "swebench.harness.run_evaluation module missing run_evaluation entrypoint"
+    dataset_rows = _read_jsonl(dataset_path)
+    pred_rows = _read_jsonl(predictions_path)
+    predictions = {
+        row["instance_id"]: row
+        for row in pred_rows
+        if row.get("instance_id")
+    }
+    instances = [
+        row for row in dataset_rows
+        if row.get("instance_id") in predictions
+    ]
+    if not instances:
+        return {}
+
+    run_id = f"repogauge-{out_root.parent.name}-{out_root.name}"
+    client = docker_module.from_env()
+
+    print("repogauge eval: building environment images", file=sys.stderr)
+    run_module.build_env_images(
+        client,
+        instances,
+        force_rebuild=False,
+        max_workers=workers,
+        namespace="swebench",
+        instance_image_tag="latest",
+        env_image_tag="latest",
+    )
+
+    out_root.mkdir(parents=True, exist_ok=True)
+    orig_dir = os.getcwd()
+    os.chdir(out_root)
+    try:
+        print(
+            "repogauge eval: dispatching to official SWE-bench harness",
+            file=sys.stderr,
         )
-
-    signature = inspect.signature(run_fn)
-    params = signature.parameters
-
-    kwargs: dict[str, Any] = {}
-    if "dataset_path" in params:
-        kwargs["dataset_path"] = str(dataset_path)
-    elif "dataset" in params:
-        kwargs["dataset"] = str(dataset_path)
-
-    if "predictions_path" in params:
-        kwargs["predictions_path"] = str(predictions_path)
-    elif "predictions" in params:
-        kwargs["predictions"] = str(predictions_path)
-
-    if "output_dir" in params:
-        kwargs["output_dir"] = str(out_dir)
-    elif "output" in params:
-        kwargs["output"] = str(out_dir)
-
-    if "max_workers" in params:
-        kwargs["max_workers"] = workers
-    elif "num_workers" in params:
-        kwargs["num_workers"] = workers
-
-    if "timeout" in params:
-        kwargs["timeout"] = timeout_seconds
-
-    if "report_path" in params:
-        kwargs["report_path"] = str(out_dir / "report.json")
-
-    print("repogauge eval: dispatching to official SWE-bench harness", file=sys.stderr)
-    return run_fn(**kwargs)
+        run_module.run_instances(
+            predictions=predictions,
+            instances=instances,
+            cache_level="instance",
+            clean=False,
+            force_rebuild=False,
+            max_workers=workers,
+            run_id=run_id,
+            timeout=timeout_seconds,
+            namespace="swebench",
+        )
+        report_path = run_module.make_run_report(
+            predictions,
+            instances,
+            run_id,
+            namespace="swebench",
+        )
+        return json.loads(report_path.read_text())
+    finally:
+        os.chdir(orig_dir)
 
 
 def run_harness_evaluation(
