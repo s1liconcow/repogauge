@@ -295,6 +295,61 @@ class TestCliSurface(unittest.TestCase):
                 "gold flag should enable missing-predictions generation",
             )
 
+    def test_eval_prefers_dataset_directory_files_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_dir = Path(workspace) / "dataset"
+            dataset_dir.mkdir()
+            dataset_path = dataset_dir / "dataset.jsonl"
+            predictions_path = dataset_dir / "predictions.gold.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            predictions_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "model_name_or_path": "gold",
+                        "model_patch": "diff",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            out_root = Path(workspace) / "out"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                )
+                result = main(["eval", str(dataset_dir), "--gold", "--out", str(out_root)])
+
+            self.assertEqual(result, 0)
+            mock_eval.assert_called_once()
+            self.assertEqual(
+                Path(mock_eval.call_args.kwargs["dataset_path"]),
+                dataset_path,
+            )
+            self.assertEqual(
+                Path(mock_eval.call_args.kwargs["predictions_path"]),
+                predictions_path,
+            )
+
     def test_eval_requires_predictions_or_gold(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             dataset_path = Path(workspace) / "dataset.jsonl"
