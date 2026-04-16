@@ -91,6 +91,24 @@ class TestCliSurface(unittest.TestCase):
         self.assertEqual(namespace.triage_hints, "./triage.jsonl")
         self.assertEqual(namespace.llm_model, "local-unit")
         self.assertEqual(namespace.llm_provider, "local")
+        namespace = self.parser.parse_args(
+            [
+                "train-router",
+                "./router_train.parquet",
+                "--seed",
+                "11",
+                "--train-fraction",
+                "0.7",
+                "--validation-fraction",
+                "0.2",
+                "--max-depth",
+                "4",
+            ]
+        )
+        self.assertEqual(namespace.seed, 11)
+        self.assertEqual(namespace.train_fraction, 0.7)
+        self.assertEqual(namespace.validation_fraction, 0.2)
+        self.assertEqual(namespace.max_depth, 4)
 
     def test_command_emits_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
@@ -766,6 +784,13 @@ solvers:
             self.assertEqual(report["cheap_solver_id"], "solver-cheap")
             self.assertEqual(len(report["policies"]), 4)
             self.assertEqual(report["policies"][0]["policy"], "always_cheap")
+            self.assertIn("learned_router", report)
+            self.assertEqual(report["learned_router"]["policy"], "learned_router")
+            self.assertIn("model", report)
+            self.assertEqual(
+                report["model"]["model_version"], "router-model-v1"
+            )
+            self.assertTrue((report_out / "router_model.json").exists())
 
     def test_analyze_fails_when_attempts_missing(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

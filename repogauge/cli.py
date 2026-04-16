@@ -165,6 +165,31 @@ def _build_parser() -> argparse.ArgumentParser:
                 type=float,
                 help="Threshold for classifying expensive attempts in metrics.",
             )
+        if name == "train-router":
+            cmd.add_argument(
+                "--seed",
+                default=0,
+                type=int,
+                help="Deterministic split/model seed for router training.",
+            )
+            cmd.add_argument(
+                "--train-fraction",
+                default=0.8,
+                type=float,
+                help="Fraction of rows to use for router training.",
+            )
+            cmd.add_argument(
+                "--validation-fraction",
+                default=0.1,
+                type=float,
+                help="Fraction of rows to use for router validation.",
+            )
+            cmd.add_argument(
+                "--max-depth",
+                default=3,
+                type=int,
+                help="Maximum tree depth for the supervised router baseline.",
+            )
 
     return parser
 
@@ -1502,6 +1527,12 @@ def _run_command(namespace: argparse.Namespace) -> int:
             report = run_router_training(
                 router_train_path,
                 out_root=report_out_root,
+                seed=int(getattr(namespace, "seed", 0)),
+                train_fraction=float(getattr(namespace, "train_fraction", 0.8)),
+                validation_fraction=float(
+                    getattr(namespace, "validation_fraction", 0.1)
+                ),
+                max_depth=int(getattr(namespace, "max_depth", 3)),
             )
             report_path = Path(report["router_report_path"])
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
@@ -1512,11 +1543,17 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 + "Z",
             )
             manifest.artifact_paths["router_train"] = str(router_train_path)
+            manifest.artifact_paths["router_model"] = report["router_model_path"]
             manifest.artifact_paths["router_report"] = str(report_path)
             manifest.metadata["train_router"] = {
                 "router_train_path": str(router_train_path),
+                "router_model_path": report["router_model_path"],
                 "router_report_path": str(report_path),
                 "instance_count": report["instance_count"],
+                "seed": getattr(namespace, "seed", 0),
+                "train_fraction": getattr(namespace, "train_fraction", 0.8),
+                "validation_fraction": getattr(namespace, "validation_fraction", 0.1),
+                "max_depth": getattr(namespace, "max_depth", 3),
                 "report": report["report"],
             }
             manifest.mark_step(
