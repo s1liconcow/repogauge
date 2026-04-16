@@ -8,6 +8,10 @@ from .planner import (
     write_matrix_copy,
     write_run_manifest,
 )
+from .adapters import (
+    SolverAdapterError,
+    build_solver_adapters,
+)
 from .scheduler import (
     SolverAdapter,
     SolverAdapterRequest,
@@ -40,6 +44,8 @@ __all__ = [
     "write_jobs",
     "write_matrix_copy",
     "write_run_manifest",
+    "build_solver_adapters",
+    "SolverAdapterError",
     "SolverAdapter",
     "SolverAdapterRequest",
     "SolverAdapterResult",

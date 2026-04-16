@@ -8,6 +8,7 @@ changing public invocation semantics.
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import hashlib
 import json
 import os
@@ -24,6 +25,13 @@ from .manifest import Manifest, ManifestStepStatus
 from .mining.inspect import inspect_repository
 from .mining.scan import scan_repository
 from repogauge.runner.matrix import MatrixConfigurationError, load_matrix_config
+from repogauge.runner.adapters import SolverAdapterError, build_solver_adapters
+from repogauge.runner.scheduler import (
+    SolverAttemptState,
+    SolverScheduler,
+    SolverSchedulerConfig,
+    SolverSchedulerError,
+)
 from repogauge.runner.planner import (
     RunManifest,
     plan_jobs,
@@ -195,6 +203,22 @@ def _resolve_repo_root(path_value: str | Path) -> Path:
         if (ancestor / ".git").exists():
             return ancestor
     raise RuntimeError(f"cannot resolve repository root from {path_value}")
+
+
+def _load_dataset_rows(dataset_path: Path) -> dict[str, dict[str, object]]:
+    rows: dict[str, dict[str, object]] = {}
+    for line in dataset_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line.strip())
+        if not isinstance(row, dict):
+            raise RuntimeError("dataset row must be a JSON object")
+
+        instance_id = str(row.get("instance_id", "")).strip()
+        if not instance_id:
+            raise RuntimeError("dataset row missing instance_id")
+        rows[instance_id] = dict(row)
+    return rows
 
 
 def _run_command(namespace: argparse.Namespace) -> int:
@@ -994,6 +1018,12 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 + "Z",
             )
             manifest.artifact_paths["validation"] = eval_summary.validation_path
+            if eval_summary.results_path is not None:
+                manifest.artifact_paths["results"] = eval_summary.results_path
+            if eval_summary.instance_results_path is not None:
+                manifest.artifact_paths["instance_results"] = (
+                    eval_summary.instance_results_path
+                )
             manifest.metadata["eval"] = {
                 "total": eval_summary.total,
                 "resolved": eval_summary.resolved,
@@ -1101,6 +1131,9 @@ def _run_command(namespace: argparse.Namespace) -> int:
             matrix_out = run_root / "matrix.yaml"
             jobs_out = run_root / "jobs.jsonl"
             run_manifest_out = run_root / "manifest.json"
+            run_jobs_out = run_root / "run_jobs.jsonl"
+            attempts_out = run_root / "attempts.jsonl"
+            run_summary_out = run_root / "run_summary.json"
             write_matrix_copy(matrix_out, Path(matrix.matrix_path))
             write_jobs(jobs, jobs_out)
             run_manifest = RunManifest.from_matrix(
@@ -1111,6 +1144,35 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 jobs_out=jobs_out,
             )
             write_run_manifest(run_manifest, run_manifest_out)
+            dataset_rows = _load_dataset_rows(Path(matrix.dataset.path))
+            adapters = build_solver_adapters(
+                solvers=matrix.solvers,
+                providers=matrix.providers,
+            )
+            scheduler = SolverScheduler(
+                config=SolverSchedulerConfig(
+                    persist_jobs_to=run_jobs_out,
+                    persist_attempts_to=attempts_out,
+                )
+            )
+            summary = scheduler.run(
+                jobs=jobs,
+                adapters=adapters,
+                dataset_rows=dataset_rows,
+            )
+            run_summary = {
+                "completed_at": summary.completed_at,
+                "job_count": len(summary.jobs),
+                "solved": sum(
+                    1
+                    for item in summary.jobs
+                    if item.final_status == SolverAttemptState.SUCCEEDED
+                ),
+                "jobs": [asdict(item) for item in summary.jobs],
+            }
+            run_summary_out.write_text(
+                json.dumps(run_summary, sort_keys=True) + "\n", encoding="utf-8"
+            )
 
             manifest.mark_step(
                 "inspect", ManifestStepStatus.SUCCEEDED, ended_at=command_timestamp
@@ -1125,10 +1187,13 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.artifact_paths["matrix"] = str(matrix_out)
             manifest.artifact_paths["jobs"] = str(jobs_out)
             manifest.artifact_paths["run_manifest"] = str(run_manifest_out)
+            manifest.artifact_paths["run_jobs"] = str(run_jobs_out)
+            manifest.artifact_paths["attempts"] = str(attempts_out)
+            manifest.artifact_paths["run_summary"] = str(run_summary_out)
             manifest.finish(
                 status="succeeded",
                 metadata={
-                    "reason": "run_plan_complete",
+                    "reason": "run_complete",
                     "run_id": matrix.run_id,
                     "job_count": len(jobs),
                 },
@@ -1142,6 +1207,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "timestamp": manifest.ended_at,
                     "run_id": matrix.run_id,
                     "jobs": len(jobs),
+                    "solved": run_summary["solved"],
                 },
                 events_path,
             )
@@ -1157,6 +1223,43 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.finish(
                 status="failed",
                 metadata={"reason": "run_matrix_invalid", "error": str(exc)},
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            return 1
+        except (
+            SolverAdapterError,
+            SolverSchedulerError,
+            RuntimeError,
+            ValueError,
+        ) as exc:
+            manifest.mark_step(
+                "execute",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.finish(
+                status="failed",
+                metadata={
+                    "reason": "run_execution_failed",
+                    "error": str(exc),
+                },
             )
             manifest.mark_step(
                 "finish",

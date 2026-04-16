@@ -136,6 +136,54 @@ class CaptureAdapter(SolverAdapter):
         return result
 
 
+class PrepareErrorAdapter(ReplayAdapter):
+    def __init__(self, statuses: list[str], fail_prepare_attempts: set[int]) -> None:
+        super().__init__(statuses)
+        self.fail_prepare_attempts = fail_prepare_attempts
+
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+    ) -> SolverAdapterRequest:
+        if attempt_index in self.fail_prepare_attempts:
+            raise RuntimeError("prepare failed")
+        return super().prepare_request(
+            job=job,
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            instance_row=instance_row,
+        )
+
+
+class TelemetryErrorAdapter(CaptureAdapter):
+    def __init__(
+        self, statuses: list[str], patch: str = "", timed: float = 0.0
+    ) -> None:
+        super().__init__(statuses, patch=patch, timed=timed)
+        self.telemetry_calls: list[str] = []
+
+    def collect_telemetry(self, attempt_id: str) -> tuple[dict[str, str], ...]:
+        self.telemetry_calls.append(attempt_id)
+        raise RuntimeError("telemetry unavailable")
+
+
+class FinalizeErrorAdapter(ReplayAdapter):
+    def __init__(self, statuses: list[str], fail_finalize_attempts: set[int]) -> None:
+        super().__init__(statuses)
+        self.fail_finalize_attempts = fail_finalize_attempts
+
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
+        if request.attempt_index in self.fail_finalize_attempts:
+            raise RuntimeError("finalize failed")
+        return result
+
+
 class SleepyAdapter(SolverAdapter):
     def __init__(self) -> None:
         self.active = 0
@@ -292,6 +340,76 @@ def test_scheduler_preserves_dataset_row_in_prepare_request(tmp_path: Path) -> N
             dataset_rows["i-1"],
         )
     ]
+
+
+def test_scheduler_prepare_error_is_recorded_and_retried_on_budget(
+    tmp_path: Path,
+) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0", solver_id="solver-a")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=2,
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    adapter = PrepareErrorAdapter(
+        [SolverAttemptState.SUCCEEDED],
+        fail_prepare_attempts={1},
+    )
+
+    summary = scheduler.run([job], adapters={"solver-a": adapter})
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    assert summary.jobs[0].attempts == 2
+
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 2
+    assert attempt_rows[0]["attempt_state"] == SolverAttemptState.FAILED
+    assert attempt_rows[0]["exit_reason"] == "adapter_prepare_error: prepare failed"
+    assert attempt_rows[1]["attempt_state"] == SolverAttemptState.SUCCEEDED
+
+
+def test_scheduler_telemetry_error_is_embedded_in_metadata(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0", solver_id="solver-a")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    adapter = TelemetryErrorAdapter([SolverAttemptState.SUCCEEDED])
+
+    summary = scheduler.run([job], adapters={"solver-a": adapter})
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0]["metadata"]["attempt_state"] == SolverAttemptState.SUCCEEDED
+    assert attempt_rows[0]["metadata"]["telemetry"] == [
+        {"error": "telemetry_error: telemetry unavailable"}
+    ]
+
+
+def test_scheduler_finalize_error_marks_attempt_as_failed(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0", solver_id="solver-a")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    adapter = FinalizeErrorAdapter(
+        [SolverAttemptState.SUCCEEDED], fail_finalize_attempts={1}
+    )
+
+    summary = scheduler.run([job], adapters={"solver-a": adapter})
+
+    assert summary.jobs[0].final_status == SolverAttemptState.BUDGET_EXCEEDED
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0]["attempt_state"] == SolverAttemptState.FAILED
+    assert attempt_rows[0]["exit_reason"] == "adapter_finalize_error: finalize failed"
 
 
 def test_scheduler_applies_solver_budget_and_marks_terminal_state(

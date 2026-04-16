@@ -352,6 +352,68 @@ class TestCliSurface(unittest.TestCase):
                 "explicit predictions should disable gold generation",
             )
 
+    def test_eval_manifest_records_batched_artifact_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_path = Path(workspace) / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            predictions_path = Path(workspace) / "predictions.jsonl"
+            predictions_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "model_name_or_path": "agent",
+                        "model_patch": "diff",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            out_root = Path(workspace) / "out"
+            results_path = out_root / "results.json"
+            instance_results_path = out_root / "instance_results.jsonl"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                    results_path=str(results_path),
+                    instance_results_path=str(instance_results_path),
+                )
+                result = main(
+                    [
+                        "eval",
+                        str(dataset_path),
+                        "--predictions",
+                        str(predictions_path),
+                        "--out",
+                        str(out_root),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            manifest = json.loads(
+                (out_root / "manifest.json").read_text(encoding="utf-8")
+            )
+            paths = manifest["artifact_paths"]
+            self.assertEqual(paths["results"], str(results_path))
+            self.assertEqual(paths["instance_results"], str(instance_results_path))
+
     def test_run_command_builds_run_root_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             root = Path(workspace)
@@ -427,6 +489,9 @@ solvers:
             self.assertTrue(matrix_copy.exists())
             self.assertTrue(jobs_path.exists())
             self.assertTrue(run_manifest_path.exists())
+            self.assertTrue((run_root / "run_jobs.jsonl").exists())
+            self.assertTrue((run_root / "attempts.jsonl").exists())
+            self.assertTrue((run_root / "run_summary.json").exists())
 
             rows = [
                 json.loads(line)
@@ -448,6 +513,34 @@ solvers:
             self.assertEqual(run_manifest["providers"][0]["provider_id"], "mock")
             self.assertEqual(len(run_manifest["solvers"]), 1)
             self.assertEqual(run_manifest["solvers"][0]["solver_id"], "solver-a")
+
+            run_summary = json.loads(
+                (run_root / "run_summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(run_summary["job_count"], 4)
+            self.assertEqual(run_summary["solved"], 4)
+
+            run_manifest_payload = json.loads(
+                (out / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                run_manifest_payload["step_statuses"]["execute"], "succeeded"
+            )
+            self.assertEqual(
+                run_manifest_payload["step_statuses"]["inspect"], "succeeded"
+            )
+
+            attempt_rows = [
+                json.loads(line)
+                for line in (run_root / "attempts.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(attempt_rows), 4)
+            self.assertTrue(
+                all(row["attempt_state"] == "succeeded" for row in attempt_rows)
+            )
 
     def test_run_rejects_unknown_solver_provider(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

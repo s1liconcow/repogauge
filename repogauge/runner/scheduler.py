@@ -405,13 +405,6 @@ class SolverScheduler:
             attempt_id = f"{job.job_id}:attempt-{attempts}"
             attempt_ids.append(attempt_id)
 
-            request = adapter.prepare_request(
-                job=job,
-                attempt_id=attempt_id,
-                attempt_index=attempts,
-                instance_row=dataset_row,
-            )
-
             job_status = SolverAttemptState.RUNNING
             if started_at is None:
                 started_at = _now_ts()
@@ -425,32 +418,72 @@ class SolverScheduler:
 
             result: SolverAdapterResult | None = None
             attempt_started = datetime.now(timezone.utc).timestamp()
+            telemetry = ()
+            request = SolverAdapterRequest(
+                attempt_id=attempt_id,
+                attempt_index=attempts,
+                job=job,
+                instance_row=dataset_row,
+            )
 
             with self._resource_guards(job.provider_id):
                 try:
-                    result = adapter.execute_attempt(request)
+                    request = adapter.prepare_request(
+                        job=job,
+                        attempt_id=attempt_id,
+                        attempt_index=attempts,
+                        instance_row=dataset_row,
+                    )
                 except Exception as exc:
                     result = SolverAdapterResult(
                         attempt_id=attempt_id,
                         status=SolverAttemptState.FAILED,
-                        exit_reason=f"adapter_execution_error: {exc}",
+                        exit_reason=f"adapter_prepare_error: {exc}",
                         raw_output="",
                     )
 
-                telemetry = adapter.collect_telemetry(attempt_id)
-                metadata = dict(result.metadata)
-                metadata["telemetry"] = list(telemetry)
-                result = SolverAdapterResult(
-                    attempt_id=result.attempt_id,
-                    status=result.status,
-                    model_patch=result.model_patch,
-                    raw_output=result.raw_output,
-                    exit_reason=result.exit_reason,
-                    usage=result.usage,
-                    cost=result.cost,
-                    metadata=metadata,
-                )
-                result = adapter.finalize_output(request=request, result=result)
+                if result is None:
+                    try:
+                        result = adapter.execute_attempt(request)
+                    except Exception as exc:
+                        result = SolverAdapterResult(
+                            attempt_id=attempt_id,
+                            status=SolverAttemptState.FAILED,
+                            exit_reason=f"adapter_execution_error: {exc}",
+                            raw_output="",
+                        )
+
+                    try:
+                        telemetry = adapter.collect_telemetry(attempt_id)
+                    except Exception as exc:
+                        telemetry = (({"error": f"telemetry_error: {exc}"}),)
+
+                    metadata = dict(result.metadata)
+                    metadata["telemetry"] = list(telemetry)
+                    result = SolverAdapterResult(
+                        attempt_id=result.attempt_id,
+                        status=result.status,
+                        model_patch=result.model_patch,
+                        raw_output=result.raw_output,
+                        exit_reason=result.exit_reason,
+                        usage=result.usage,
+                        cost=result.cost,
+                        metadata=metadata,
+                    )
+
+                    try:
+                        result = adapter.finalize_output(request=request, result=result)
+                    except Exception as exc:
+                        result = SolverAdapterResult(
+                            attempt_id=result.attempt_id,
+                            status=SolverAttemptState.FAILED,
+                            model_patch=result.model_patch,
+                            raw_output=result.raw_output,
+                            exit_reason=f"adapter_finalize_error: {exc}",
+                            usage=result.usage,
+                            cost=result.cost,
+                            metadata=result.metadata,
+                        )
 
             attempt_elapsed_ms = int(
                 (datetime.now(timezone.utc).timestamp() - attempt_started) * 1000
