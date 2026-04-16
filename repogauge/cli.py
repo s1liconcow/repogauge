@@ -168,6 +168,16 @@ def _build_parser() -> argparse.ArgumentParser:
                 type=int,
                 help="Multiplier applied to --workers for each concurrent batch.",
             )
+            cmd.add_argument(
+                "--container-runtime",
+                choices=["docker", "podman"],
+                default="docker",
+                help="Container runtime backing the Docker-compatible API.",
+            )
+            cmd.add_argument(
+                "--container-host",
+                help="Docker-compatible socket/host override, for example unix:///run/user/1000/podman/podman.sock.",
+            )
         if name == "run":
             cmd.add_argument(
                 "--run-id",
@@ -1125,6 +1135,8 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     ),
                     workers_per_batch=getattr(namespace, "workers_per_batch", 1),
                 ),
+                container_runtime=getattr(namespace, "container_runtime", "docker"),
+                container_host=getattr(namespace, "container_host", None),
             )
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
             manifest.mark_step(

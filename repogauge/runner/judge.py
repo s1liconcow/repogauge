@@ -7,14 +7,16 @@ harness wrapper path used by ``repogauge eval``.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import importlib.util
 import json
+import os
 import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, MutableMapping, Optional
 
 
 class HarnessEvaluationError(RuntimeError):
@@ -57,6 +59,62 @@ class JudgeBatchResult:
     instance_rows: list[dict[str, Any]]
     metadata: dict[str, Any]
     batch_key: str
+
+
+def _resolve_container_host(
+    *, container_runtime: str, container_host: str | None
+) -> str | None:
+    runtime = _coerce_text(container_runtime).lower() or "docker"
+    if runtime not in {"docker", "podman"}:
+        raise HarnessEvaluationError(
+            f"unsupported container runtime: {container_runtime}"
+        )
+
+    explicit = _coerce_text(container_host)
+    if explicit:
+        return explicit
+    if runtime == "podman":
+        runtime_dir = _coerce_text(os.getenv("XDG_RUNTIME_DIR"))
+        if runtime_dir:
+            return f"unix://{runtime_dir}/podman/podman.sock"
+        return f"unix:///run/user/{os.getuid()}/podman/podman.sock"
+    return None
+
+
+@contextmanager
+def _temporary_environment(overrides: Mapping[str, str | None]) -> Iterator[None]:
+    original: dict[str, str | None] = {}
+    try:
+        for key, value in overrides.items():
+            original[key] = os.environ.get(key)
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, value in original.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _validate_container_runtime(
+    *, container_runtime: str, container_host: str | None
+) -> None:
+    runtime = _coerce_text(container_runtime).lower() or "docker"
+    host = _coerce_text(container_host)
+    if runtime != "podman" or not host or not host.startswith("unix://"):
+        return
+    socket_path = Path(host.removeprefix("unix://"))
+    if socket_path.exists():
+        return
+    raise HarnessEvaluationError(
+        "podman socket not found at "
+        f"{socket_path}. Start it with `systemctl --user enable --now podman.socket` "
+        "or pass --container-host with a reachable Docker-compatible endpoint."
+    )
 
 
 def _iter_chunks(values: list[Any], size: int) -> Iterable[list[Any]]:
@@ -170,6 +228,8 @@ def _run_batch(
     out_root: Path,
     workers: int,
     timeout_seconds: int,
+    container_runtime: str,
+    container_host: str | None,
 ) -> JudgeBatchResult:
     batch_root = (
         out_root
@@ -197,6 +257,8 @@ def _run_batch(
         out_root=batch_root,
         workers=workers,
         timeout_seconds=timeout_seconds,
+        container_runtime=container_runtime,
+        container_host=container_host,
     )
     instance_rows, metadata = _parse_harness_results(harness_result, dataset_rows)
 
@@ -617,10 +679,10 @@ def _invoke_swebench_harness(
     out_root: Path,
     workers: int,
     timeout_seconds: int,
+    container_runtime: str = "docker",
+    container_host: str | None = None,
 ) -> Any:
     """Call the swebench 4.x ``run_instances`` API."""
-    import os
-
     import docker as docker_module  # type: ignore[import]
     import swebench.harness.run_evaluation as run_module  # type: ignore[import]
 
@@ -634,51 +696,68 @@ def _invoke_swebench_harness(
         return {}
 
     run_id = f"repogauge-{out_root.parent.name}-{out_root.name}"
-    client = docker_module.from_env()
+    resolved_container_host = _resolve_container_host(
+        container_runtime=container_runtime,
+        container_host=container_host,
+    )
+    _validate_container_runtime(
+        container_runtime=container_runtime,
+        container_host=resolved_container_host,
+    )
     # Repogauge materializes local, repo-specific datasets. Passing a namespace
     # makes swebench treat instance images as remote and attempt a docker pull
     # like ``swebench/sweb.eval...<instance_id>``, which fails for local runs.
     namespace = None
+    env_overrides = {}
+    if resolved_container_host:
+        env_overrides["DOCKER_HOST"] = resolved_container_host
 
-    print("repogauge eval: building environment images", file=sys.stderr)
-    run_module.build_env_images(
-        client,
-        instances,
-        force_rebuild=False,
-        max_workers=workers,
-        namespace=namespace,
-        instance_image_tag="latest",
-        env_image_tag="latest",
-    )
-
-    out_root.mkdir(parents=True, exist_ok=True)
-    orig_dir = os.getcwd()
-    os.chdir(out_root)
-    try:
-        print(
-            "repogauge eval: dispatching to official SWE-bench harness",
-            file=sys.stderr,
-        )
-        run_module.run_instances(
-            predictions=predictions,
-            instances=instances,
-            cache_level="instance",
-            clean=False,
+    with _temporary_environment(env_overrides):
+        client = docker_module.from_env()
+        print("repogauge eval: building environment images", file=sys.stderr)
+        if resolved_container_host:
+            print(
+                f"repogauge eval: container_host={resolved_container_host}",
+                file=sys.stderr,
+            )
+        run_module.build_env_images(
+            client,
+            instances,
             force_rebuild=False,
             max_workers=workers,
-            run_id=run_id,
-            timeout=timeout_seconds,
             namespace=namespace,
+            instance_image_tag="latest",
+            env_image_tag="latest",
         )
-        report_path = run_module.make_run_report(
-            predictions,
-            instances,
-            run_id,
-            namespace=namespace,
-        )
-        return json.loads(report_path.read_text())
-    finally:
-        os.chdir(orig_dir)
+
+        out_root.mkdir(parents=True, exist_ok=True)
+        orig_dir = os.getcwd()
+        os.chdir(out_root)
+        try:
+            print(
+                "repogauge eval: dispatching to official SWE-bench harness",
+                file=sys.stderr,
+            )
+            run_module.run_instances(
+                predictions=predictions,
+                instances=instances,
+                cache_level="instance",
+                clean=False,
+                force_rebuild=False,
+                max_workers=workers,
+                run_id=run_id,
+                timeout=timeout_seconds,
+                namespace=namespace,
+            )
+            report_path = run_module.make_run_report(
+                predictions,
+                instances,
+                run_id,
+                namespace=namespace,
+            )
+            return json.loads(report_path.read_text())
+        finally:
+            os.chdir(orig_dir)
 
 
 def run_harness_evaluation(
@@ -691,6 +770,8 @@ def run_harness_evaluation(
     timeout_seconds: int = 120,
     gold_if_missing: bool = False,
     judge_config: JudgeSchedulerConfig | None = None,
+    container_runtime: str = "docker",
+    container_host: str | None = None,
 ) -> HarnessRunSummary:
     """Run official SWE-bench harness and normalize outputs.
 
@@ -783,6 +864,8 @@ def run_harness_evaluation(
                         out_root=out_root,
                         workers=workers * config.workers_per_batch,
                         timeout_seconds=timeout_seconds,
+                        container_runtime=container_runtime,
+                        container_host=container_host,
                     ): batch_key
                     for index, (batch_key, rows) in enumerate(batches)
                 }

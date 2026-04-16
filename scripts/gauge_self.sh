@@ -4,6 +4,8 @@
 #                               [--eval-workers N] [--eval-batch-size N]
 #                               [--eval-max-parallel-batches N]
 #                               [--eval-workers-per-batch N] [--eval-timeout SECONDS]
+#                               [--eval-container-runtime docker|podman]
+#                               [--eval-container-host URI]
 
 set -euo pipefail
 
@@ -18,6 +20,8 @@ EVAL_BATCH_SIZE=32
 EVAL_MAX_PARALLEL_BATCHES=1
 EVAL_WORKERS_PER_BATCH=1
 EVAL_TIMEOUT=120
+EVAL_CONTAINER_RUNTIME="docker"
+EVAL_CONTAINER_HOST=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -29,6 +33,8 @@ while [[ $# -gt 0 ]]; do
         --eval-max-parallel-batches) EVAL_MAX_PARALLEL_BATCHES="$2"; shift 2 ;;
         --eval-workers-per-batch) EVAL_WORKERS_PER_BATCH="$2"; shift 2 ;;
         --eval-timeout) EVAL_TIMEOUT="$2"; shift 2 ;;
+        --eval-container-runtime) EVAL_CONTAINER_RUNTIME="$2"; shift 2 ;;
+        --eval-container-host) EVAL_CONTAINER_HOST="$2"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -66,7 +72,11 @@ EVAL_ARGS=(
     --max-parallel-batches "$EVAL_MAX_PARALLEL_BATCHES"
     --workers-per-batch "$EVAL_WORKERS_PER_BATCH"
     --timeout "$EVAL_TIMEOUT"
+    --container-runtime "$EVAL_CONTAINER_RUNTIME"
 )
+if [[ -n "$EVAL_CONTAINER_HOST" ]]; then
+    EVAL_ARGS+=(--container-host "$EVAL_CONTAINER_HOST")
+fi
 if uv run repogauge "${EVAL_ARGS[@]}"; then
     EVAL_OK=1
 else

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import pytest
 import sys
 import types
 from unittest.mock import patch
 
 from repogauge.runner.judge import (
     HarnessRunSummary,
+    HarnessEvaluationError,
     JudgeBatchResult,
     JudgeSchedulerConfig,
     _invoke_swebench_harness,
@@ -254,10 +257,18 @@ def test_invoke_swebench_harness_uses_local_instance_images(tmp_path: Path) -> N
     out_root.mkdir()
     report_path = out_root / "report.json"
     report_path.write_text(json.dumps({"resolved_ids": ["inst-a"]}), encoding="utf-8")
+    podman_socket = tmp_path / "podman.sock"
+    podman_socket.write_text("", encoding="utf-8")
 
     fake_client = object()
     docker_module = types.ModuleType("docker")
-    docker_module.from_env = lambda: fake_client
+    docker_env: dict[str, str | None] = {}
+
+    def fake_from_env():
+        docker_env["DOCKER_HOST"] = os.environ.get("DOCKER_HOST")
+        return fake_client
+
+    docker_module.from_env = fake_from_env
 
     run_module = types.ModuleType("swebench.harness.run_evaluation")
 
@@ -309,10 +320,145 @@ def test_invoke_swebench_harness_uses_local_instance_images(tmp_path: Path) -> N
         )
 
     assert result == {"resolved_ids": ["inst-a"]}
+    assert docker_env["DOCKER_HOST"] is None
     assert calls["build_env_images"]["client"] is fake_client
     assert calls["build_env_images"]["namespace"] is None
     assert calls["run_instances"]["namespace"] is None
     assert calls["make_run_report"]["namespace"] is None
+
+
+def test_invoke_swebench_harness_uses_podman_socket_override(tmp_path: Path) -> None:
+    dataset_rows = [_dataset_row(instance_id="inst-a", model="solver-x")]
+    predictions_rows = [
+        {
+            "instance_id": "inst-a",
+            "model_name_or_path": "solver-x",
+            "model_patch": "diff",
+        }
+    ]
+    dataset_path = tmp_path / "dataset.jsonl"
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+        encoding="utf-8",
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in predictions_rows),
+        encoding="utf-8",
+    )
+
+    out_root = tmp_path / "eval"
+    out_root.mkdir()
+    report_path = out_root / "report.json"
+    report_path.write_text(json.dumps({"resolved_ids": ["inst-a"]}), encoding="utf-8")
+    podman_socket = tmp_path / "podman.sock"
+    podman_socket.write_text("", encoding="utf-8")
+
+    fake_client = object()
+    docker_module = types.ModuleType("docker")
+    docker_env: dict[str, str | None] = {}
+
+    def fake_from_env():
+        docker_env["DOCKER_HOST"] = os.environ.get("DOCKER_HOST")
+        return fake_client
+
+    docker_module.from_env = fake_from_env
+
+    run_module = types.ModuleType("swebench.harness.run_evaluation")
+    run_module.build_env_images = lambda *args, **kwargs: None
+    run_module.run_instances = lambda **kwargs: None
+    run_module.make_run_report = lambda *args, **kwargs: report_path
+
+    swebench_pkg = types.ModuleType("swebench")
+    harness_pkg = types.ModuleType("swebench.harness")
+    swebench_pkg.harness = harness_pkg
+    harness_pkg.run_evaluation = run_module
+
+    with patch.dict(
+        sys.modules,
+        {
+            "docker": docker_module,
+            "swebench": swebench_pkg,
+            "swebench.harness": harness_pkg,
+            "swebench.harness.run_evaluation": run_module,
+        },
+    ):
+        with patch.dict(os.environ, {}, clear=False):
+            result = _invoke_swebench_harness(
+                dataset_path=dataset_path,
+                predictions_path=predictions_path,
+                out_root=out_root,
+                workers=2,
+                timeout_seconds=120,
+                container_runtime="podman",
+                container_host=f"unix://{podman_socket}",
+            )
+
+    assert result == {"resolved_ids": ["inst-a"]}
+    assert docker_env["DOCKER_HOST"] == f"unix://{podman_socket}"
+    assert os.environ.get("DOCKER_HOST") is None
+
+
+def test_invoke_swebench_harness_errors_when_podman_socket_missing(
+    tmp_path: Path,
+) -> None:
+    dataset_rows = [_dataset_row(instance_id="inst-a", model="solver-x")]
+    predictions_rows = [
+        {
+            "instance_id": "inst-a",
+            "model_name_or_path": "solver-x",
+            "model_patch": "diff",
+        }
+    ]
+    dataset_path = tmp_path / "dataset.jsonl"
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+        encoding="utf-8",
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in predictions_rows),
+        encoding="utf-8",
+    )
+
+    out_root = tmp_path / "eval"
+    out_root.mkdir()
+
+    missing_socket = tmp_path / "missing" / "podman.sock"
+    docker_module = types.ModuleType("docker")
+    docker_module.from_env = lambda: object()
+    run_module = types.ModuleType("swebench.harness.run_evaluation")
+    run_module.build_env_images = lambda *args, **kwargs: None
+    run_module.run_instances = lambda **kwargs: None
+    run_module.make_run_report = lambda *args, **kwargs: out_root / "report.json"
+
+    swebench_pkg = types.ModuleType("swebench")
+    harness_pkg = types.ModuleType("swebench.harness")
+    swebench_pkg.harness = harness_pkg
+    harness_pkg.run_evaluation = run_module
+
+    with patch.dict(
+        sys.modules,
+        {
+            "docker": docker_module,
+            "swebench": swebench_pkg,
+            "swebench.harness": harness_pkg,
+            "swebench.harness.run_evaluation": run_module,
+        },
+    ):
+        with patch.dict(os.environ, {}, clear=False):
+            with pytest.raises(HarnessEvaluationError) as exc_info:
+                _invoke_swebench_harness(
+                    dataset_path=dataset_path,
+                    predictions_path=predictions_path,
+                    out_root=out_root,
+                    workers=2,
+                    timeout_seconds=120,
+                    container_runtime="podman",
+                    container_host=f"unix://{missing_socket}",
+                )
+
+    assert "podman socket not found" in str(exc_info.value)
 
 
 def test_register_adapter_maps_patches_grading_source_modules() -> None:
