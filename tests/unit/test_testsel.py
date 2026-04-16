@@ -19,10 +19,7 @@ def test_build_targeted_test_plan_prefers_node_ids_from_test_patch() -> None:
 
     cmd, inputs = build_targeted_test_plan("python -m pytest", test_patch)
 
-    assert (
-        cmd
-        == "python -m pytest --tb=no -q --junit-xml={junit_xml}"
-    )
+    assert cmd == "python -m pytest --tb=no -q --junit-xml={junit_xml}"
     assert inputs == ["tests/unit/test_thing.py::test_new"]
 
 
@@ -47,7 +44,9 @@ def test_build_targeted_test_plan_targets_changed_test_file_when_no_node_ids() -
     assert inputs == ["tests/unit/test_core.py"]
 
 
-def test_build_targeted_test_plan_falls_back_to_tests_root_on_support_only_change() -> None:
+def test_build_targeted_test_plan_falls_back_to_tests_root_on_support_only_change() -> (
+    None
+):
     test_patch = (
         "diff --git a/tests/conftest.py b/tests/conftest.py\n"
         "--- a/tests/conftest.py\n"

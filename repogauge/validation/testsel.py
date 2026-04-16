@@ -7,7 +7,9 @@ import shlex
 from typing import List, Tuple
 
 
-_TEST_NODE_RE = re.compile(r"^\+\s*(?:async\s+)?def\s+(test_[A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_TEST_NODE_RE = re.compile(
+    r"^\+\s*(?:async\s+)?def\s+(test_[A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
 _TEST_CLASS_RE = re.compile(r"^\+\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:(]")
 _PYTEST_CMD_PREFIX = "python -m pytest"
 _JUNIT_XML_PLACEHOLDER = "{junit_xml}"
@@ -78,18 +80,15 @@ def _build_pytest_targeted_cmd(test_cmd_base: str) -> str:
 def _is_test_path(path: str) -> bool:
     lower = path.lower()
     base = lower.rsplit("/", 1)[-1]
-    return (
-        lower.endswith(".py")
-        and (
-            lower.startswith("test/")
-            or lower.startswith("tests/")
-            or lower.startswith("spec/")
-            or lower.startswith("testsuites/")
-            or base.startswith("test_")
-            or base.endswith("_test.py")
-            or "_test_" in base
-            or "spec" in base
-        )
+    return lower.endswith(".py") and (
+        lower.startswith("test/")
+        or lower.startswith("tests/")
+        or lower.startswith("spec/")
+        or lower.startswith("testsuites/")
+        or base.startswith("test_")
+        or base.endswith("_test.py")
+        or "_test_" in base
+        or "spec" in base
     )
 
 
