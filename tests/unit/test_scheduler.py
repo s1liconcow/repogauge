@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 import threading
 
+from repogauge.exec import run_command
 from repogauge.runner.planner import PlannedRunJob
 from repogauge.runner.scheduler import (
     SolverAdapter,
@@ -56,6 +57,7 @@ class ReplayAdapter(SolverAdapter):
         attempt_id: str,
         attempt_index: int,
         instance_row=None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         self.prepare_calls.append(attempt_id)
         return SolverAdapterRequest(
@@ -63,6 +65,7 @@ class ReplayAdapter(SolverAdapter):
             attempt_index=attempt_index,
             job=replace(job, metadata={"attempt_index": attempt_index}),
             instance_row=None,
+            workspace_path=workspace_path,
         )
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
@@ -105,6 +108,7 @@ class CaptureAdapter(SolverAdapter):
         attempt_id: str,
         attempt_index: int,
         instance_row=None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         row = None if instance_row is None else dict(instance_row)
         self.prepare_requests.append(((attempt_id, job.job_id), row))
@@ -113,6 +117,7 @@ class CaptureAdapter(SolverAdapter):
             attempt_index=attempt_index,
             job=replace(job, metadata={"attempt_index": attempt_index}),
             instance_row=instance_row,
+            workspace_path=workspace_path,
         )
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
@@ -163,6 +168,7 @@ class SourceAwareAdapter(SolverAdapter):
         attempt_id: str,
         attempt_index: int,
         instance_row=None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         self.prepare_request_calls.append(attempt_id)
         return SolverAdapterRequest(
@@ -170,6 +176,7 @@ class SourceAwareAdapter(SolverAdapter):
             attempt_index=attempt_index,
             job=job,
             instance_row=instance_row,
+            workspace_path=workspace_path,
         )
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
@@ -199,12 +206,14 @@ class StdoutStderrAdapter(SolverAdapter):
         attempt_id: str,
         attempt_index: int,
         instance_row=None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         return SolverAdapterRequest(
             attempt_id=attempt_id,
             attempt_index=attempt_index,
             job=job,
             instance_row=instance_row,
+            workspace_path=workspace_path,
         )
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
@@ -235,6 +244,7 @@ class PrepareErrorAdapter(ReplayAdapter):
         attempt_id: str,
         attempt_index: int,
         instance_row=None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         if attempt_index in self.fail_prepare_attempts:
             raise RuntimeError("prepare failed")
@@ -243,6 +253,7 @@ class PrepareErrorAdapter(ReplayAdapter):
             attempt_id=attempt_id,
             attempt_index=attempt_index,
             instance_row=instance_row,
+            workspace_path=workspace_path,
         )
 
 
@@ -260,12 +271,14 @@ class MetadataAwareAdapter(SolverAdapter):
         attempt_id: str,
         attempt_index: int,
         instance_row=None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         return SolverAdapterRequest(
             attempt_id=attempt_id,
             attempt_index=attempt_index,
             job=job,
             instance_row=instance_row,
+            workspace_path=workspace_path,
         )
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
@@ -327,12 +340,14 @@ class SleepyAdapter(SolverAdapter):
         attempt_id: str,
         attempt_index: int,
         instance_row=None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         return SolverAdapterRequest(
             attempt_id=attempt_id,
             attempt_index=attempt_index,
             job=job,
             instance_row=None,
+            workspace_path=workspace_path,
         )
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
@@ -376,6 +391,68 @@ def _read_jsonl(path: Path) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _create_repo(tmp_path: Path) -> tuple[Path, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_command(["git", "init", "-b", "main"], cwd=str(repo))
+    run_command(["git", "config", "user.name", "ci"], cwd=str(repo))
+    run_command(["git", "config", "user.email", "ci@example.com"], cwd=str(repo))
+    (repo / "src.py").write_text("print('before')\n", encoding="utf-8")
+    run_command(["git", "add", "src.py"], cwd=str(repo))
+    run_command(["git", "commit", "-m", "base"], cwd=str(repo))
+    commit = run_command(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip()
+    return repo, commit
+
+
+class WorkspaceAwareAdapter(SolverAdapter):
+    def __init__(self) -> None:
+        self.workspace_paths: list[Path] = []
+
+    def requires_workspace(self) -> bool:
+        return True
+
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+        workspace_path=None,
+    ) -> SolverAdapterRequest:
+        return SolverAdapterRequest(
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            job=job,
+            instance_row=instance_row,
+            workspace_path=workspace_path,
+        )
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        assert request.workspace_path is not None
+        self.workspace_paths.append(request.workspace_path)
+        before = (request.workspace_path / "src.py").read_text(encoding="utf-8")
+        assert before == "print('before')\n"
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=SolverAttemptState.SUCCEEDED,
+            raw_output=(
+                "diff --git a/src.py b/src.py\n"
+                "index 1111111..2222222 100644\n"
+                "--- a/src.py\n"
+                "+++ b/src.py\n"
+                "@@ -1 +1 @@\n"
+                "-print('before')\n"
+                "+print('after')\n"
+            ),
+        )
+
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
+        return result
 
 
 def test_scheduler_records_job_attempt_state_transitions(tmp_path: Path) -> None:
@@ -565,6 +642,52 @@ def test_scheduler_preserves_dataset_row_in_prepare_request(tmp_path: Path) -> N
             dataset_rows["i-1"],
         )
     ]
+
+
+def test_scheduler_runs_workspace_backed_attempts_in_isolated_worktree(
+    tmp_path: Path,
+) -> None:
+    repo_root, commit = _create_repo(tmp_path)
+    job = _job(job_id="run-1:i-1:solver-a:0")
+    attempts_jsonl = tmp_path / "attempts.jsonl"
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_attempts_to=attempts_jsonl,
+            source_repo_root=repo_root,
+            attempt_workspaces_root=tmp_path / "attempt_workspaces",
+        )
+    )
+    adapter = WorkspaceAwareAdapter()
+    dataset_rows = {
+        "i-1": {
+            "instance_id": "i-1",
+            "repo": "sample/repo",
+            "base_commit": commit,
+            "version": "1.0.0",
+            "problem_statement": "Change the output text.",
+        }
+    }
+
+    summary = scheduler.run(
+        [job],
+        adapters={"solver-a": adapter},
+        dataset_rows=dataset_rows,
+    )
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    assert len(adapter.workspace_paths) == 1
+    assert not adapter.workspace_paths[0].exists()
+
+    attempt_rows = _read_jsonl(attempts_jsonl)
+    assert len(attempt_rows) == 1
+    row = attempt_rows[0]
+    assert row["attempt_state"] == SolverAttemptState.SUCCEEDED
+    assert "diff --git a/src.py b/src.py" in row["model_patch"]
+    assert row["metadata"]["instruction_pack_path"]
+    assert row["metadata"]["raw_output_path"]
+    assert row["metadata"]["normalized_patch_path"]
+    assert row["metadata"]["patch_stats"]["files_touched"] == 1
 
 
 def test_scheduler_persists_task_feature_bundle_in_attempt_rows(tmp_path: Path) -> None:

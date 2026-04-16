@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+from pathlib import Path
+import signal
 import subprocess
 from time import perf_counter
 from typing import Dict, Optional, Sequence
-from pathlib import Path
 
 
 @dataclass
@@ -35,21 +37,38 @@ def run_command(
     start = perf_counter()
     command_list = list(command)
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             command_list,
             cwd=cwd,
             env=env,
-            input=input_text,
-            capture_output=True,
+            stdin=subprocess.PIPE if input_text is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout_seconds,
+            start_new_session=True,
         )
+        stdout, stderr = proc.communicate(input=input_text, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (PermissionError, ProcessLookupError):
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            stdout, stderr = proc.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            stdout, stderr = proc.communicate()
         return CommandResult(
             command=command_list,
             returncode=-1,
-            stdout=(exc.stdout or ""),
-            stderr=(exc.stderr or ""),
+            stdout=(stdout or exc.stdout or ""),
+            stderr=(stderr or exc.stderr or ""),
             timed_out=True,
             elapsed_ms=int((perf_counter() - start) * 1000),
             cwd=cwd or str(Path.cwd()),
@@ -67,8 +86,8 @@ def run_command(
     return CommandResult(
         command=command_list,
         returncode=proc.returncode,
-        stdout=proc.stdout or "",
-        stderr=proc.stderr or "",
+        stdout=stdout or "",
+        stderr=stderr or "",
         timed_out=False,
         elapsed_ms=int((perf_counter() - start) * 1000),
         cwd=cwd or str(Path.cwd()),

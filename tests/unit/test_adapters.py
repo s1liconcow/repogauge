@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from unittest import mock
+from pathlib import Path
 
 from repogauge.exec import CommandResult
 from repogauge.runner.adapters import (
@@ -334,8 +336,48 @@ class TestAdapters(unittest.TestCase):
             adapter.execute_attempt(request)
 
         command = mock_run_command.call_args.args[0]
-        self.assertEqual(
-            command[:7],
-            ["codex", "exec", "-c", "notify=[]", "-c", "mcp_servers={}", "--json"],
-        )
+        self.assertEqual(command[:6], ["codex", "exec", "-c", "notify=[]", "-c", "mcp_servers={}"])
+        self.assertIn("--json", command)
+        self.assertIn("--ask-for-approval", command)
+        self.assertIn("never", command)
+        self.assertIn("--sandbox", command)
+        self.assertIn("danger-full-access", command)
         self.assertEqual(command[-2:], ["--model", "gpt-5.4"])
+
+    def test_codex_cli_adapter_targets_attempt_workspace(self) -> None:
+        provider = _provider_for_command("codex")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            request = adapter.prepare_request(
+                job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+                attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+                attempt_index=1,
+                instance_row={
+                    "instance_id": "repo__sample-1",
+                    "repo": "repo",
+                    "base_commit": "abc123",
+                    "problem_statement": "fix bug",
+                },
+                workspace_path=Path(workspace),
+            )
+            command_result = CommandResult(
+                command=[],
+                returncode=0,
+                stdout='{"message":{"content":"diff --git a/x b/x\\n+ok"}}\n',
+                stderr="",
+            )
+            with mock.patch(
+                "repogauge.runner.adapters.run_command", return_value=command_result
+            ) as mock_run_command:
+                adapter.execute_attempt(request)
+
+        command = mock_run_command.call_args.args[0]
+        kwargs = mock_run_command.call_args.kwargs
+        assert "--cd" in command
+        assert command[command.index("--cd") + 1] == workspace
+        assert kwargs["cwd"] == workspace

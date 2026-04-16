@@ -1729,12 +1729,22 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 solvers=matrix.solvers,
                 providers=matrix.providers,
             )
+            needs_workspace = any(
+                adapter.requires_workspace() for adapter in adapters.values()
+            )
+            repo_root = (
+                _resolve_repo_root(Path(matrix.dataset.path))
+                if needs_workspace
+                else None
+            )
             scheduler = SolverScheduler(
                 config=SolverSchedulerConfig(
                     persist_jobs_to=run_jobs_out,
                     persist_attempts_to=attempts_out,
                     persist_attempts_parquet=attempts_parquet_out,
                     persist_attempt_logs_root=attempt_logs_root,
+                    source_repo_root=repo_root,
+                    attempt_workspaces_root=run_root / "attempt_workspaces",
                 )
             )
             summary = scheduler.run(

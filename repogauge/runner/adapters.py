@@ -332,6 +332,7 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
         attempt_id: str,
         attempt_index: int,
         instance_row: Mapping[str, Any] | None = None,
+        workspace_path=None,
     ) -> SolverAdapterRequest:
         _required_instance_fields(instance_row)
         if not attempt_id:
@@ -343,6 +344,7 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
             attempt_index=attempt_index,
             job=job,
             instance_row=instance_row,
+            workspace_path=workspace_path,
         )
 
     def finalize_output(
@@ -881,6 +883,9 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         resolved = _coerce_cli_command(config)
         self.command = [resolved.command, *resolved.cli_args]
 
+    def requires_workspace(self) -> bool:
+        return True
+
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
         instance_row = _required_instance_fields(request.instance_row)
         prompt = _build_prompt(
@@ -893,9 +898,24 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         command.append("exec")
         for key, value in self._BATCH_CONFIG_OVERRIDES:
             command.extend(["-c", f"{key}={value}"])
-        command.extend(["--json", "--model", self.model])
+        command.extend(
+            [
+                "--json",
+                "--color",
+                "never",
+                "--ask-for-approval",
+                "never",
+                "--sandbox",
+                "danger-full-access",
+                "--ephemeral",
+            ]
+        )
+        if request.workspace_path is not None:
+            command.extend(["--cd", str(request.workspace_path)])
+        command.extend(["--model", self.model])
         command_result = run_command(
             command,
+            cwd=str(request.workspace_path) if request.workspace_path else None,
             input_text=prompt,
             timeout_seconds=self.timeout_seconds,
         )

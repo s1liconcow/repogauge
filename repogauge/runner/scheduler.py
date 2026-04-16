@@ -9,16 +9,18 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from contextlib import contextmanager, nullcontext
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from repogauge.config import AttemptRow, JobRow
 
-from .planner import PlannedRunJob
 from .features import build_task_feature_bundle
+from .normalize_patch import PatchNormalizationError, normalize_solver_output
+from .planner import PlannedRunJob
+from .workspaces import prepare_attempt_workspace
 
 try:
     from tqdm import tqdm
@@ -58,6 +60,8 @@ class SolverSchedulerConfig:
     persist_attempts_to: Path | None = None
     persist_attempts_parquet: Path | None = None
     persist_attempt_logs_root: Path | None = None
+    source_repo_root: Path | None = None
+    attempt_workspaces_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,7 @@ class SolverAdapterRequest:
     attempt_index: int
     job: PlannedRunJob
     instance_row: Mapping[str, Any] | None = None
+    workspace_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -108,12 +113,17 @@ class SolverAdapter(ABC):
         attempt_id: str,
         attempt_index: int,
         instance_row: Mapping[str, Any] | None = None,
+        workspace_path: Path | None = None,
     ) -> SolverAdapterRequest:
         """Return a request object for one scheduler attempt."""
 
     @abstractmethod
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
         """Execute one solver attempt and return attempt output."""
+
+    def requires_workspace(self) -> bool:
+        """Return true when the adapter must run inside an attempt worktree."""
+        return False
 
     def stream_telemetry(self, attempt_id: str) -> Iterable[Mapping[str, Any]]:
         """Optional streaming hook for live telemetry events."""
@@ -599,6 +609,76 @@ class SolverScheduler:
             with self._attempt_rows_lock:
                 self._attempt_rows.append(normalized_payload)
 
+    def _normalize_workspace_result(
+        self, *, result: SolverAdapterResult, attempt_workspace: Any
+    ) -> SolverAdapterResult:
+        metadata = dict(result.metadata)
+        metadata.update(
+            {
+                "attempt_root": str(attempt_workspace.attempt_root),
+                "instruction_pack_path": str(attempt_workspace.instruction_pack_path),
+                "raw_output_path": str(attempt_workspace.raw_output_path),
+            }
+        )
+        attempt_workspace.raw_output_path.write_text(
+            result.raw_output or "", encoding="utf-8"
+        )
+
+        if result.status != SolverAttemptState.SUCCEEDED:
+            return SolverAdapterResult(
+                attempt_id=result.attempt_id,
+                status=result.status,
+                model_patch=result.model_patch,
+                raw_output=result.raw_output,
+                stderr_output=result.stderr_output,
+                exit_reason=result.exit_reason,
+                usage_source=result.usage_source,
+                cost_source=result.cost_source,
+                usage=result.usage,
+                cost=result.cost,
+                metadata=metadata,
+            )
+
+        try:
+            normalized = normalize_solver_output(
+                result.raw_output, attempt=attempt_workspace
+            )
+        except PatchNormalizationError as exc:
+            return SolverAdapterResult(
+                attempt_id=result.attempt_id,
+                status=SolverAttemptState.INVALID_PATCH,
+                model_patch=None,
+                raw_output=result.raw_output,
+                stderr_output=result.stderr_output,
+                exit_reason=f"invalid patch: {exc}",
+                usage_source=result.usage_source,
+                cost_source=result.cost_source,
+                usage=result.usage,
+                cost=result.cost,
+                metadata=metadata,
+            )
+
+        metadata.update(
+            {
+                "normalized_patch_path": normalized.normalized_patch_path,
+                "patch_stats_path": normalized.patch_stats_path,
+                "patch_stats": asdict(normalized.patch_stats),
+            }
+        )
+        return SolverAdapterResult(
+            attempt_id=result.attempt_id,
+            status=result.status,
+            model_patch=normalized.patch,
+            raw_output=result.raw_output,
+            stderr_output=result.stderr_output,
+            exit_reason=result.exit_reason,
+            usage_source=result.usage_source,
+            cost_source=result.cost_source,
+            usage=result.usage,
+            cost=result.cost,
+            metadata=metadata,
+        )
+
     def _execute_job(
         self,
         job: PlannedRunJob,
@@ -644,83 +724,143 @@ class SolverScheduler:
                 job=job,
                 instance_row=dataset_row,
             )
-
-            with self._resource_guards(job.provider_id):
-                try:
-                    request = adapter.prepare_request(
-                        job=job,
+            workspace_context = nullcontext(None)
+            if adapter.requires_workspace():
+                if dataset_row is None:
+                    result = SolverAdapterResult(
                         attempt_id=attempt_id,
-                        attempt_index=attempts,
-                        instance_row=dataset_row,
+                        status=SolverAttemptState.FAILED,
+                        stderr_output="dataset row required for workspace-backed solver",
+                        usage_source="",
+                        cost_source="",
+                        exit_reason="workspace_preparation_error: dataset row required for workspace-backed solver",
+                        raw_output="",
                     )
-                except Exception as exc:
+                elif (
+                    self.config.source_repo_root is None
+                    or self.config.attempt_workspaces_root is None
+                ):
+                    result = SolverAdapterResult(
+                        attempt_id=attempt_id,
+                        status=SolverAttemptState.FAILED,
+                        stderr_output="scheduler missing workspace configuration",
+                        usage_source="",
+                        cost_source="",
+                        exit_reason="workspace_preparation_error: scheduler missing source_repo_root/attempt_workspaces_root",
+                        raw_output="",
+                    )
+                else:
+                    workspace_context = prepare_attempt_workspace(
+                        repo_root=self.config.source_repo_root,
+                        instance_row=dataset_row,
+                        attempt_id=attempt_id,
+                        solver_id=job.solver_id,
+                        workspaces_root=self.config.attempt_workspaces_root,
+                    )
+
+            try:
+                with workspace_context as attempt_workspace:
+                    if result is None:
+                        with self._resource_guards(job.provider_id):
+                            try:
+                                request = adapter.prepare_request(
+                                    job=job,
+                                    attempt_id=attempt_id,
+                                    attempt_index=attempts,
+                                    instance_row=dataset_row,
+                                    workspace_path=(
+                                        attempt_workspace.workspace_path
+                                        if attempt_workspace is not None
+                                        else None
+                                    ),
+                                )
+                            except Exception as exc:
+                                result = SolverAdapterResult(
+                                    attempt_id=attempt_id,
+                                    status=SolverAttemptState.FAILED,
+                                    stderr_output=str(exc),
+                                    usage_source="",
+                                    cost_source="",
+                                    exit_reason=f"adapter_prepare_error: {exc}",
+                                    raw_output="",
+                                )
+
+                            if result is None:
+                                try:
+                                    result = adapter.execute_attempt(request)
+                                except Exception as exc:
+                                    result = SolverAdapterResult(
+                                        attempt_id=attempt_id,
+                                        status=SolverAttemptState.FAILED,
+                                        stderr_output=str(exc),
+                                        usage_source="",
+                                        cost_source="",
+                                        exit_reason=f"adapter_execution_error: {exc}",
+                                        raw_output="",
+                                    )
+
+                            try:
+                                telemetry = adapter.collect_telemetry(attempt_id)
+                            except Exception as exc:
+                                telemetry = (({"error": f"telemetry_error: {exc}"}),)
+
+                            metadata = dict(result.metadata)
+                            adapter_telemetry = metadata.get("telemetry")
+                            if telemetry:
+                                metadata["telemetry"] = list(telemetry)
+                            elif isinstance(adapter_telemetry, list):
+                                metadata["telemetry"] = list(adapter_telemetry)
+                            else:
+                                metadata["telemetry"] = []
+                            result = SolverAdapterResult(
+                                attempt_id=result.attempt_id,
+                                status=result.status,
+                                stderr_output=result.stderr_output,
+                                usage_source=result.usage_source,
+                                cost_source=result.cost_source,
+                                model_patch=result.model_patch,
+                                raw_output=result.raw_output,
+                                exit_reason=result.exit_reason,
+                                usage=result.usage,
+                                cost=result.cost,
+                                metadata=metadata,
+                            )
+
+                            try:
+                                result = adapter.finalize_output(
+                                    request=request, result=result
+                                )
+                            except Exception as exc:
+                                result = SolverAdapterResult(
+                                    attempt_id=result.attempt_id,
+                                    status=SolverAttemptState.FAILED,
+                                    stderr_output=str(exc),
+                                    usage_source=result.usage_source,
+                                    cost_source=result.cost_source,
+                                    model_patch=result.model_patch,
+                                    raw_output=result.raw_output,
+                                    exit_reason=f"adapter_finalize_error: {exc}",
+                                    usage=result.usage,
+                                    cost=result.cost,
+                                    metadata=result.metadata,
+                                )
+
+                    if result is not None and attempt_workspace is not None:
+                        result = self._normalize_workspace_result(
+                            result=result,
+                            attempt_workspace=attempt_workspace,
+                        )
+            except Exception as exc:
+                if result is None:
                     result = SolverAdapterResult(
                         attempt_id=attempt_id,
                         status=SolverAttemptState.FAILED,
                         stderr_output=str(exc),
                         usage_source="",
                         cost_source="",
-                        exit_reason=f"adapter_prepare_error: {exc}",
+                        exit_reason=f"workspace_preparation_error: {exc}",
                         raw_output="",
                     )
-
-                if result is None:
-                    try:
-                        result = adapter.execute_attempt(request)
-                    except Exception as exc:
-                        result = SolverAdapterResult(
-                            attempt_id=attempt_id,
-                            status=SolverAttemptState.FAILED,
-                            stderr_output=str(exc),
-                            usage_source="",
-                            cost_source="",
-                            exit_reason=f"adapter_execution_error: {exc}",
-                            raw_output="",
-                        )
-
-                    try:
-                        telemetry = adapter.collect_telemetry(attempt_id)
-                    except Exception as exc:
-                        telemetry = (({"error": f"telemetry_error: {exc}"}),)
-
-                    metadata = dict(result.metadata)
-                    adapter_telemetry = metadata.get("telemetry")
-                    if telemetry:
-                        metadata["telemetry"] = list(telemetry)
-                    elif isinstance(adapter_telemetry, list):
-                        metadata["telemetry"] = list(adapter_telemetry)
-                    else:
-                        metadata["telemetry"] = []
-                    result = SolverAdapterResult(
-                        attempt_id=result.attempt_id,
-                        status=result.status,
-                        stderr_output=result.stderr_output,
-                        usage_source=result.usage_source,
-                        cost_source=result.cost_source,
-                        model_patch=result.model_patch,
-                        raw_output=result.raw_output,
-                        exit_reason=result.exit_reason,
-                        usage=result.usage,
-                        cost=result.cost,
-                        metadata=metadata,
-                    )
-
-                    try:
-                        result = adapter.finalize_output(request=request, result=result)
-                    except Exception as exc:
-                        result = SolverAdapterResult(
-                            attempt_id=result.attempt_id,
-                            status=SolverAttemptState.FAILED,
-                            stderr_output=str(exc),
-                            usage_source=result.usage_source,
-                            cost_source=result.cost_source,
-                            model_patch=result.model_patch,
-                            raw_output=result.raw_output,
-                            exit_reason=f"adapter_finalize_error: {exc}",
-                            usage=result.usage,
-                            cost=result.cost,
-                            metadata=result.metadata,
-                        )
 
             attempt_started_at = datetime.fromtimestamp(
                 attempt_started, tz=timezone.utc
