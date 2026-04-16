@@ -604,7 +604,9 @@ class SolverScheduler:
                 attempt_started, tz=timezone.utc
             ).replace(tzinfo=None)
             attempt_ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            attempt_elapsed_ms = int((attempt_ended_at - attempt_started_at).total_seconds() * 1000)
+            attempt_elapsed_ms = int(
+                (attempt_ended_at - attempt_started_at).total_seconds() * 1000
+            )
             attempt_started_iso = attempt_started_at.isoformat() + "Z"
             attempt_ended_iso = attempt_ended_at.isoformat() + "Z"
             attempt_state = _coerce_attempt_status(result.status)
