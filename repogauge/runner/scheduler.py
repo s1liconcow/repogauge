@@ -309,7 +309,9 @@ def _serialize_attempt_row(
 
 
 def _safe_attempt_log_dir(root: Path, attempt_id: str) -> Path:
-    safe_id = "".join(c if c.isalnum() or c in {"-", "_", ":"} else "-" for c in attempt_id)
+    safe_id = "".join(
+        c if c.isalnum() or c in {"-", "_", ":"} else "-" for c in attempt_id
+    )
     if not safe_id:
         safe_id = "attempt"
     return root / safe_id

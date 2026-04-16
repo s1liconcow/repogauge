@@ -185,7 +185,9 @@ def _run_pytest(
     last_parse_error: str | None = None
 
     for index, base_cmd in enumerate(_pytest_command_attempts(test_cmd_base)):
-        pytest_cmd, junit_xml_to_read = _normalize_junit_output_flag(base_cmd, junit_xml)
+        pytest_cmd, junit_xml_to_read = _normalize_junit_output_flag(
+            base_cmd, junit_xml
+        )
 
         if junit_xml_to_read.exists():
             try:
@@ -193,11 +195,7 @@ def _run_pytest(
             except OSError:
                 pass
 
-        cmd = (
-            pytest_cmd
-            + ["--tb=no", "-q"]
-            + (test_files if test_files else [])
-        )
+        cmd = pytest_cmd + ["--tb=no", "-q"] + (test_files if test_files else [])
         result = run_command(
             cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
         )

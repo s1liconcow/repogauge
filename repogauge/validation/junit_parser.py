@@ -57,8 +57,8 @@ def _split_classname(classname: str) -> tuple[str, str]:
 
 def _normalize_file_path(file_path: str) -> str:
     """Normalize a file attribute from JUnit into a test-path-style string."""
-    normalized = (file_path or "").replace('\\', '/')
-    idx = normalized.rfind('/tests/')
+    normalized = (file_path or "").replace("\\", "/")
+    idx = normalized.rfind("/tests/")
     if idx >= 0:
         normalized = normalized[idx + 1 :]
     return normalized

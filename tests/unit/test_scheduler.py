@@ -268,9 +268,7 @@ class MetadataAwareAdapter(SolverAdapter):
             instance_row=instance_row,
         )
 
-    def execute_attempt(
-        self, request: SolverAdapterRequest
-    ) -> SolverAdapterResult:
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
         status = (
             self._statuses[min(request.attempt_index - 1, len(self._statuses) - 1)]
             if self._statuses
@@ -279,7 +277,9 @@ class MetadataAwareAdapter(SolverAdapter):
         return SolverAdapterResult(
             attempt_id=request.attempt_id,
             status=status,
-            model_patch="diff --git a/x b/x\n+ok" if status == SolverAttemptState.SUCCEEDED else None,
+            model_patch="diff --git a/x b/x\n+ok"
+            if status == SolverAttemptState.SUCCEEDED
+            else None,
             raw_output="ok",
             usage_source="response.usage",
             cost_source="response.cost",
@@ -287,6 +287,7 @@ class MetadataAwareAdapter(SolverAdapter):
             cost={"total_cost": 0.1},
             metadata={"telemetry": list(self._telemetry)},
         )
+
 
 class TelemetryErrorAdapter(CaptureAdapter):
     def __init__(

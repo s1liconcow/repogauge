@@ -362,7 +362,9 @@ class TestCliSurface(unittest.TestCase):
                 predictions_path,
             )
 
-    def test_eval_prefers_nested_dataset_directory_when_root_has_dataset_jsonl(self) -> None:
+    def test_eval_prefers_nested_dataset_directory_when_root_has_dataset_jsonl(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             dataset_root = Path(workspace) / "artifact"
             dataset_root.mkdir()
