@@ -352,6 +352,142 @@ class TestCliSurface(unittest.TestCase):
                 "explicit predictions should disable gold generation",
             )
 
+    def test_run_command_builds_run_root_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            dataset_root = root / "artifact"
+            dataset_root.mkdir()
+            dataset_path = dataset_root / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "repo": "repo",
+                        "base_commit": "abc",
+                        "problem_statement": "fix foo",
+                        "version": "1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "test_patch": "",
+                        "FAIL_TO_PASS": [],
+                        "PASS_TO_PASS": [],
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "instance_id": "repo__sample-2",
+                        "repo": "repo",
+                        "base_commit": "abc",
+                        "problem_statement": "fix bar",
+                        "version": "1",
+                        "patch": "diff --git a/y b/y\n+print('ok')",
+                        "test_patch": "",
+                        "FAIL_TO_PASS": [],
+                        "PASS_TO_PASS": [],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            matrix_path = root / "matrix.yaml"
+            matrix_path.write_text(
+                """
+run_id: unit-run
+dataset:
+  path: artifact/dataset.jsonl
+providers:
+  mock:
+    kind: local
+execution:
+  repeats: 2
+  seed: 7
+  shuffle: false
+solvers:
+  - id: solver-a
+    provider: mock
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            out = root / "out"
+            result = main(["run", str(matrix_path), "--out", str(out)])
+            self.assertEqual(result, 0)
+
+            run_root = out / "unit-run"
+            matrix_copy = run_root / "matrix.yaml"
+            jobs_path = run_root / "jobs.jsonl"
+            run_manifest_path = run_root / "manifest.json"
+
+            self.assertTrue(matrix_copy.exists())
+            self.assertTrue(jobs_path.exists())
+            self.assertTrue(run_manifest_path.exists())
+
+            rows = [
+                json.loads(line)
+                for line in jobs_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(rows[0]["run_id"], "unit-run")
+
+            run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(run_manifest["command"], "run")
+            self.assertEqual(run_manifest["run_id"], "unit-run")
+            self.assertEqual(run_manifest["job_count"], 4)
+            self.assertEqual(run_manifest["run_root"], str(run_root))
+            self.assertEqual(run_manifest["dataset_path"], str(dataset_path.resolve()))
+            self.assertEqual(run_manifest["solver_count"], 1)
+            self.assertEqual(run_manifest["provider_count"], 1)
+
+    def test_run_rejects_unknown_solver_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            dataset_path = root / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "repo": "repo",
+                        "base_commit": "abc",
+                        "problem_statement": "fix foo",
+                        "version": "1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "test_patch": "",
+                        "FAIL_TO_PASS": [],
+                        "PASS_TO_PASS": [],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            matrix_path = root / "matrix.yaml"
+            matrix_path.write_text(
+                """
+dataset:
+  path: dataset.jsonl
+providers:
+  mock:
+    kind: local
+solvers:
+  - id: solver-a
+    provider: missing
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            out = root / "out"
+            result = main(["run", str(matrix_path), "--out", str(out)])
+            self.assertEqual(result, 1)
+            self.assertFalse((out / "matrix").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
