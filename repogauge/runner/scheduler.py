@@ -294,9 +294,7 @@ def _normalize_attempt_row(
     normalized["task_features"] = task_features.features
 
     existing_metadata = normalized.get("metadata", {})
-    metadata = (
-        dict(existing_metadata) if isinstance(existing_metadata, Mapping) else {}
-    )
+    metadata = dict(existing_metadata) if isinstance(existing_metadata, Mapping) else {}
     metadata.update(task_features.to_metadata())
     normalized["metadata"] = metadata
     return normalized
@@ -496,7 +494,9 @@ class SolverScheduler:
             attempt_state=attempt_state,
         )
         if self.config.persist_attempts_to is not None:
-            self._writer.append_jsonl(self.config.persist_attempts_to, normalized_payload)
+            self._writer.append_jsonl(
+                self.config.persist_attempts_to, normalized_payload
+            )
         if self.config.persist_attempts_parquet is not None:
             with self._attempt_rows_lock:
                 self._attempt_rows.append(normalized_payload)

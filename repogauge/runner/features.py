@@ -151,7 +151,8 @@ def build_task_feature_bundle(row: Mapping[str, Any]) -> TaskFeatureBundle:
         "repo_segment_count": repo.count("/") + 1 if repo else 0,
         "repo_slug_length": len(repo),
         "problem_statement_has_stacktrace": statement_signal == "stacktrace",
-        "problem_statement_has_error_terms": statement_signal in {"stacktrace", "error"},
+        "problem_statement_has_error_terms": statement_signal
+        in {"stacktrace", "error"},
         "problem_statement_has_test_terms": statement_signal == "test",
         "problem_statement_has_path_terms": statement_signal == "path",
     }

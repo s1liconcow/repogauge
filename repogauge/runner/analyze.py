@@ -359,9 +359,7 @@ def join_attempt_rows(
 
         existing_metadata = item.get("metadata", {})
         metadata = (
-            dict(existing_metadata)
-            if isinstance(existing_metadata, Mapping)
-            else {}
+            dict(existing_metadata) if isinstance(existing_metadata, Mapping) else {}
         )
         metadata.update(task_features.to_metadata())
         item["metadata"] = metadata
