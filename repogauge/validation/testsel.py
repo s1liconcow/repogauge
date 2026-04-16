@@ -13,6 +13,7 @@ _TEST_NODE_RE = re.compile(
 _TEST_CLASS_RE = re.compile(r"^\+\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:(]")
 _PYTEST_CMD_PREFIX = "python -m pytest"
 _JUNIT_XML_PLACEHOLDER = "{junit_xml}"
+_JUNIT_XML_FLAGS = ("--junit-xml=", "--junitxml=")
 
 
 def _dedupe(values: List[str]) -> List[str]:
@@ -53,7 +54,9 @@ def _command_has_flag(parts: List[str], flag: str) -> bool:
     if not parts:
         return False
     if flag.endswith("="):
-        return any(part.startswith(flag) for part in parts)
+        return any(
+            part.startswith(junit_flag) for part in parts for junit_flag in _JUNIT_XML_FLAGS
+        )
     return flag in parts
 
 

@@ -110,12 +110,9 @@ def _run_pytest(
     raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
 
     if not junit_xml.exists():
-        return {}, raw
+        raise JUnitParseError(f"missing expected junit output: {junit_xml}")
 
-    try:
-        outcomes = parse_junit_xml(junit_xml)
-    except JUnitParseError:
-        outcomes = {}
+    outcomes = parse_junit_xml(junit_xml)
 
     return outcomes, raw
 

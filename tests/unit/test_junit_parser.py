@@ -38,6 +38,12 @@ class TestParseJunitXml:
                 <testcase classname="tests.unit.test_foo" name="test_skip">
                   <skipped/>
                 </testcase>
+                <testcase classname="tests.unit.test_foo" name="test_xfail">
+                  <skipped type="pytest.xfail" message="expected failure"/>
+                </testcase>
+                <testcase classname="tests.unit.test_foo" name="test_xpass">
+                  <xpass/>
+                </testcase>
               </testsuite>
             </testsuites>
         """,
@@ -47,6 +53,8 @@ class TestParseJunitXml:
         assert results["tests/unit/test_foo.py::test_fail"] == OUTCOME_FAIL
         assert results["tests/unit/test_foo.py::test_error"] == OUTCOME_ERROR
         assert results["tests/unit/test_foo.py::test_skip"] == OUTCOME_SKIP
+        assert results["tests/unit/test_foo.py::test_xfail"] == OUTCOME_SKIP
+        assert results["tests/unit/test_foo.py::test_xpass"] == OUTCOME_SKIP
 
     def test_bare_testsuite_root(self, tmp_path):
         xml = _write_xml(

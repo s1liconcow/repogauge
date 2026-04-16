@@ -76,7 +76,13 @@ def _canonical_id(classname: str, name: str) -> str:
 
 
 def _outcome_of(testcase: ET.Element) -> str:
-    if testcase.find("skipped") is not None:
+    skipped = testcase.find("skipped")
+    if skipped is not None:
+        return OUTCOME_SKIP
+    if testcase.find("xpass") is not None:
+        # Pytest may emit explicit xpass signals for xfails that unexpectedly passed.
+        return OUTCOME_SKIP
+    if testcase.find("xfail") is not None:
         return OUTCOME_SKIP
     if testcase.find("error") is not None:
         return OUTCOME_ERROR
