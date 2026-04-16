@@ -13,7 +13,7 @@ from .providers import (
     ProviderConfigurationError,
     normalize_provider,
 )
-from .solvers import SolverConfig, SolverConfigurationError, normalize_solver
+from .solvers import SolverConfigurationError, normalize_solver
 
 
 class MatrixConfigurationError(ValueError):
