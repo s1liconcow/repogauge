@@ -108,8 +108,9 @@ class TestGenerateAdapter:
         assert "org/my-repo.v2" in mod.MAP_REPO_TO_EXT
         assert "org/my-repo.v2" in mod.MAP_REPO_TO_PARSER
         assert mod.MAP_REPO_TO_PARSER["org/my-repo.v2"] == "junit"
-        assert mod.MAP_REPO_VERSION_TO_SPECS["org/my-repo.v2"]["v1"]["parser"] == "junit"
-
+        assert (
+            mod.MAP_REPO_VERSION_TO_SPECS["org/my-repo.v2"]["v1"]["parser"] == "junit"
+        )
 
     def test_generation_is_deterministic(self, tmp_path):
         plan = {
