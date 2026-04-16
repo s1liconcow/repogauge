@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .repogauge
 out/
+logs/
 .e2e_tmp/
 **/__pycache__
 
