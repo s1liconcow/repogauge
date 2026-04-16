@@ -82,7 +82,10 @@ Options:
 | Flag | Default | Description |
 |---|---|---|
 | `--out DIR` | `./out` | Root directory for all artifacts |
+| `--enrich-github` | disabled | Enable optional GitHub issue/PR metadata enrichment |
 | `--max-commits N` | `100` | Commits to scan |
+| `--github-token TOKEN` | `$(GITHUB_TOKEN)` | Token used for GitHub API calls |
+| `--github-enrichment-cache PATH` | `<out>/github_enrichment_cache.json` | Optional local cache for enrichment responses |
 | `--decisions FILE` | _(none)_ | JSONL file of manual accept/reject decisions |
 
 Outputs written under `--out`:

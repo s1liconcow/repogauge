@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import sys
 from datetime import datetime, timezone
@@ -35,6 +36,9 @@ VERBOSE_HELP = "Enable verbose output."
 COMMIT_RANGE_HELP = "Commit range to scan (for example HEAD~50..HEAD)."
 MAX_COMMITS_HELP = "Maximum number of commits to inspect."
 EXCLUDE_MERGES_HELP = "Skip merge commits during scanning."
+ENRICH_GITHUB_HELP = "Add issue/PR metadata from GitHub API when refs are present."
+GITHUB_TOKEN_HELP = "GitHub token for API calls (defaults to GITHUB_TOKEN env var)."
+GITHUB_ENRICHMENT_CACHE_HELP = "Path for optional GitHub metadata cache (default: <out>/github_enrichment_cache.json)."
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -75,6 +79,19 @@ def _build_parser() -> argparse.ArgumentParser:
             cmd.add_argument(
                 "--exclude-merges", action="store_true", help=EXCLUDE_MERGES_HELP
             )
+            cmd.add_argument(
+                "--enrich-github",
+                action="store_true",
+                help=ENRICH_GITHUB_HELP,
+            )
+            cmd.add_argument(
+                "--github-token",
+                help=GITHUB_TOKEN_HELP,
+            )
+            cmd.add_argument(
+                "--github-enrichment-cache",
+                help=GITHUB_ENRICHMENT_CACHE_HELP,
+            )
         if name == "eval":
             cmd.add_argument(
                 "--gold",
@@ -100,6 +117,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
+    github_token = ""
+    if command == "mine":
+        if getattr(namespace, "github_token", None):
+            github_token = namespace.github_token
+        else:
+            github_token = os.getenv("GITHUB_TOKEN", "")
     payload = {
         "command": command,
         "path": namespace.path or "",
@@ -107,6 +130,11 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
         "commit_range": namespace.commit_range if command == "mine" else "",
         "max_commits": namespace.max_commits if command == "mine" else 0,
         "exclude_merges": namespace.exclude_merges if command == "mine" else False,
+        "enrich_github": namespace.enrich_github if command == "mine" else False,
+        "github_token": github_token,
+        "github_enrichment_cache_path": namespace.github_enrichment_cache
+        if command == "mine"
+        else "",
         "dry_run": bool(namespace.dry_run),
         "llm_mode": namespace.llm_mode or "",
         "llm_model": getattr(namespace, "llm_model", ""),
@@ -418,6 +446,19 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 max_count=int(namespace.max_commits),
                 commit_range=namespace.commit_range,
                 include_merges=not namespace.exclude_merges,
+                enrich_github=bool(namespace.enrich_github),
+                enrichment_cache_path=(
+                    Path(namespace.github_enrichment_cache).expanduser()
+                    if namespace.github_enrichment_cache
+                    else out_root / "github_enrichment_cache.json"
+                )
+                if namespace.enrich_github
+                else None,
+                github_token=(
+                    namespace.github_token
+                    if namespace.github_token is not None
+                    else os.getenv("GITHUB_TOKEN")
+                ),
             )
         except Exception as exc:
             manifest.mark_step(

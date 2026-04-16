@@ -1,6 +1,7 @@
 import unittest
 
 import json
+from unittest.mock import patch
 import tempfile
 from pathlib import Path
 
@@ -52,6 +53,11 @@ class TestCliSurface(unittest.TestCase):
             [
                 "mine",
                 "./repo",
+                "--enrich-github",
+                "--github-token",
+                "ghp_test",
+                "--github-enrichment-cache",
+                "./cache/github.json",
                 "--commit-range",
                 "HEAD~5..HEAD",
                 "--max-commits",
@@ -62,6 +68,9 @@ class TestCliSurface(unittest.TestCase):
         self.assertEqual(namespace.commit_range, "HEAD~5..HEAD")
         self.assertEqual(namespace.max_commits, 10)
         self.assertTrue(namespace.exclude_merges)
+        self.assertTrue(namespace.enrich_github)
+        self.assertEqual(namespace.github_token, "ghp_test")
+        self.assertEqual(namespace.github_enrichment_cache, "./cache/github.json")
         namespace = self.parser.parse_args(
             ["review", "./candidates.jsonl", "--decisions", "./decisions.jsonl"]
         )
@@ -156,6 +165,45 @@ class TestCliSurface(unittest.TestCase):
             ]
             self.assertEqual(len(scan_payloads), 0)
             self.assertEqual(len(candidates_payloads), 0)
+
+    def test_mine_forwards_github_enrichment_options_to_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            repo = Path(workspace) / "repo"
+            repo.mkdir()
+            run_command(["git", "init", "-b", "main"], cwd=str(repo))
+            run_command(["git", "config", "user.name", "ci"], cwd=str(repo))
+            run_command(
+                ["git", "config", "user.email", "ci@example.com"], cwd=str(repo)
+            )
+            run_command(
+                ["git", "remote", "add", "origin", "git@github.com:example/demo.git"],
+                cwd=str(repo),
+            )
+            out = Path(workspace) / "mine_out"
+            cache_path = out / "custom_github_cache.json"
+            with patch("repogauge.cli.scan_repository") as mock_scan:
+                mock_scan.return_value = []
+                result = main(
+                    [
+                        "mine",
+                        str(repo),
+                        "--out",
+                        str(out),
+                        "--enrich-github",
+                        "--github-token",
+                        "ghp_token_for_tests",
+                        "--github-enrichment-cache",
+                        str(cache_path),
+                        "--max-commits",
+                        "3",
+                    ]
+                )
+            self.assertEqual(result, 0)
+            mock_scan.assert_called_once()
+            scan_kwargs = mock_scan.call_args.kwargs
+            self.assertTrue(scan_kwargs["enrich_github"])
+            self.assertEqual(scan_kwargs["enrichment_cache_path"], cache_path)
+            self.assertEqual(scan_kwargs["github_token"], "ghp_token_for_tests")
 
     def test_mine_artifact_contract_is_recorded_in_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

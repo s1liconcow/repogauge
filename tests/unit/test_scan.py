@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from repogauge.exec import run_command
 from repogauge.mining.scan import scan_repository
@@ -86,3 +87,36 @@ def test_scan_detects_rename_only_commits_and_merge_metadata(tmp_path: Path) -> 
     rename_rows = [row for row in rows if row.metadata.get("has_rename_only")]
     assert rename_rows
     assert all(row.metadata["total_changed_lines"] == 0 for row in rename_rows)
+
+
+def test_scan_forwards_github_enrichment_options(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / "src").mkdir()
+    (repo / "src" / "core.py").write_text("x = 1\n", encoding="utf-8")
+    run_command(["git", "-C", str(repo), "add", "src/core.py"])
+    run_command(["git", "-C", str(repo), "commit", "-m", "Add core module"])
+
+    with patch("repogauge.mining.scan.enrich_commit_metadata") as mock_enrich:
+        mock_enrich.return_value = {
+            "issue_title": "Reported issue",
+            "issue_refs": ["11"],
+        }
+        rows = scan_repository(
+            repo,
+            repo_name="owner/repo",
+            max_count=1,
+            enrich_github=True,
+            enrichment_cache_path=tmp_path / "cache.json",
+            github_token="ghp_test",
+        )
+
+    assert len(rows) == 1
+    assert rows[0].metadata["issue_title"] == "Reported issue"
+    assert rows[0].metadata["issue_refs"] == ["11"]
+    mock_enrich.assert_called_once_with(
+        commit_subject="Add core module",
+        commit_body="Add core module",
+        repo_name="owner/repo",
+        token="ghp_test",
+        cache_path=tmp_path / "cache.json",
+    )

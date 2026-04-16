@@ -5,10 +5,12 @@ from __future__ import annotations
 import re
 from collections import Counter
 from pathlib import Path
+
 from repogauge.config import ScanRow
 from repogauge.exec import run_command
 from repogauge.mining.score import score_scan_commit
 from repogauge.mining.file_roles import classify_files
+from repogauge.mining.enrich import enrich_commit_metadata
 from repogauge.utils.git import (
     get_default_branch,
     get_repo_root,
@@ -194,6 +196,10 @@ def _build_scan_row(
     repo: str,
     repo_root: Path,
     commit: str,
+    *,
+    enrich_github: bool = False,
+    enrichment_cache_path: Path | None = None,
+    github_token: str | None = None,
 ) -> ScanRow:
     parents = list_commit_parents(repo_root, commit)
     subject, body, author_date = _read_commit_metadata(repo_root, commit)
@@ -240,6 +246,16 @@ def _build_scan_row(
         "n_hunks": n_hunks,
         "total_changed_lines": changed_lines,
     }
+    if enrich_github:
+        metadata.update(
+            enrich_commit_metadata(
+                commit_subject=subject,
+                commit_body=body,
+                repo_name=repo,
+                token=github_token,
+                cache_path=enrichment_cache_path,
+            )
+        )
     scoring = score_scan_commit(
         commit_subject=subject,
         commit_body=body,
@@ -280,6 +296,9 @@ def scan_repository(
     max_count: int = 100,
     commit_range: str | None = None,
     include_merges: bool = True,
+    enrich_github: bool = False,
+    enrichment_cache_path: Path | None = None,
+    github_token: str | None = None,
 ) -> list[ScanRow]:
     """Scan commit history and emit deterministic `ScanRow` entries."""
     try:
@@ -294,5 +313,14 @@ def scan_repository(
         parents = list_commit_parents(repo_root, commit)
         if not include_merges and len(parents) > 1:
             continue
-        rows.append(_build_scan_row(repo_name, repo_root, commit))
+        rows.append(
+            _build_scan_row(
+                repo_name,
+                repo_root,
+                commit,
+                enrich_github=enrich_github,
+                enrichment_cache_path=enrichment_cache_path,
+                github_token=github_token,
+            )
+        )
     return rows
