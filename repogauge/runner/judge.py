@@ -171,7 +171,11 @@ def _run_batch(
     workers: int,
     timeout_seconds: int,
 ) -> JudgeBatchResult:
-    batch_root = out_root / "judge_batches" / f"batch_{batch_index:04d}_{_safe_batch_key(batch_key)}"
+    batch_root = (
+        out_root
+        / "judge_batches"
+        / f"batch_{batch_index:04d}_{_safe_batch_key(batch_key)}"
+    )
     dataset_path = batch_root / "dataset.jsonl"
     predictions_path = batch_root / "predictions.jsonl"
     dataset_rows = [dataset_row for dataset_row, _ in rows]
@@ -724,7 +728,9 @@ def run_harness_evaluation(
                         ) from exc
         except HarnessEvaluationError:
             raise
-        except Exception as exc:  # pragma: no cover - defensive for unexpected pool errors
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - defensive for unexpected pool errors
             raise HarnessEvaluationError(
                 f"official harness batch execution failed: {exc}"
             ) from exc
@@ -740,7 +746,9 @@ def run_harness_evaluation(
             iid = _coerce_text(row.get("instance_id"))
             if not iid:
                 continue
-            row["metadata"] = dict(row.get("metadata", {}), **{"batch_key": batch.batch_key})
+            row["metadata"] = dict(
+                row.get("metadata", {}), **{"batch_key": batch.batch_key}
+            )
             by_instance_id[iid] = row
 
     instance_rows = []
