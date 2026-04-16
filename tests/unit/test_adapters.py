@@ -248,7 +248,9 @@ class TestAdapters(unittest.TestCase):
             stdout=output,
             stderr="",
         )
-        with mock.patch("repogauge.runner.adapters.run_command", return_value=command_result):
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
             result = adapter.execute_attempt(request)
 
         self.assertEqual(result.usage_source, "codex_cli.event.usage")
