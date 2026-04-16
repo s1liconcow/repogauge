@@ -74,7 +74,9 @@ def _normalize_relative_path(matrix_dir: Path, value: Any) -> Path:
 def _read_yaml(path: Path) -> Dict[str, Any]:
     try:
         import yaml
-    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency fallback
+    except (
+        ModuleNotFoundError
+    ) as exc:  # pragma: no cover - optional dependency fallback
         raise MatrixConfigurationError(
             "PyYAML is required to parse matrix.yaml; install pyyaml"
         ) from exc
@@ -276,7 +278,9 @@ def load_matrix_config(
             )
         )
 
-    provider_kinds = {provider.provider_id: provider.kind for provider in provider_rows_list}
+    provider_kinds = {
+        provider.provider_id: provider.kind for provider in provider_rows_list
+    }
 
     solver_rows = raw.get("solvers")
     if solver_rows is None:

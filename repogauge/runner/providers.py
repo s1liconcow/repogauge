@@ -84,13 +84,17 @@ def _read_secret_from_env(name: Any) -> str:
         raise ProviderConfigurationError("provider env reference cannot be empty")
     value = os.getenv(env_name)
     if not value:
-        raise ProviderConfigurationError(f"missing required environment variable: {env_name}")
+        raise ProviderConfigurationError(
+            f"missing required environment variable: {env_name}"
+        )
     return value
 
 
 def _read_secret_from_file(path_value: Any, *, root: Path) -> str:
     if not isinstance(path_value, str):
-        raise ProviderConfigurationError("provider auth file reference must be a string")
+        raise ProviderConfigurationError(
+            "provider auth file reference must be a string"
+        )
 
     path = Path(path_value.strip())
     if not path.is_absolute():

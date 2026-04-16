@@ -116,7 +116,9 @@ def _normalize_adapter(value: Any, *, provider_id: str, provider_kind: str) -> s
     if value is None:
         adapter = DEFAULT_SOLVER_ADAPTER_BY_PROVIDER[provider_kind]
     else:
-        adapter = _coerce_text(value, field_name=f"solver '{provider_id}'.adapter").lower()
+        adapter = _coerce_text(
+            value, field_name=f"solver '{provider_id}'.adapter"
+        ).lower()
 
         if adapter in SOLVER_ADAPTER_ALIAS:
             adapter = SOLVER_ADAPTER_ALIAS[adapter]
@@ -155,8 +157,12 @@ def normalize_solver(
         provider_kind=provider_kind,
     )
 
-    prompt_policy = _coerce_mapping(payload.get("prompt_policy"), field_name="solver.prompt_policy")
-    tool_policy = _coerce_mapping(payload.get("tool_policy"), field_name="solver.tool_policy")
+    prompt_policy = _coerce_mapping(
+        payload.get("prompt_policy"), field_name="solver.prompt_policy"
+    )
+    tool_policy = _coerce_mapping(
+        payload.get("tool_policy"), field_name="solver.tool_policy"
+    )
 
     behavior = dict(payload)
     for field in KNOWN_SOLVER_FIELDS:
