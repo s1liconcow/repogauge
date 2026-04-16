@@ -413,6 +413,9 @@ def _result_row_from_instance(
 
     return {
         "instance_id": _coerce_text(dataset_row.get("instance_id")),
+        "solver_id": _coerce_text(
+            dataset_row.get("solver_id") or dataset_row.get("model_name_or_path")
+        ),
         "status": final_status,
         "reason": reason,
         "failure_code": None,
