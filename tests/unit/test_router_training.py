@@ -94,7 +94,12 @@ def _build_training_rows() -> list[dict[str, object]]:
 
     attempts: list[dict[str, object]] = []
     instance_results: list[dict[str, object]] = []
-    for index, (instance_id, problem_statement, cheap_resolved, expensive_resolved) in enumerate(
+    for index, (
+        instance_id,
+        problem_statement,
+        cheap_resolved,
+        expensive_resolved,
+    ) in enumerate(
         instances,
         start=1,
     ):
@@ -151,14 +156,18 @@ def _build_training_rows() -> list[dict[str, object]]:
 def test_train_router_model_and_report_are_versioned() -> None:
     rows = _build_training_rows()
 
-    model = train_router_model(rows, seed=7, train_fraction=0.67, validation_fraction=0.17, max_depth=3)
+    model = train_router_model(
+        rows, seed=7, train_fraction=0.67, validation_fraction=0.17, max_depth=3
+    )
     learned = evaluate_router_model(rows, model)
 
     assert model["model_version"] == ROUTER_MODEL_VERSION
     assert model["task_feature_version"] == "task-features-v1"
     assert model["dataset_version"]
     assert model["row_count"] == len(rows)
-    assert model["split"]["train_count"] + model["split"]["validation_count"] + model["split"]["test_count"] == len(rows)
+    assert model["split"]["train_count"] + model["split"]["validation_count"] + model[
+        "split"
+    ]["test_count"] == len(rows)
     assert model["selected_depth"] >= 1
     assert model["validation_scores"] or model["split"]["validation_count"] == 0
 

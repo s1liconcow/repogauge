@@ -356,7 +356,9 @@ def _percentile(values: list[int], percentile: float) -> int:
     return int(ordered[index])
 
 
-def _router_feature_vector(row: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, Any]]:
+def _router_feature_vector(
+    row: Mapping[str, Any],
+) -> tuple[dict[str, float], dict[str, Any]]:
     source_row = row.get("row")
     if isinstance(source_row, Mapping):
         row = source_row
@@ -477,7 +479,9 @@ def _router_split_rows(
             test_count = count - train_count - validation_count
 
         partitions["train"].extend(ordered[:train_count])
-        partitions["validation"].extend(ordered[train_count : train_count + validation_count])
+        partitions["validation"].extend(
+            ordered[train_count : train_count + validation_count]
+        )
         partitions["test"].extend(ordered[train_count + validation_count :])
 
     return partitions
@@ -518,15 +522,17 @@ def _router_best_split(
 
     parent_counts = _router_class_counts(rows)
     parent_gini = _router_gini(parent_counts)
-    best: tuple[str, float, list[dict[str, Any]], list[dict[str, Any]], float] | None = (
-        None
-    )
+    best: (
+        tuple[str, float, list[dict[str, Any]], list[dict[str, Any]], float] | None
+    ) = None
 
     for feature_name in feature_names:
         values = sorted({float(row["features"][feature_name]) for row in rows})
         if len(values) < 2:
             continue
-        thresholds = sorted({(left + right) / 2.0 for left, right in zip(values, values[1:])})
+        thresholds = sorted(
+            {(left + right) / 2.0 for left, right in zip(values, values[1:])}
+        )
         for threshold in thresholds:
             left_rows = [
                 row for row in rows if float(row["features"][feature_name]) <= threshold
@@ -539,10 +545,9 @@ def _router_best_split(
 
             left_counts = _router_class_counts(left_rows)
             right_counts = _router_class_counts(right_rows)
-            weighted_gini = (
-                len(left_rows) / len(rows) * _router_gini(left_counts)
-                + len(right_rows) / len(rows) * _router_gini(right_counts)
-            )
+            weighted_gini = len(left_rows) / len(rows) * _router_gini(
+                left_counts
+            ) + len(right_rows) / len(rows) * _router_gini(right_counts)
             if weighted_gini >= parent_gini:
                 continue
 
@@ -605,17 +610,25 @@ def _train_router_tree(
             "threshold": threshold,
             "gini": _router_gini(class_counts),
             "left": _train_router_tree(
-                left_rows, feature_names=feature_names, max_depth=max_depth, depth=depth + 1
+                left_rows,
+                feature_names=feature_names,
+                max_depth=max_depth,
+                depth=depth + 1,
             ),
             "right": _train_router_tree(
-                right_rows, feature_names=feature_names, max_depth=max_depth, depth=depth + 1
+                right_rows,
+                feature_names=feature_names,
+                max_depth=max_depth,
+                depth=depth + 1,
             ),
         }
     )
     return node
 
 
-def _predict_router_label(tree: Mapping[str, Any], features: Mapping[str, float]) -> str:
+def _predict_router_label(
+    tree: Mapping[str, Any], features: Mapping[str, float]
+) -> str:
     node: Mapping[str, Any] = tree
     while node.get("node_type") == "split":
         feature_name = _coerce_str(node.get("feature"))
@@ -646,9 +659,7 @@ def _prepare_router_training_rows(
                 "route_label": label,
                 "features": encoded_features,
                 "bundle_metadata": bundle_metadata,
-                "task_feature_version": _coerce_str(
-                    row.get("task_feature_version")
-                )
+                "task_feature_version": _coerce_str(row.get("task_feature_version"))
                 or _coerce_str(bundle_metadata.get("task_feature_version")),
                 "task_feature_hash": _coerce_str(row.get("task_feature_hash"))
                 or _coerce_str(bundle_metadata.get("task_feature_hash")),
@@ -679,10 +690,14 @@ def _build_router_model_payload(
         raise RuntimeError("router training data contained no rows")
 
     task_feature_versions = {
-        _coerce_str(row.get("task_feature_version")) for row in rows if _coerce_str(row.get("task_feature_version"))
+        _coerce_str(row.get("task_feature_version"))
+        for row in rows
+        if _coerce_str(row.get("task_feature_version"))
     }
     if len(task_feature_versions) > 1:
-        raise RuntimeError("router training rows must share a single task feature version")
+        raise RuntimeError(
+            "router training rows must share a single task feature version"
+        )
     task_feature_version = next(iter(task_feature_versions), "")
     if not task_feature_version:
         task_feature_version = _coerce_str(rows[0].get("task_feature_version"))
@@ -753,7 +768,9 @@ def _build_router_model_payload(
             "train_count": len(train_rows),
             "validation_count": len(validation_rows),
             "test_count": len(test_rows),
-            "train_label_counts": dict(sorted(_router_class_counts(train_rows).items())),
+            "train_label_counts": dict(
+                sorted(_router_class_counts(train_rows).items())
+            ),
             "validation_label_counts": dict(
                 sorted(_router_class_counts(validation_rows).items())
             ),
@@ -1210,7 +1227,9 @@ def _summarize_policy(rows: list[dict[str, Any]], prefix: str) -> dict[str, Any]
             except (TypeError, ValueError):
                 oracle_latency_value = None
             else:
-                oracle_latency_regret_total += max(0.0, float(latency_ms) - oracle_latency_value)
+                oracle_latency_regret_total += max(
+                    0.0, float(latency_ms) - oracle_latency_value
+                )
                 oracle_latency_regret_count += 1
 
     total_instances = len(rows)
@@ -1355,12 +1374,16 @@ def run_router_training(
     write_router_model(model_path, model)
 
     split = model.get("split", {})
-    eval_rows = model.get("test_count", 0) and _router_split_rows(
-        _prepare_router_training_rows(rows),
-        seed=seed,
-        train_fraction=train_fraction,
-        validation_fraction=validation_fraction,
-    )["test"] or []
+    eval_rows = (
+        model.get("test_count", 0)
+        and _router_split_rows(
+            _prepare_router_training_rows(rows),
+            seed=seed,
+            train_fraction=train_fraction,
+            validation_fraction=validation_fraction,
+        )["test"]
+        or []
+    )
     if not eval_rows:
         split_rows = _router_split_rows(
             _prepare_router_training_rows(rows),

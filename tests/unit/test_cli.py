@@ -787,9 +787,7 @@ solvers:
             self.assertIn("learned_router", report)
             self.assertEqual(report["learned_router"]["policy"], "learned_router")
             self.assertIn("model", report)
-            self.assertEqual(
-                report["model"]["model_version"], "router-model-v1"
-            )
+            self.assertEqual(report["model"]["model_version"], "router-model-v1")
             self.assertTrue((report_out / "router_model.json").exists())
 
     def test_analyze_fails_when_attempts_missing(self) -> None:
