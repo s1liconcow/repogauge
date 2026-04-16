@@ -62,7 +62,10 @@ RESUME_HELP = "Resume into an existing artifact directory."
 DRY_RUN_HELP = (
     "Validate inputs and render intended commands without mutating artifacts."
 )
-LLM_MODE_HELP = "Control model usage: off/local_only/allow_remote."
+LLM_MODE_HELP = (
+    "Control advisory triage model usage: off/local_only/allow_remote. "
+    "Currently only affects the review command."
+)
 VERBOSE_HELP = "Enable verbose output."
 
 COMMIT_RANGE_HELP = "Commit range to scan (for example HEAD~50..HEAD)."

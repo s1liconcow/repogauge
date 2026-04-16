@@ -111,6 +111,14 @@ class TestCliSurface(unittest.TestCase):
         self.assertEqual(namespace.validation_fraction, 0.2)
         self.assertEqual(namespace.max_depth, 4)
 
+    def test_llm_mode_help_notes_review_only_behavior(self) -> None:
+        subparsers_action = next(
+            action for action in self.parser._actions if getattr(action, "choices", None)
+        )
+        help_text = subparsers_action.choices["run"].format_help()
+        self.assertIn("Currently only affects", help_text)
+        self.assertIn("review command.", help_text)
+
     def test_command_emits_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             out = Path(workspace) / "mine_out"
