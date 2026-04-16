@@ -199,7 +199,9 @@ def normalize_provider(
             continue
 
         resolved[key] = value
-        redacted[key] = REDACTION_PLACEHOLDER if _is_sensitive_provider_key(key) else value
+        redacted[key] = (
+            REDACTION_PLACEHOLDER if _is_sensitive_provider_key(key) else value
+        )
 
     return ProviderConfig(
         provider_id=provider_id,
