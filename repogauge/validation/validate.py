@@ -79,6 +79,32 @@ def _resolve_test_cmd(test_cmd_base: str) -> List[str]:
     return parts
 
 
+class PytestExecutionError(RuntimeError):
+    """Raised when deterministic pytest attempts fail to produce parseable output."""
+
+    def __init__(self, message: str, attempts: List[Dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+
+
+def _pytest_command_attempts(test_cmd_base: str) -> List[List[str]]:
+    """Return deterministic command attempts for a pytest-style base command."""
+    primary = _resolve_test_cmd(test_cmd_base)
+    attempts = [primary]
+
+    if not primary:
+        return attempts
+
+    # A common recovery path when `pytest` is not on PATH: call it through
+    # the current interpreter as ``python -m pytest``.
+    if primary[0] == "pytest":
+        corrected = [sys.executable, "-m", "pytest"] + primary[1:]
+        if corrected not in attempts:
+            attempts.append(corrected)
+
+    return attempts
+
+
 def _run_pytest(
     worktree: Path,
     *,
@@ -86,35 +112,77 @@ def _run_pytest(
     junit_xml: Path,
     timeout_seconds: int = 120,
     test_cmd_base: str = "python -m pytest",
-) -> Tuple[Dict[str, str], str]:
-    """Run pytest in *worktree*, return (results_dict, raw_output).
+) -> Tuple[Dict[str, str], str, List[Dict[str, Any]]]:
+    """Run pytest in *worktree* with deterministic command retries.
 
-    ``results_dict`` maps test_id → outcome string, empty if XML missing/malformed.
+    Returns:
+        - ``results_dict`` maps test_id -> outcome string
+        - ``raw_output`` from the final attempt
+        - ``attempts`` persisted attempt metadata
+
+    ``results_dict`` is empty if XML parsing fails for every deterministic attempt.
     ``raw_output`` is the combined stdout+stderr for log purposes.
     ``test_cmd_base`` is taken from the adapter spec when available.
     """
     env = {**os.environ, "PYTHONPATH": str(worktree)}
-    cmd = (
-        _resolve_test_cmd(test_cmd_base)
-        + [
-            "--tb=no",
-            "-q",
-            f"--junit-xml={junit_xml}",
-        ]
-        + (test_files if test_files else [])
+    attempts: List[Dict[str, Any]] = []
+    junit_flag = f"--junit-xml={junit_xml}"
+    raw = ""
+    last_parse_error: str | None = None
+
+    for index, base_cmd in enumerate(_pytest_command_attempts(test_cmd_base)):
+        if junit_xml.exists():
+            try:
+                junit_xml.unlink()
+            except OSError:
+                pass
+
+        cmd = (
+            base_cmd
+            + ["--tb=no", "-q", junit_flag]
+            + (test_files if test_files else [])
+        )
+        result = run_command(
+            cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
+        )
+        raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
+
+        attempt_entry: Dict[str, Any] = {
+            "attempt": index + 1,
+            "command": cmd,
+            "returncode": result.returncode,
+            "timed_out": result.timed_out,
+            "status": "unknown",
+        }
+
+        try:
+            outcomes = parse_junit_xml(junit_xml)
+        except JUnitParseError as exc:
+            last_parse_error = str(exc)
+            attempt_entry.update(
+                {
+                    "status": "parse_error",
+                    "error": str(exc),
+                }
+            )
+            attempts.append(attempt_entry)
+            continue
+
+        attempt_entry["status"] = "success"
+        attempt_entry["tests_run"] = len(outcomes)
+        attempts.append(attempt_entry)
+        return outcomes, raw, attempts
+
+    if last_parse_error:
+        raise PytestExecutionError(
+            f"failed to obtain valid junit output after {len(attempts)} attempt(s): {last_parse_error}",
+            attempts,
+        )
+
+    raise PytestExecutionError(
+        f"pytest execution produced no parseable output for {test_files}",
+        attempts,
     )
-
-    result = run_command(
-        cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
-    )
-    raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
-
-    if not junit_xml.exists():
-        raise JUnitParseError(f"missing expected junit output: {junit_xml}")
-
-    outcomes = parse_junit_xml(junit_xml)
-
-    return outcomes, raw
 
 
 def _derive_test_lists(
@@ -191,12 +259,13 @@ def _eval_instance(
         wt_b = None
         run_b: Dict[str, str] = {}
         log_b = ""
+        attempts_b: List[Dict[str, Any]] = []
         try:
             wt_b = create_worktree(repo_root, ref=base_commit)
             if test_patch.strip():
                 apply_patch_text(wt_b.path, test_patch)
             xml_b = tmp / "junit_b.xml"
-            run_b, log_b = _run_pytest(
+            run_b, log_b, attempts_b = _run_pytest(
                 wt_b.path,
                 test_files=test_inputs,
                 junit_xml=xml_b,
@@ -204,6 +273,9 @@ def _eval_instance(
                 test_cmd_base=test_cmd_base,
             )
         except Exception as exc:
+            pass_b_attempts = (
+                exc.attempts if isinstance(exc, PytestExecutionError) else []
+            )
             return {
                 "status": "error",
                 "error": f"pass_b failed: {exc}",
@@ -213,6 +285,8 @@ def _eval_instance(
                 "log_c": "",
                 "run_b": {},
                 "run_c": {},
+                "run_b_attempts": pass_b_attempts,
+                "run_c_attempts": [],
                 "FAIL_TO_PASS": [],
                 "PASS_TO_PASS": [],
                 "resolved": False,
@@ -228,6 +302,7 @@ def _eval_instance(
         wt_c = None
         run_c: Dict[str, str] = {}
         log_c = ""
+        attempts_c: List[Dict[str, Any]] = []
         try:
             wt_c = create_worktree(repo_root, ref=base_commit)
             if test_patch.strip():
@@ -235,7 +310,7 @@ def _eval_instance(
             if pred_patch.strip():
                 apply_patch_text(wt_c.path, pred_patch)
             xml_c = tmp / "junit_c.xml"
-            run_c, log_c = _run_pytest(
+            run_c, log_c, attempts_c = _run_pytest(
                 wt_c.path,
                 test_files=test_inputs,
                 junit_xml=xml_c,
@@ -243,6 +318,9 @@ def _eval_instance(
                 test_cmd_base=test_cmd_base,
             )
         except Exception as exc:
+            pass_c_attempts = (
+                exc.attempts if isinstance(exc, PytestExecutionError) else []
+            )
             return {
                 "status": "error",
                 "error": f"pass_c failed: {exc}",
@@ -252,6 +330,8 @@ def _eval_instance(
                 "log_c": log_c,
                 "run_b": run_b,
                 "run_c": {},
+                "run_b_attempts": attempts_b,
+                "run_c_attempts": pass_c_attempts,
                 "FAIL_TO_PASS": [],
                 "PASS_TO_PASS": [],
                 "resolved": False,
@@ -275,6 +355,8 @@ def _eval_instance(
         "targeted_test_inputs": test_inputs,
         "run_b": run_b,
         "run_c": run_c,
+        "run_b_attempts": attempts_b,
+        "run_c_attempts": attempts_c,
         "FAIL_TO_PASS": ftp,
         "PASS_TO_PASS": ptp,
         "resolved": resolved,
@@ -373,6 +455,8 @@ def run_eval(
                     "base_commit": ds["base_commit"],
                     "run_b_count": len(outcome["run_b"]),
                     "run_c_count": len(outcome["run_c"]),
+                    "run_b_attempts": outcome["run_b_attempts"],
+                    "run_c_attempts": outcome["run_c_attempts"],
                     "log_b": outcome["log_b"][-2000:],
                     "log_c": outcome["log_c"][-2000:],
                 },
