@@ -25,6 +25,7 @@ See the architecture docs:
 
 - [docs/ADRs/0001-mvp-architecture.md](docs/ADRs/0001-mvp-architecture.md)
 - [DESIGN.md](DESIGN.md)
+- [docs/junit_parser_contract.md](docs/junit_parser_contract.md)
 
 ## CLI surface (scaffold)
 
