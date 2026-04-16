@@ -188,10 +188,15 @@ def _build_budget_frontier(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     frontier: list[dict[str, Any]] = []
     best_row: dict[str, Any] | None = None
 
-    for budget, bucket in groupby(ordered, key=lambda row: _metric_value_or_inf(row.get("cost_per_resolved_issue"))):
+    for budget, bucket in groupby(
+        ordered,
+        key=lambda row: _metric_value_or_inf(row.get("cost_per_resolved_issue")),
+    ):
         bucket_rows = list(bucket)
         for row in bucket_rows:
-            if best_row is None or _solver_ranking_key(row) < _solver_ranking_key(best_row):
+            if best_row is None or _solver_ranking_key(row) < _solver_ranking_key(
+                best_row
+            ):
                 best_row = row
         if best_row is None:
             continue
@@ -200,12 +205,8 @@ def _build_budget_frontier(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "budget": budget,
                 "best_solver_id": _solver_id_from_row(best_row),
                 "best_raw_resolution_rate": best_row.get("raw_resolution_rate"),
-                "best_resolved_instance_count": best_row.get(
-                    "resolved_instance_count"
-                ),
-                "best_cost_per_resolved_issue": best_row.get(
-                    "cost_per_resolved_issue"
-                ),
+                "best_resolved_instance_count": best_row.get("resolved_instance_count"),
+                "best_cost_per_resolved_issue": best_row.get("cost_per_resolved_issue"),
                 "best_latency_ms_per_resolved_issue": best_row.get(
                     "latency_ms_per_resolved_issue"
                 ),
@@ -254,7 +255,9 @@ def _build_failure_breakdown(
             "count": count,
             "share": (_safe_rate(count, total) if total else 0.0),
         }
-        for reason, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        for reason, count in sorted(
+            counts.items(), key=lambda item: (-item[1], item[0])
+        )
     ]
     return breakdown
 
@@ -367,9 +370,7 @@ def build_analysis_report(
     if best_solver is not None and cheapest_solver is not None:
         report["marginal_win_analysis"] = {
             "best_solver_id": _solver_id_from_row(best_solver),
-            "best_solver_raw_resolution_rate": best_solver.get(
-                "raw_resolution_rate"
-            ),
+            "best_solver_raw_resolution_rate": best_solver.get("raw_resolution_rate"),
             "best_solver_cost_per_resolved_issue": best_solver.get(
                 "cost_per_resolved_issue"
             ),
@@ -616,10 +617,12 @@ def write_summary_html(
         headers = list(table_group_by) + metric_headers
         lines: list[str] = [f"<h2>{html_escape(title)}</h2>"]
         if not table_rows:
-            lines.append("<p class=\"empty\">No rows.</p>")
+            lines.append('<p class="empty">No rows.</p>')
             return lines
         lines.append("<table>")
-        lines.append("<tr>" + "".join(f"<th>{html_escape(h)}</th>" for h in headers) + "</tr>")
+        lines.append(
+            "<tr>" + "".join(f"<th>{html_escape(h)}</th>" for h in headers) + "</tr>"
+        )
         for row in table_rows:
             group_values = row.get("group_values", {})
             lines.append("<tr>")
@@ -629,15 +632,19 @@ def write_summary_html(
                     value = _coerce_str(group_values.get(column))
                 lines.append(f"<td>{html_escape(value)}</td>")
             for header in metric_headers:
-                lines.append(f"<td>{html_escape(_display_number(row.get(header)))}</td>")
+                lines.append(
+                    f"<td>{html_escape(_display_number(row.get(header)))}</td>"
+                )
             lines.append("</tr>")
         lines.append("</table>")
         return lines
 
     def render_key_values(items: list[tuple[str, Any]]) -> list[str]:
-        lines = ["<dl class=\"kv\">"]
+        lines = ['<dl class="kv">']
         for label, value in items:
-            lines.append(f"<dt>{html_escape(label)}</dt><dd>{html_escape(_display_number(value))}</dd>")
+            lines.append(
+                f"<dt>{html_escape(label)}</dt><dd>{html_escape(_display_number(value))}</dd>"
+            )
         lines.append("</dl>")
         return lines
 
@@ -681,7 +688,10 @@ def write_summary_html(
                 ("instance_result_rows", top_line.get("instance_result_rows")),
                 ("unique_instance_count", top_line.get("unique_instance_count")),
                 ("resolved_instance_count", top_line.get("resolved_instance_count")),
-                ("unresolved_instance_count", top_line.get("unresolved_instance_count")),
+                (
+                    "unresolved_instance_count",
+                    top_line.get("unresolved_instance_count"),
+                ),
                 ("best_solver_id", top_line.get("best_solver_id")),
                 ("cheapest_solver_id", top_line.get("cheapest_solver_id")),
                 ("expensive_cost_threshold", top_line.get("expensive_cost_threshold")),
@@ -692,7 +702,9 @@ def write_summary_html(
     if metadata:
         lines.append("<h2>Run Metadata</h2>")
         lines.append(
-            "<pre>{}</pre>".format(html_escape(json.dumps(metadata, sort_keys=True, indent=2)))
+            "<pre>{}</pre>".format(
+                html_escape(json.dumps(metadata, sort_keys=True, indent=2))
+            )
         )
 
     lines.extend(
@@ -726,15 +738,23 @@ def write_summary_html(
             "best_total_cost_usd",
             "best_total_duration_ms",
         ]
-        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        lines.append(
+            "<tr>"
+            + "".join(f"<th>{html_escape(header)}</th>" for header in headers)
+            + "</tr>"
+        )
         for row in budget_frontier:
             lines.append("<tr>")
             for header in headers:
-                lines.append(f"<td>{html_escape(_display_number(row.get(header)))}</td>")
+                lines.append(
+                    f"<td>{html_escape(_display_number(row.get(header)))}</td>"
+                )
             lines.append("</tr>")
         lines.append("</table>")
     else:
-        lines.append("<p class=\"empty\">No affordable solver rows with a resolved issue count.</p>")
+        lines.append(
+            '<p class="empty">No affordable solver rows with a resolved issue count.</p>'
+        )
 
     lines.append("<h2>Pareto Frontier</h2>")
     if pareto_frontier:
@@ -749,7 +769,11 @@ def write_summary_html(
             "latency_ms_per_resolved_issue",
             "resolved_instance_count",
         ]
-        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        lines.append(
+            "<tr>"
+            + "".join(f"<th>{html_escape(header)}</th>" for header in headers)
+            + "</tr>"
+        )
         for row in pareto_frontier:
             lines.append("<tr>")
             for header in headers:
@@ -760,13 +784,17 @@ def write_summary_html(
             lines.append("</tr>")
         lines.append("</table>")
     else:
-        lines.append("<p class=\"empty\">No frontier rows.</p>")
+        lines.append('<p class="empty">No frontier rows.</p>')
 
     lines.append("<h2>Failure Reasons</h2>")
     if failure_breakdown:
         lines.append("<table>")
         headers = ["reason", "count", "share"]
-        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        lines.append(
+            "<tr>"
+            + "".join(f"<th>{html_escape(header)}</th>" for header in headers)
+            + "</tr>"
+        )
         for row in failure_breakdown:
             lines.append("<tr>")
             for header in headers:
@@ -777,7 +805,7 @@ def write_summary_html(
             lines.append("</tr>")
         lines.append("</table>")
     else:
-        lines.append("<p class=\"empty\">No unresolved rows.</p>")
+        lines.append('<p class="empty">No unresolved rows.</p>')
 
     lines.append("<h2>Unresolved Samples</h2>")
     if unresolved_samples:
@@ -793,18 +821,26 @@ def write_summary_html(
             "task_cluster",
             "problem_statement",
         ]
-        lines.append("<tr>" + "".join(f"<th>{html_escape(header)}</th>" for header in headers) + "</tr>")
+        lines.append(
+            "<tr>"
+            + "".join(f"<th>{html_escape(header)}</th>" for header in headers)
+            + "</tr>"
+        )
         for row in unresolved_samples:
             lines.append("<tr>")
             for header in headers:
                 value = row.get(header, "")
-                if header == "problem_statement" and isinstance(value, str) and len(value) > 220:
+                if (
+                    header == "problem_statement"
+                    and isinstance(value, str)
+                    and len(value) > 220
+                ):
                     value = f"{value[:217]}..."
                 lines.append(f"<td>{html_escape(_display_number(value))}</td>")
             lines.append("</tr>")
         lines.append("</table>")
     else:
-        lines.append("<p class=\"empty\">No unresolved sample rows.</p>")
+        lines.append('<p class="empty">No unresolved sample rows.</p>')
 
     lines.append("</body></html>")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

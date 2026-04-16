@@ -131,7 +131,12 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
 
     summary_path = tmp_path / "summary.json"
     html_path = tmp_path / "report.html"
-    write_summary_json(summary_path, grouped_summaries, metadata={"run_root": "/tmp/run"}, report=report)
+    write_summary_json(
+        summary_path,
+        grouped_summaries,
+        metadata={"run_root": "/tmp/run"},
+        report=report,
+    )
     write_summary_html(
         html_path,
         grouped_summaries,
@@ -142,7 +147,10 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
 
     summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert "report" in summary_payload
-    assert summary_payload["report"]["budget_frontier"][0]["best_solver_id"] == "solver-cheap"
+    assert (
+        summary_payload["report"]["budget_frontier"][0]["best_solver_id"]
+        == "solver-cheap"
+    )
 
     html = html_path.read_text(encoding="utf-8")
     assert "Budget Frontier" in html
