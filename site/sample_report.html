@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>RepoGauge Analysis</title>
+  <style>
+    :root {
+      --bg: #f6f3ee;
+      --bg-2: #fffdf9;
+      --ink: #102135;
+      --muted: #5b6879;
+      --line: rgba(18, 33, 53, 0.12);
+      --panel: rgba(255, 255, 255, 0.82);
+      --panel-strong: rgba(255, 255, 255, 0.94);
+      --shadow: 0 24px 80px rgba(15, 33, 53, 0.12);
+      --blue: #0f4c81;
+      --teal: #0f7c82;
+      --orange: #eb8f47;
+      --green: #198754;
+      --rose: #d94f70;
+      --violet: #6a52d3;
+      --gold: #d5a021;
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --font-sans: "Avenir Next", "Segoe UI Variable Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+      --font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Code", monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 124, 130, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(235, 143, 71, 0.14), transparent 26%),
+        linear-gradient(180deg, #fbf8f3 0%, #f6f3ee 46%, #f0ece5 100%);
+      min-height: 100vh;
+    }
+    .page {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+    }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 32px;
+      padding: 36px;
+      background:
+        linear-gradient(135deg, rgba(11, 52, 87, 0.96), rgba(18, 76, 129, 0.92) 52%, rgba(15, 124, 130, 0.88));
+      color: white;
+      box-shadow: var(--shadow);
+      isolation: isolate;
+    }
+    .hero::before,
+    .hero::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      filter: blur(10px);
+      opacity: 0.58;
+      z-index: -1;
+    }
+    .hero::before {
+      width: 320px;
+      height: 320px;
+      right: -60px;
+      top: -90px;
+      background: radial-gradient(circle, rgba(255,255,255,0.22), transparent 68%);
+    }
+    .hero::after {
+      width: 240px;
+      height: 240px;
+      left: -30px;
+      bottom: -70px;
+      background: radial-gradient(circle, rgba(235,143,71,0.45), transparent 66%);
+    }
+    .hero__eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.75);
+      margin-bottom: 16px;
+    }
+    .hero__eyebrow::before {
+      content: "";
+      width: 28px;
+      height: 1px;
+      background: rgba(255,255,255,0.45);
+    }
+    .hero h1 {
+      margin: 0 0 14px;
+      font-size: clamp(2.4rem, 4vw, 4rem);
+      line-height: 0.96;
+      letter-spacing: -0.04em;
+      max-width: 12ch;
+    }
+    .hero p {
+      margin: 0;
+      max-width: 68ch;
+      color: rgba(255,255,255,0.86);
+      font-size: 1.04rem;
+      line-height: 1.6;
+    }
+    .hero__stats {
+      margin-top: 26px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .hero__stat {
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    .hero__stat-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.68);
+    }
+    .hero__stat-value {
+      display: block;
+      margin-top: 10px;
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+    .section-grid {
+      display: grid;
+      gap: 22px;
+      margin-top: 24px;
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .spotlight-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .two-up {
+      display: grid;
+      grid-template-columns: 1.45fr 1fr;
+      gap: 22px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid rgba(16, 33, 53, 0.08);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      backdrop-filter: blur(12px);
+      animation: panel-enter 480ms ease both;
+    }
+    .panel--chart {
+      overflow: hidden;
+    }
+    .section-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .section-heading h2 {
+      margin: 0;
+      font-size: 1.28rem;
+      letter-spacing: -0.03em;
+    }
+    .section-heading p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 76ch;
+      line-height: 1.55;
+    }
+    .metric-card {
+      position: relative;
+      overflow: hidden;
+      min-height: 188px;
+      border-radius: 24px;
+      padding: 22px;
+      background: var(--panel-strong);
+      border: 1px solid rgba(16, 33, 53, 0.08);
+      box-shadow: 0 18px 45px rgba(16, 33, 53, 0.08);
+    }
+    .metric-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 4px;
+      background: linear-gradient(90deg, rgba(15, 76, 129, 0.18), rgba(15, 124, 130, 0.68), rgba(235, 143, 71, 0.68));
+    }
+    .metric-card--success::before { background: linear-gradient(90deg, rgba(25,135,84,0.25), rgba(25,135,84,0.9)); }
+    .metric-card--accent::before { background: linear-gradient(90deg, rgba(15,76,129,0.3), rgba(15,124,130,0.88)); }
+    .metric-card--cool::before { background: linear-gradient(90deg, rgba(106,82,211,0.24), rgba(75,123,236,0.92)); }
+    .metric-card--warm::before { background: linear-gradient(90deg, rgba(235,143,71,0.28), rgba(235,143,71,0.95)); }
+    .metric-card--highlight::before { background: linear-gradient(90deg, rgba(213,160,33,0.28), rgba(213,160,33,0.95)); }
+    .metric-card__eyebrow {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .metric-card__title {
+      margin: 12px 0 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .metric-card__value {
+      font-size: clamp(1.7rem, 2.5vw, 2.6rem);
+      line-height: 0.95;
+      letter-spacing: -0.05em;
+      font-weight: 700;
+    }
+    .metric-card__support {
+      margin: 14px 0 0;
+      color: var(--muted);
+      line-height: 1.5;
+      max-width: 26ch;
+    }
+    .callout {
+      border-radius: 22px;
+      padding: 22px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid rgba(16,33,53,0.08);
+    }
+    .callout h3 {
+      margin: 0 0 8px;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .callout p {
+      margin: 0;
+      font-size: 1.08rem;
+      line-height: 1.6;
+      letter-spacing: -0.015em;
+    }
+    .callout--success { background: linear-gradient(180deg, rgba(25,135,84,0.08), rgba(255,255,255,0.88)); }
+    .callout--accent { background: linear-gradient(180deg, rgba(15,76,129,0.08), rgba(255,255,255,0.88)); }
+    .callout--warning { background: linear-gradient(180deg, rgba(235,143,71,0.11), rgba(255,255,255,0.88)); }
+    .table-shell {
+      overflow: auto;
+      border-radius: 18px;
+      border: 1px solid rgba(16,33,53,0.08);
+      background: rgba(255,255,255,0.72);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 820px;
+    }
+    th, td {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(16,33,53,0.08);
+      text-align: left;
+      font-size: 0.94rem;
+      vertical-align: top;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      background: rgba(255,255,255,0.96);
+      z-index: 1;
+      font-size: 0.79rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    tbody tr:hover {
+      background: rgba(15,124,130,0.04);
+    }
+    .sort-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-transform: inherit;
+      letter-spacing: inherit;
+      cursor: pointer;
+    }
+    .sort-button__glyph {
+      font-size: 0.92em;
+      opacity: 0.55;
+    }
+    .bar-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 14px;
+    }
+    .bar-list__item {
+      padding: 0;
+    }
+    .bar-list__header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      color: var(--ink);
+    }
+    .bar-list__track {
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(16,33,53,0.08);
+      overflow: hidden;
+    }
+    .bar-list__fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--blue), var(--teal));
+    }
+    .bar-list__fill--blue { background: linear-gradient(90deg, var(--blue), var(--teal)); }
+    .bar-list__fill--orange { background: linear-gradient(90deg, var(--orange), #f5c257); }
+    .bar-list__fill--rose { background: linear-gradient(90deg, var(--rose), #ff8fa3); }
+    .chart-shell {
+      display: grid;
+      gap: 18px;
+    }
+    .chart-surface {
+      fill: rgba(255,255,255,0.68);
+      stroke: rgba(16,33,53,0.08);
+    }
+    .chart-grid {
+      stroke: rgba(16,33,53,0.08);
+      stroke-width: 1;
+    }
+    .chart-grid--vertical {
+      stroke-dasharray: 4 7;
+    }
+    .chart-axis {
+      stroke: rgba(16,33,53,0.22);
+      stroke-width: 1.5;
+    }
+    .chart-axis-label {
+      fill: rgba(16,33,53,0.64);
+      font-size: 11px;
+      font-family: var(--font-sans);
+    }
+    .chart-title {
+      fill: rgba(16,33,53,0.9);
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font-sans);
+    }
+    .chart-point-label {
+      fill: rgba(16,33,53,0.84);
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-sans);
+      letter-spacing: 0.01em;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .legend__item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+    }
+    .legend__swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(15,76,129,0.10);
+      color: var(--blue);
+      font-size: 0.77rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .chip--warning {
+      background: rgba(235,143,71,0.12);
+      color: #a55a00;
+    }
+    .incident-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .incident-card {
+      border-radius: 20px;
+      padding: 20px;
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(16,33,53,0.08);
+    }
+    .incident-card__top {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .incident-card h3 {
+      margin: 16px 0 8px;
+      font-size: 1.02rem;
+      letter-spacing: -0.02em;
+    }
+    .incident-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .incident-card__meta {
+      margin: 18px 0 0;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .incident-card__meta div {
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(16,33,53,0.04);
+    }
+    .incident-card__meta dt {
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .incident-card__meta dd {
+      margin: 0;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .metadata-panel {
+      border-radius: 18px;
+      background: rgba(255,255,255,0.5);
+    }
+    .metadata-panel summary {
+      cursor: pointer;
+      font-weight: 700;
+    }
+    pre {
+      margin: 16px 0 0;
+      padding: 18px;
+      overflow: auto;
+      background: rgba(16,33,53,0.92);
+      color: #f4f5f7;
+      border-radius: 18px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .empty-state {
+      border-radius: 18px;
+      padding: 22px;
+      background: rgba(16,33,53,0.04);
+      color: var(--muted);
+    }
+    @keyframes panel-enter {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    @media (max-width: 1120px) {
+      .metric-grid,
+      .spotlight-grid,
+      .two-up,
+      .incident-grid,
+      .hero__stats {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    @media (max-width: 760px) {
+      .page { padding: 18px 14px 32px; }
+      .hero { padding: 24px; }
+      .metric-grid,
+      .spotlight-grid,
+      .two-up,
+      .incident-grid,
+      .hero__stats {
+        grid-template-columns: 1fr;
+      }
+      .section-heading {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <span class="hero__eyebrow">RepoGauge Analysis</span>
+      <h1>Model performance you can actually route by.</h1>
+      <p>
+        This report turns raw run and evaluation artifacts into a decision surface:
+        which solvers win, which ones are cheap, how their latency and token burn compare,
+        and how much spend you could claw back by switching already-solvable work to cheaper models.
+      </p>
+      <div class="hero__stats">
+        <div class="hero__stat"><span class="hero__stat-label">Best Solver</span><span class="hero__stat-value">codex-cli-mini</span></div>
+        <div class="hero__stat"><span class="hero__stat-label">Cheapest Solver</span><span class="hero__stat-value">codex-cli-mini</span></div>
+        <div class="hero__stat"><span class="hero__stat-label">Group By</span><span class="hero__stat-value">solver_id</span></div>
+        <div class="hero__stat"><span class="hero__stat-label">Expensive Threshold</span><span class="hero__stat-value">$1.00</span></div>
+      </div>
+    </header>
+
+    <section class="section-grid">
+      <div class="metric-grid"><article class="metric-card metric-card--success"><span class="metric-card__eyebrow">Coverage</span><h3 class="metric-card__title">Resolved Instances</h3><div class="metric-card__value">1</div><p class="metric-card__support">out of 1 unique tasks</p></article><article class="metric-card metric-card--accent"><span class="metric-card__eyebrow">Efficiency</span><h3 class="metric-card__title">Total Spend</h3><div class="metric-card__value">$0.06</div><p class="metric-card__support">cost telemetry on 100.0% of attempts</p></article><article class="metric-card metric-card--cool"><span class="metric-card__eyebrow">Latency</span><h3 class="metric-card__title">Average Attempt</h3><div class="metric-card__value">1.1m</div><p class="metric-card__support">1 attempt rows analyzed</p></article><article class="metric-card metric-card--warm"><span class="metric-card__eyebrow">Tokens</span><h3 class="metric-card__title">Total Tokens</h3><div class="metric-card__value">321.3K</div><p class="metric-card__support">in 315.9K input and 5.4K output tokens</p></article><article class="metric-card metric-card--default"><span class="metric-card__eyebrow">Tooling</span><h3 class="metric-card__title">Tool Calls</h3><div class="metric-card__value">15</div><p class="metric-card__support">visible on 100.0% of attempts</p></article><article class="metric-card metric-card--highlight"><span class="metric-card__eyebrow">Routing</span><h3 class="metric-card__title">Portfolio Cost Floor</h3><div class="metric-card__value">$0.06</div><p class="metric-card__support">best solver gap $0.00</p></article></div>
+      <div class="spotlight-grid"><article class="callout callout--success"><h3>Best Solver</h3><p>codex-cli-mini leads at 100.0% resolution with $0.06 per resolved issue.</p></article><article class="callout callout--accent"><h3>Cheapest Successful Solver</h3><p>codex-cli-mini is the low-cost anchor at $0.06 per resolved issue.</p></article><article class="callout callout--warning"><h3>Cost Opportunity</h3><p>If you route each already-solved task to the cheapest solver that also solved it, the current best-solver spend could drop by $0.00.</p></article></div>
+      <section class="panel"><div class="section-heading"><h2>Solver Comparison</h2><p>Resolution, cost, latency, tokens, and tool usage on one surface. Click any column to sort.</p></div><div class="table-shell"><table id="solver-comparison"><thead><tr><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="solver_id">Solver<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="raw_resolution_rate">Resolution<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="resolved_instance_count">Resolved<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="cost_per_resolved_issue">Cost / Resolve<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="total_cost_usd">Total Spend<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="avg_attempt_duration_ms">Avg Latency<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="p95_attempt_duration_ms">P95 Latency<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="avg_total_tokens_per_attempt">Avg Tokens / Attempt<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="tokens_per_resolved_issue">Tokens / Resolve<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="avg_tool_calls_per_attempt">Avg Tool Calls<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="avoidable_spend_usd">Avoidable Spend<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="solver-comparison" data-key="avoidable_share">Avoidable Share<span class="sort-button__glyph">↕</span></button></th></tr></thead><tbody><tr><td data-key="solver_id" data-sort-value="codex-cli-mini">codex-cli-mini</td><td data-key="raw_resolution_rate" data-sort-value="1.0">100.0%</td><td data-key="resolved_instance_count" data-sort-value="1">1</td><td data-key="cost_per_resolved_issue" data-sort-value="0.05569395">$0.06</td><td data-key="total_cost_usd" data-sort-value="0.05569395">$0.06</td><td data-key="avg_attempt_duration_ms" data-sort-value="65881.0">1.1m</td><td data-key="p95_attempt_duration_ms" data-sort-value="65881">1.1m</td><td data-key="avg_total_tokens_per_attempt" data-sort-value="321304.0">321.3K</td><td data-key="tokens_per_resolved_issue" data-sort-value="321304.0">321.3K</td><td data-key="avg_tool_calls_per_attempt" data-sort-value="15.0">15</td><td data-key="avoidable_spend_usd" data-sort-value="0.0">$0.00</td><td data-key="avoidable_share" data-sort-value="0.0">0.0%</td></tr></tbody></table></div></section>
+      <div class="two-up">
+        <section class="panel panel--chart"><div class="section-heading"><h2>Solver Frontier</h2><p>Resolution rate versus cost per resolved issue, with point size weighted by resolved instances.</p></div><div class="chart-shell"><svg viewBox="0 0 760 360" role="img" aria-label="Solver frontier chart"><rect x="0" y="0" width="760" height="360" rx="24" class="chart-surface"/><line x1="70" y1="302.0" x2="724" y2="302.0" class="chart-grid"/><text x="58" y="306.0" text-anchor="end" class="chart-axis-label">0.0%</text><line x1="70" y1="234.5" x2="724" y2="234.5" class="chart-grid"/><text x="58" y="238.5" text-anchor="end" class="chart-axis-label">25.0%</text><line x1="70" y1="167.0" x2="724" y2="167.0" class="chart-grid"/><text x="58" y="171.0" text-anchor="end" class="chart-axis-label">50.0%</text><line x1="70" y1="99.5" x2="724" y2="99.5" class="chart-grid"/><text x="58" y="103.5" text-anchor="end" class="chart-axis-label">75.0%</text><line x1="70" y1="32.0" x2="724" y2="32.0" class="chart-grid"/><text x="58" y="36.0" text-anchor="end" class="chart-axis-label">100.0%</text><line x1="70.0" y1="32" x2="70.0" y2="302" class="chart-grid chart-grid--vertical"/><text x="70.0" y="326" text-anchor="middle" class="chart-axis-label">$0.06</text><line x1="233.5" y1="32" x2="233.5" y2="302" class="chart-grid chart-grid--vertical"/><text x="233.5" y="326" text-anchor="middle" class="chart-axis-label">$0.06</text><line x1="397.0" y1="32" x2="397.0" y2="302" class="chart-grid chart-grid--vertical"/><text x="397.0" y="326" text-anchor="middle" class="chart-axis-label">$0.06</text><line x1="560.5" y1="32" x2="560.5" y2="302" class="chart-grid chart-grid--vertical"/><text x="560.5" y="326" text-anchor="middle" class="chart-axis-label">$0.06</text><line x1="724.0" y1="32" x2="724.0" y2="302" class="chart-grid chart-grid--vertical"/><text x="724.0" y="326" text-anchor="middle" class="chart-axis-label">$0.06</text><line x1="70" y1="302" x2="724" y2="302" class="chart-axis"/><line x1="70" y1="32" x2="70" y2="302" class="chart-axis"/><g class="chart-point"><circle cx="397.0" cy="167.0" r="9.8" fill="#0f4c81" fill-opacity="0.78" stroke="white" stroke-width="2"><title>codex-cli-mini | resolve 100.0% | cost $0.06 | latency 1.1m | tokens 321.3K</title></circle><text x="397.0" y="149.2" text-anchor="middle" class="chart-point-label">codex-cli-mini</text></g><text x="70" y="22" class="chart-title">Higher and farther left is better.</text><text x="380.0" y="348" text-anchor="middle" class="chart-axis-label">Cost Per Resolved Issue</text><text x="18" y="180.0" text-anchor="middle" transform="rotate(-90 18 180.0)" class="chart-axis-label">Resolution Rate</text></svg><ul class="legend"><li class="legend__item"><span class="legend__swatch" style="background:#0f4c81"></span><span>codex-cli-mini</span></li></ul></div></section>
+        <section class="panel"><div class="section-heading"><h2>Failure Reasons</h2><p>Share of unresolved rows by dominant harness outcome or failure reason.</p></div><div class="empty-state">No unresolved rows were present in the joined analysis set.</div></section>
+      </div>
+      <div class="two-up">
+        <section class="panel"><div class="section-heading"><h2>Cost Opportunities</h2><p>How much each solver spends today on the tasks it solved, versus the cheapest solver that also solved the same tasks.</p></div><div class="table-shell"><table id="cost-opportunities"><thead><tr><th scope="col"><button type="button" class="sort-button" data-table="cost-opportunities" data-key="solver_id">Solver<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="cost-opportunities" data-key="resolved_instance_count">Resolved<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="cost-opportunities" data-key="success_spend_usd">Current Success Spend<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="cost-opportunities" data-key="cheapest_compatible_spend_usd">Cheapest Equivalent Spend<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="cost-opportunities" data-key="avoidable_spend_usd">Avoidable Spend<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="cost-opportunities" data-key="avoidable_share">Avoidable Share<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="cost-opportunities" data-key="avg_avoidable_spend_per_resolved_issue">Avoidable / Resolve<span class="sort-button__glyph">↕</span></button></th></tr></thead><tbody><tr><td data-key="solver_id" data-sort-value="codex-cli-mini">codex-cli-mini</td><td data-key="resolved_instance_count" data-sort-value="1">1</td><td data-key="success_spend_usd" data-sort-value="0.055694">$0.06</td><td data-key="cheapest_compatible_spend_usd" data-sort-value="0.055694">$0.06</td><td data-key="avoidable_spend_usd" data-sort-value="0.0">$0.00</td><td data-key="avoidable_share" data-sort-value="0.0">0.0%</td><td data-key="avg_avoidable_spend_per_resolved_issue" data-sort-value="0.0">$0.00</td></tr></tbody></table></div></section>
+        <section class="panel"><div class="section-heading"><h2>Potential Savings By Solver</h2><p>Avoidable spend if successful tasks were handed to the cheapest successful model instead.</p></div><ul class="bar-list"><li class="bar-list__item"><div class="bar-list__header"><span>codex-cli-mini</span><strong>$0.00</strong></div><div class="bar-list__track"><span class="bar-list__fill bar-list__fill--orange" style="width:0.00%"></span></div></li></ul></section>
+      </div>
+      <section class="panel"><div class="section-heading"><h2>High-Leverage Instance Savings</h2><p>Concrete examples where solver substitution changes spend the most while preserving success.</p></div><div class="empty-state">No instance had two priced successful solvers to compare.</div></section>
+      <section class="panel"><div class="section-heading"><h2>Requested Summary</h2><p>The custom grouped rollup that `repogauge analyze` was asked to produce.</p></div><div class="table-shell"><table id="requested-summary"><thead><tr><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="solver_id">solver_id<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="raw_resolution_rate">Resolution<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="resolved_instance_count">Resolved<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="cost_per_resolved_issue">Cost / Resolve<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="avg_attempt_duration_ms">Avg Latency<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="avg_total_tokens_per_attempt">Avg Tokens / Attempt<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="avg_tool_calls_per_attempt">Avg Tool Calls<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="requested-summary" data-key="marginal_cost_per_extra_resolve">Marginal Cost<span class="sort-button__glyph">↕</span></button></th></tr></thead><tbody><tr><td data-key="solver_id" data-sort-value="codex-cli-mini">codex-cli-mini</td><td data-key="raw_resolution_rate" data-sort-value="1.0">100.0%</td><td data-key="resolved_instance_count" data-sort-value="1">1</td><td data-key="cost_per_resolved_issue" data-sort-value="0.05569395">$0.06</td><td data-key="avg_attempt_duration_ms" data-sort-value="65881.0">1.1m</td><td data-key="avg_total_tokens_per_attempt" data-sort-value="321304.0">321.3K</td><td data-key="avg_tool_calls_per_attempt" data-sort-value="15.0">15</td><td data-key="marginal_cost_per_extra_resolve" data-sort-value="">-</td></tr></tbody></table></div></section>
+      <div class="two-up">
+        <section class="panel"><div class="section-heading"><h2>Budget Frontier</h2><p>At each budget ceiling, this is the best affordable solver. The `best_solver_id` is the answer to the practical question: if this is my budget, what should I run?</p></div><div class="table-shell"><table id="budget-frontier"><thead><tr><th scope="col"><button type="button" class="sort-button" data-table="budget-frontier" data-key="budget">Budget<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="budget-frontier" data-key="best_solver_id">Best Solver<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="budget-frontier" data-key="best_raw_resolution_rate">Resolution<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="budget-frontier" data-key="best_cost_per_resolved_issue">Cost / Resolve<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="budget-frontier" data-key="best_latency_ms_per_resolved_issue">Latency / Resolve<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="budget-frontier" data-key="best_total_cost_usd">Total Spend<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="budget-frontier" data-key="affordable_solver_ids">Affordable Solvers<span class="sort-button__glyph">↕</span></button></th></tr></thead><tbody><tr><td data-key="budget" data-sort-value="0.05569395">$0.06</td><td data-key="best_solver_id" data-sort-value="codex-cli-mini">codex-cli-mini</td><td data-key="best_raw_resolution_rate" data-sort-value="1.0">100.0%</td><td data-key="best_cost_per_resolved_issue" data-sort-value="0.05569395">$0.06</td><td data-key="best_latency_ms_per_resolved_issue" data-sort-value="65881.0">1.1m</td><td data-key="best_total_cost_usd" data-sort-value="0.05569395">$0.06</td><td data-key="affordable_solver_ids" data-sort-value="[&#x27;codex-cli-mini&#x27;]">[&#x27;codex-cli-mini&#x27;]</td></tr></tbody></table></div></section>
+        <section class="panel"><div class="section-heading"><h2>Pareto Frontier</h2><p>Rows here are not dominated on resolution, cost, and latency. They are the serious candidates.</p></div><div class="table-shell"><table id="pareto-frontier"><thead><tr><th scope="col"><button type="button" class="sort-button" data-table="pareto-frontier" data-key="solver_id">Solver<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="pareto-frontier" data-key="raw_resolution_rate">Resolution<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="pareto-frontier" data-key="cost_per_resolved_issue">Cost / Resolve<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="pareto-frontier" data-key="latency_ms_per_resolved_issue">Latency / Resolve<span class="sort-button__glyph">↕</span></button></th><th scope="col"><button type="button" class="sort-button" data-table="pareto-frontier" data-key="resolved_instance_count">Resolved<span class="sort-button__glyph">↕</span></button></th></tr></thead><tbody><tr><td data-key="solver_id" data-sort-value="codex-cli-mini">codex-cli-mini</td><td data-key="raw_resolution_rate" data-sort-value="1.0">100.0%</td><td data-key="cost_per_resolved_issue" data-sort-value="0.05569395">$0.06</td><td data-key="latency_ms_per_resolved_issue" data-sort-value="65881.0">1.1m</td><td data-key="resolved_instance_count" data-sort-value="1">1</td></tr></tbody></table></div></section>
+      </div>
+      <section class="panel"><div class="section-heading"><h2>Unresolved Samples</h2><p>No unresolved rows remain in this analysis window.</p></div><div class="empty-state">Everything in the selected slice resolved successfully.</div></section>
+      <section class="panel"><details class="metadata-panel"><summary>Run Metadata</summary><pre>{
+  &quot;attempt_rows&quot;: 1,
+  &quot;group_by&quot;: [
+    &quot;solver_id&quot;
+  ],
+  &quot;input_root&quot;: &quot;/home/david/projects/oss_repogauge/out/run-codex-only/repogauge-cli-codex-only&quot;,
+  &quot;instance_result_rows&quot;: 1,
+  &quot;router_training_rows&quot;: 1,
+  &quot;run_root&quot;: &quot;/home/david/projects/oss_repogauge/out/run-codex-only/repogauge-cli-codex-only&quot;,
+  &quot;task_feature_version&quot;: &quot;task-features-v1&quot;
+}</pre></details></section>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const parseValue = (raw) => {
+        if (raw === undefined || raw === null || raw === "") return Number.NEGATIVE_INFINITY;
+        const numeric = Number(raw);
+        return Number.isNaN(numeric) ? raw.toString().toLowerCase() : numeric;
+      };
+      document.querySelectorAll(".sort-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          const table = document.getElementById(button.dataset.table);
+          if (!table) return;
+          const tbody = table.querySelector("tbody");
+          if (!tbody) return;
+          const key = button.dataset.key;
+          const current = button.dataset.direction === "asc" ? "asc" : "desc";
+          const nextDirection = current === "asc" ? "desc" : "asc";
+          document
+            .querySelectorAll(`.sort-button[data-table="${button.dataset.table}"]`)
+            .forEach((peer) => (peer.dataset.direction = ""));
+          button.dataset.direction = nextDirection;
+          const rows = Array.from(tbody.querySelectorAll("tr"));
+          rows.sort((left, right) => {
+            const leftCell = left.querySelector(`td[data-key="${key}"]`);
+            const rightCell = right.querySelector(`td[data-key="${key}"]`);
+            const leftValue = parseValue(leftCell?.dataset.sortValue);
+            const rightValue = parseValue(rightCell?.dataset.sortValue);
+            if (leftValue < rightValue) return nextDirection === "asc" ? -1 : 1;
+            if (leftValue > rightValue) return nextDirection === "asc" ? 1 : -1;
+            return 0;
+          });
+          rows.forEach((row) => tbody.appendChild(row));
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
+
