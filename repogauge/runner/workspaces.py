@@ -47,6 +47,7 @@ class AttemptWorkspace:
     patch_stats_path: Path
     benchmark_agents_path: Path
     codex_home_root: Path
+    claude_home_root: Path
 
 
 def _coerce_dict(value: Any) -> dict[str, Any]:
@@ -118,6 +119,15 @@ def _prepare_codex_home(codex_home_root: Path) -> None:
             shutil.copy2(source, config_root / name)
 
 
+def _prepare_claude_home(claude_home_root: Path) -> None:
+    config_root = claude_home_root / ".claude"
+    config_root.mkdir(parents=True, exist_ok=True)
+
+    source = Path.home() / ".claude" / ".credentials.json"
+    if source.exists():
+        shutil.copy2(source, config_root / ".credentials.json")
+
+
 @contextmanager
 def prepare_attempt_workspace(
     *,
@@ -152,6 +162,7 @@ def prepare_attempt_workspace(
     patch_stats_path = attempt_root / "patch_stats.json"
     benchmark_agents_path = workspace_root / _BENCHMARK_AGENTS_FILENAME
     codex_home_root = attempt_root / _CODEX_HOME_DIRNAME
+    claude_home_root = attempt_root / "claude-home"
 
     _write_instruction_pack(
         path=instruction_pack_path,
@@ -168,6 +179,7 @@ def prepare_attempt_workspace(
     ) as worktree:
         _write_benchmark_agents(worktree)
         _prepare_codex_home(codex_home_root)
+        _prepare_claude_home(claude_home_root)
         attempt = AttemptWorkspace(
             attempt_id=attempt_id,
             instance_id=instance_id,
@@ -181,10 +193,13 @@ def prepare_attempt_workspace(
             patch_stats_path=patch_stats_path,
             benchmark_agents_path=benchmark_agents_path,
             codex_home_root=codex_home_root,
+            claude_home_root=claude_home_root,
         )
         yield attempt
 
     if codex_home_root.exists():
         shutil.rmtree(codex_home_root, ignore_errors=True)
+    if claude_home_root.exists():
+        shutil.rmtree(claude_home_root, ignore_errors=True)
     if workspace_root.exists():
         shutil.rmtree(workspace_root, ignore_errors=True)

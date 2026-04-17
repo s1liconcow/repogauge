@@ -23,6 +23,7 @@ from typing import Any, Mapping
 
 from repogauge.exec import run_command
 
+from .container_exec import WorkspaceContainerError, run_solver_command_in_container
 from .pricing import estimate_public_api_cost_usd
 from .scheduler import (
     SolverAdapter,
@@ -1060,6 +1061,14 @@ def _coerce_cli_command(config: Mapping[str, Any]) -> _CLIAdapterConfig:
     raise SolverAdapterError("provider.command must be a string or list")
 
 
+def _codex_cli_env(home_root: Path) -> dict[str, str]:
+    command_env = dict(os.environ)
+    command_env["HOME"] = str(home_root)
+    command_env["XDG_CONFIG_HOME"] = str(home_root / ".config")
+    command_env["CODEX_HOME"] = str(home_root / ".codex")
+    return command_env
+
+
 class CodexCLIAdapter(_BaseConcreteSolverAdapter):
     """Codex CLI adapter driven via non-interactive JSON output."""
 
@@ -1075,6 +1084,8 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         provider_id: str,
         provider_config: Mapping[str, Any] | None,
         behavior: Mapping[str, Any] | None = None,
+        containerized: bool = False,
+        container_host: str | None = None,
     ) -> None:
         super().__init__(
             solver_id=solver_id,
@@ -1091,6 +1102,15 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         config = _coerce_mapping(provider_config, field_name="provider_config")
         resolved = _coerce_cli_command(config)
         self.command = [resolved.command, *resolved.cli_args]
+        self.containerized = bool(containerized)
+        self.container_host = container_host
+        self.image_override = _coerce_text(
+            config.get("image"),
+            field_name="provider.image",
+            default="",
+        )
+        if not self.image_override:
+            self.image_override = None
 
     def requires_workspace(self) -> bool:
         return True
@@ -1119,22 +1139,55 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             ]
         )
         if request.workspace_path is not None:
-            command.extend(["--cd", str(request.workspace_path)])
+            command.extend(
+                ["--cd", "/testbed" if self.containerized else str(request.workspace_path)]
+            )
         command.extend(["--model", self.model])
-        command_env = None
-        if request.workspace_path is not None:
-            codex_home_root = request.workspace_path.parent / "codex-home"
-            command_env = dict(os.environ)
-            command_env["HOME"] = str(codex_home_root)
-            command_env["XDG_CONFIG_HOME"] = str(codex_home_root / ".config")
-            command_env["CODEX_HOME"] = str(codex_home_root / ".codex")
-        command_result = run_command(
-            command,
-            cwd=str(request.workspace_path) if request.workspace_path else None,
-            env=command_env,
-            input_text=prompt,
-            timeout_seconds=self.timeout_seconds,
+        codex_home_root = (
+            request.workspace_path.parent / "codex-home"
+            if request.workspace_path is not None
+            else None
         )
+        command_env = (
+            _codex_cli_env(codex_home_root)
+            if codex_home_root is not None
+            else None
+        )
+        try:
+            if self.containerized and request.workspace_path is not None:
+                command_result = run_solver_command_in_container(
+                    attempt_id=request.attempt_id,
+                    workspace_path=request.workspace_path,
+                    instance_row=instance_row,
+                    command=command,
+                    prompt=prompt,
+                    timeout_seconds=self.timeout_seconds,
+                    container_host=self.container_host,
+                    image_override=self.image_override,
+                    environment=command_env,
+                )
+            else:
+                command_result = run_command(
+                    command,
+                    cwd=str(request.workspace_path) if request.workspace_path else None,
+                    env=command_env,
+                    input_text=prompt,
+                    timeout_seconds=self.timeout_seconds,
+                )
+        except WorkspaceContainerError as exc:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output="",
+                stderr_output=str(exc),
+                exit_reason=str(exc),
+                usage_source="",
+                cost_source="",
+                usage={},
+                cost={},
+                metadata={"containerized": True},
+            )
         usage = {}
         cost = {}
         usage_source = ""
@@ -1234,18 +1287,31 @@ def _claude_cli_child_env() -> dict[str, str] | None:
     the child environment so the CLI uses that login instead of the env key.
     Otherwise leave the env untouched so the API-key fallback still works.
     """
-    credentials = Path.home() / ".claude" / ".credentials.json"
-    if not credentials.exists():
-        return None
+    return _claude_cli_child_env_for_home(Path.home())
+
+
+def _claude_cli_child_env_for_home(home_root: Path) -> dict[str, str] | None:
+    credentials = home_root / ".claude" / ".credentials.json"
     has_key = "ANTHROPIC_API_KEY" in os.environ
     has_token = "ANTHROPIC_AUTH_TOKEN" in os.environ
+    if not credentials.exists():
+        if home_root == Path.home():
+            return None
+        command_env = dict(os.environ)
+        command_env["HOME"] = str(home_root)
+        return command_env
     if not (has_key or has_token):
-        return None
+        if home_root == Path.home():
+            return None
+        command_env = dict(os.environ)
+        command_env["HOME"] = str(home_root)
+        return command_env
     scrubbed = {
         k: v
         for k, v in os.environ.items()
         if k not in {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
     }
+    scrubbed["HOME"] = str(home_root)
     return scrubbed
 
 
@@ -1263,6 +1329,8 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
         provider_id: str,
         provider_config: Mapping[str, Any] | None,
         behavior: Mapping[str, Any] | None = None,
+        containerized: bool = False,
+        container_host: str | None = None,
     ) -> None:
         super().__init__(
             solver_id=solver_id,
@@ -1279,6 +1347,15 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
         config = _coerce_mapping(provider_config, field_name="provider_config")
         resolved = _coerce_cli_command(config)
         self.command = [resolved.command, *resolved.cli_args]
+        self.containerized = bool(containerized)
+        self.container_host = container_host
+        self.image_override = _coerce_text(
+            config.get("image"),
+            field_name="provider.image",
+            default="",
+        )
+        if not self.image_override:
+            self.image_override = None
 
     def requires_workspace(self) -> bool:
         return True
@@ -1303,14 +1380,47 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
                 "--dangerously-skip-permissions",
             ]
         )
-        command_env = _claude_cli_child_env()
-        command_result = run_command(
-            command,
-            cwd=str(request.workspace_path) if request.workspace_path else None,
-            env=command_env,
-            input_text=prompt,
-            timeout_seconds=self.timeout_seconds,
+        claude_home_root = (
+            request.workspace_path.parent / "claude-home"
+            if request.workspace_path is not None
+            else Path.home()
         )
+        command_env = _claude_cli_child_env_for_home(claude_home_root)
+        try:
+            if self.containerized and request.workspace_path is not None:
+                command_result = run_solver_command_in_container(
+                    attempt_id=request.attempt_id,
+                    workspace_path=request.workspace_path,
+                    instance_row=instance_row,
+                    command=command,
+                    prompt=prompt,
+                    timeout_seconds=self.timeout_seconds,
+                    container_host=self.container_host,
+                    image_override=self.image_override,
+                    environment=command_env,
+                )
+            else:
+                command_result = run_command(
+                    command,
+                    cwd=str(request.workspace_path) if request.workspace_path else None,
+                    env=command_env,
+                    input_text=prompt,
+                    timeout_seconds=self.timeout_seconds,
+                )
+        except WorkspaceContainerError as exc:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output="",
+                stderr_output=str(exc),
+                exit_reason=str(exc),
+                usage_source="",
+                cost_source="",
+                usage={},
+                cost={},
+                metadata={"containerized": True},
+            )
         output = command_result.stdout
         telemetry_events: list[dict[str, Any]] = []
         usage: Mapping[str, Any] = {}
@@ -1409,6 +1519,8 @@ def build_solver_adapters(
     *,
     solvers: tuple[MatrixSolver, ...],
     providers: tuple[Any, ...],
+    containerized_workspace_solvers: bool = False,
+    container_host: str | None = None,
 ) -> dict[str, SolverAdapter]:
     if not solvers:
         return {}
@@ -1455,6 +1567,8 @@ def build_solver_adapters(
                 provider_id=solver.provider_id,
                 provider_config=provider_config,
                 behavior=behavior,
+                containerized=containerized_workspace_solvers,
+                container_host=container_host,
             )
         elif adapter_name == SOLVER_ADAPTER_CLAUDE_CLI:
             adapter = ClaudeCLIAdapter(
@@ -1462,6 +1576,8 @@ def build_solver_adapters(
                 provider_id=solver.provider_id,
                 provider_config=provider_config,
                 behavior=behavior,
+                containerized=containerized_workspace_solvers,
+                container_host=container_host,
             )
         elif adapter_name == SOLVER_ADAPTER_OPEN_CODEX_SERVER:
             adapter = OpenCodeServerAdapter(

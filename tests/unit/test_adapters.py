@@ -13,6 +13,7 @@ from repogauge.runner.adapters import (
     OpenAIResponsesAdapter,
     MockSolverAdapter,
     SolverAdapterError,
+    _claude_cli_child_env_for_home,
     build_solver_adapters,
 )
 from repogauge.runner.matrix import MatrixProvider, MatrixSolver
@@ -542,6 +543,54 @@ class TestAdapters(unittest.TestCase):
             Path(workspace).parent / "codex-home" / ".codex"
         )
 
+    def test_codex_cli_adapter_uses_container_execution_when_enabled(self) -> None:
+        provider = MatrixProvider(
+            provider_id="codex",
+            kind="codex_cli",
+            config={"command": "codex", "image": "ghcr.io/example/codex:latest"},
+            redacted_config={},
+            raw={},
+        )
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+            containerized=True,
+            container_host="unix:///tmp/podman.sock",
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            request = adapter.prepare_request(
+                job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+                attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+                attempt_index=1,
+                instance_row={
+                    "instance_id": "repo__sample-1",
+                    "repo": "repo",
+                    "base_commit": "abc123",
+                    "problem_statement": "fix bug",
+                },
+                workspace_path=Path(workspace),
+            )
+            command_result = CommandResult(
+                command=("codex",),
+                returncode=0,
+                stdout='{"message":{"content":"diff --git a/x b/x\\n+ok"}}\n',
+                stderr="",
+            )
+            with mock.patch(
+                "repogauge.runner.adapters.run_solver_command_in_container",
+                return_value=command_result,
+            ) as mock_container_exec:
+                adapter.execute_attempt(request)
+
+        kwargs = mock_container_exec.call_args.kwargs
+        command = kwargs["command"]
+        assert command[command.index("--cd") + 1] == "/testbed"
+        assert kwargs["container_host"] == "unix:///tmp/podman.sock"
+        assert kwargs["image_override"] == "ghcr.io/example/codex:latest"
+        assert kwargs["environment"]["HOME"] == str(Path(workspace).parent / "codex-home")
+
     def test_codex_cli_finalize_output_prefers_model_patch(self) -> None:
         provider = _provider_for_command("codex")
         adapter = CodexCLIAdapter(
@@ -793,6 +842,44 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(command[command.index("--model") + 1], "claude-sonnet-4-6")
         self.assertEqual(kwargs["cwd"], workspace)
 
+    def test_claude_cli_adapter_uses_container_execution_when_enabled(self) -> None:
+        provider = MatrixProvider(
+            provider_id="claude",
+            kind="claude_cli",
+            config={"command": "claude", "image": "ghcr.io/example/claude:latest"},
+            redacted_config={},
+            raw={},
+        )
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+            containerized=True,
+            container_host="unix:///tmp/podman.sock",
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            request = self._claude_request(adapter, workspace=Path(workspace))
+            command_result = CommandResult(
+                command=("claude",),
+                returncode=0,
+                stdout='{"type":"result","result":"diff --git a/x b/x\\n+ok"}\n',
+                stderr="",
+            )
+            with mock.patch(
+                "repogauge.runner.adapters.run_solver_command_in_container",
+                return_value=command_result,
+            ) as mock_container_exec:
+                adapter.execute_attempt(request)
+
+        kwargs = mock_container_exec.call_args.kwargs
+        self.assertEqual(kwargs["container_host"], "unix:///tmp/podman.sock")
+        self.assertEqual(kwargs["image_override"], "ghcr.io/example/claude:latest")
+        self.assertEqual(
+            kwargs["environment"]["HOME"],
+            str(Path(workspace).parent / "claude-home"),
+        )
+
     def test_claude_cli_adapter_inherits_env_without_local_credentials(
         self,
     ) -> None:
@@ -869,6 +956,26 @@ class TestAdapters(unittest.TestCase):
         self.assertNotIn("ANTHROPIC_API_KEY", env)
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
         self.assertEqual(env["HOME"], fake_home)
+
+    def test_claude_cli_child_env_for_home_scrubs_keys_for_isolated_home(self) -> None:
+        with tempfile.TemporaryDirectory() as fake_home:
+            claude_dir = Path(fake_home) / ".claude"
+            claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}", encoding="utf-8")
+            with mock.patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "sk-env",
+                    "ANTHROPIC_AUTH_TOKEN": "tok-env",
+                },
+                clear=False,
+            ):
+                env = _claude_cli_child_env_for_home(Path(fake_home))
+
+        assert env is not None
+        assert env["HOME"] == fake_home
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "ANTHROPIC_AUTH_TOKEN" not in env
 
     def test_claude_cli_adapter_requires_command(self) -> None:
         with self.assertRaises(SolverAdapterError):

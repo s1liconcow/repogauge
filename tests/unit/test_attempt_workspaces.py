@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -70,11 +71,45 @@ def test_prepare_attempt_workspace_is_isolated_and_persists_artifacts(
             encoding="utf-8"
         )
         assert codex_config == "notify = []\n"
+        assert attempt.claude_home_root.exists()
+        assert (attempt.claude_home_root / ".claude").is_dir()
 
     assert not (attempt.workspace_path).exists()
     assert attempt.attempt_root.exists()
     assert attempt.instruction_pack_path.exists()
     assert not attempt.codex_home_root.exists()
+    assert not attempt.claude_home_root.exists()
+
+
+def test_prepare_attempt_workspace_copies_claude_credentials_when_available(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _create_repo(tmp_path)
+    row = _attempt_row(commit)
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    (fake_home / ".claude" / ".credentials.json").write_text(
+        '{"access_token":"token"}\n', encoding="utf-8"
+    )
+
+    original_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(fake_home)
+    try:
+        with prepare_attempt_workspace(
+            repo_root=repo,
+            instance_row=row,
+            attempt_id="att-claude-creds",
+            solver_id="solver-a",
+            workspaces_root=tmp_path / "workspaces",
+        ) as attempt:
+            copied = attempt.claude_home_root / ".claude" / ".credentials.json"
+            assert copied.read_text(encoding="utf-8") == '{"access_token":"token"}\n'
+    finally:
+        if original_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = original_home
 
 
 def test_prepare_attempt_workspace_overrides_repo_agents_file(tmp_path: Path) -> None:

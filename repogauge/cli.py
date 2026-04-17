@@ -51,6 +51,10 @@ from repogauge.runner.scheduler import (
     SolverSchedulerConfig,
     SolverSchedulerError,
 )
+from repogauge.runner.solvers import (
+    SOLVER_ADAPTER_CLAUDE_CLI,
+    SOLVER_ADAPTER_CODEX_CLI,
+)
 from repogauge.runner.planner import (
     RunManifest,
     plan_jobs,
@@ -192,6 +196,16 @@ def _build_parser() -> argparse.ArgumentParser:
             cmd.add_argument(
                 "--dataset",
                 help="Dataset path override (defaults to matrix.yaml dataset.path).",
+            )
+            cmd.add_argument(
+                "--container-runtime",
+                choices=["docker", "podman"],
+                default="podman",
+                help="Container runtime backing workspace solver execution.",
+            )
+            cmd.add_argument(
+                "--container-host",
+                help="Docker-compatible socket/host override, for example unix:///tmp/podman.sock.",
             )
         if name == "analyze":
             cmd.add_argument(
@@ -2194,10 +2208,89 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
             write_run_manifest(run_manifest, run_manifest_out)
             dataset_rows = _load_dataset_rows(Path(matrix.dataset.path))
-            adapters = build_solver_adapters(
-                solvers=matrix.solvers,
-                providers=matrix.providers,
+            provider_by_id = {
+                provider.provider_id: provider for provider in matrix.providers
+            }
+            workspace_cli_adapters = {
+                SOLVER_ADAPTER_CODEX_CLI,
+                SOLVER_ADAPTER_CLAUDE_CLI,
+            }
+            containerized_workspace_solvers = any(
+                solver.adapter in workspace_cli_adapters for solver in matrix.solvers
             )
+            default_dataset_images_required = any(
+                solver.adapter in workspace_cli_adapters
+                and not str(
+                    provider_by_id[solver.provider_id].config.get("image", "")
+                ).strip()
+                for solver in matrix.solvers
+            )
+
+            adapter_path: Path | None = None
+            dataset_path = Path(matrix.dataset.path).resolve()
+            expected_repo = _dataset_repo_hint(dataset_path)
+            search_roots: list[Path] = [Path(namespace.path).resolve(), dataset_path]
+            if dataset_path.is_file():
+                search_roots.append(dataset_path.parent)
+            search_roots.extend(dataset_path.parents[:3])
+            adapter_path = _discover_harness_adapter_for_repo(
+                search_roots, expected_repo=expected_repo
+            )
+
+            if adapter_path is not None:
+                from repogauge.runner.judge import (
+                    _adapter_context,
+                    _load_adapter,
+                    _register_adapter_maps,
+                )
+
+                print(f"repogauge run: adapter={adapter_path}", file=sys.stderr)
+                _, adapter_module = _load_adapter(adapter_path)
+                _register_adapter_maps(_adapter_context(adapter_module))
+
+            resolved_container_host: str | None = None
+            runtime_context = None
+            if containerized_workspace_solvers:
+                from repogauge.runner.judge import _ensure_container_runtime
+
+                runtime_context = _ensure_container_runtime(
+                    container_runtime=getattr(namespace, "container_runtime", "podman"),
+                    container_host=getattr(namespace, "container_host", None),
+                )
+
+            if runtime_context is not None:
+                with runtime_context as resolved_container_host:
+                    if default_dataset_images_required and dataset_rows:
+                        from repogauge.runner.judge import _temporary_environment
+                        import docker as docker_module  # type: ignore[import]
+                        from swebench.harness.docker_build import build_env_images
+
+                        env_overrides = {}
+                        if resolved_container_host:
+                            env_overrides["DOCKER_HOST"] = resolved_container_host
+                        with _temporary_environment(env_overrides):
+                            client = docker_module.from_env()
+                            build_env_images(
+                                client,
+                                dataset_rows,
+                                force_rebuild=False,
+                                max_workers=4,
+                                namespace=None,
+                                instance_image_tag="latest",
+                                env_image_tag="latest",
+                            )
+
+                    adapters = build_solver_adapters(
+                        solvers=matrix.solvers,
+                        providers=matrix.providers,
+                        containerized_workspace_solvers=True,
+                        container_host=resolved_container_host,
+                    )
+            else:
+                adapters = build_solver_adapters(
+                    solvers=matrix.solvers,
+                    providers=matrix.providers,
+                )
             needs_workspace = any(
                 adapter.requires_workspace() for adapter in adapters.values()
             )
@@ -2253,12 +2346,19 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.artifact_paths["attempts_parquet"] = str(attempts_parquet_out)
             manifest.artifact_paths["attempt_logs"] = str(attempt_logs_root)
             manifest.artifact_paths["run_summary"] = str(run_summary_out)
+            if adapter_path is not None:
+                manifest.artifact_paths["adapter"] = str(adapter_path)
             manifest.finish(
                 status="succeeded",
                 metadata={
                     "reason": "run_complete",
                     "run_id": matrix.run_id,
                     "job_count": len(jobs),
+                    "container_runtime": (
+                        getattr(namespace, "container_runtime", "podman")
+                        if containerized_workspace_solvers
+                        else None
+                    ),
                 },
             )
             manifest.write(manifest_path)

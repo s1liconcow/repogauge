@@ -1,11 +1,13 @@
 import unittest
 
 import json
+from contextlib import contextmanager
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
 import yaml
 from repogauge.runner.judge import HarnessRunSummary
+from repogauge.runner.scheduler import SolverJobProgress, SolverScheduleResult
 
 from repogauge.cli import _build_parser
 from repogauge.cli import main
@@ -1027,6 +1029,99 @@ solvers:
             result = main(["run", str(matrix_path), "--out", str(out)])
             self.assertEqual(result, 1)
             self.assertFalse((out / "matrix").exists())
+
+    def test_run_threads_container_runtime_flags_to_workspace_cli_solvers(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            dataset_path = root / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "repo": "repo",
+                        "base_commit": "abc",
+                        "problem_statement": "fix foo",
+                        "version": "1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "test_patch": "",
+                        "FAIL_TO_PASS": [],
+                        "PASS_TO_PASS": [],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            matrix_path = root / "matrix.yaml"
+            matrix_path.write_text(
+                """
+run_id: unit-run
+dataset:
+  path: dataset.jsonl
+providers:
+  codex:
+    kind: codex_cli
+    command: codex
+    image: ghcr.io/example/codex:latest
+solvers:
+  - id: solver-a
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.4
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            @contextmanager
+            def fake_runtime(*, container_runtime: str, container_host: str | None):
+                self.assertEqual(container_runtime, "docker")
+                self.assertEqual(container_host, "unix:///tmp/docker.sock")
+                yield "unix:///tmp/docker.sock"
+
+            fake_adapter = unittest.mock.Mock()
+            fake_adapter.requires_workspace.return_value = False
+            fake_summary = SolverScheduleResult(
+                jobs=(
+                    SolverJobProgress(
+                        job_id="job-1",
+                        final_status="succeeded",
+                        attempts=1,
+                        attempt_ids=("job-1:attempt-1",),
+                    ),
+                ),
+                completed_at="2026-01-01T00:00:00Z",
+            )
+
+            with (
+                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
+                patch("repogauge.cli.build_solver_adapters") as mock_build_adapters,
+                patch("repogauge.cli.SolverScheduler.run") as mock_run,
+            ):
+                mock_build_adapters.return_value = {"solver-a": fake_adapter}
+                mock_run.return_value = fake_summary
+                result = main(
+                    [
+                        "run",
+                        str(matrix_path),
+                        "--out",
+                        str(root / "out"),
+                        "--container-runtime",
+                        "docker",
+                        "--container-host",
+                        "unix:///tmp/docker.sock",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                mock_build_adapters.call_args.kwargs["containerized_workspace_solvers"],
+                True,
+            )
+            self.assertEqual(
+                mock_build_adapters.call_args.kwargs["container_host"],
+                "unix:///tmp/docker.sock",
+            )
 
     def test_analyze_generates_reports_and_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

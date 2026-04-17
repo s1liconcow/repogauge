@@ -59,7 +59,7 @@ The full pipeline is five commands: **export → eval → run → analyze → tr
 Each step writes artifacts under its own `--out` directory and the next step
 reads from there. `analyze` automatically evaluates solver patches with the
 SWE-bench harness, so you don't need a separate "eval predictions" step. You
-can stop anywhere — only `eval` and `analyze` need a container runtime
+can stop anywhere — `eval`, `run`, and `analyze` use a container runtime
 (Docker or Podman).
 
 ### 1. Mine candidate bugfix commits
@@ -115,7 +115,9 @@ uv run repogauge run examples/matrix.yaml \
 
 Executes each solver in your matrix against the dataset. Writes one row per
 attempt to `attempts.jsonl` with patch, tokens, cost, duration, and exit
-reason.
+reason. Workspace-backed CLI solvers run inside Docker/Podman as well, using
+the repo-specific SWE-bench image by default; set `providers.<id>.image` in
+the matrix when you want to override that image.
 
 `examples/matrix.yaml` uses the fully local `mock` provider (no credentials
 needed). For a real head-to-head comparison, see
@@ -253,6 +255,7 @@ Global flags on every command:
 - `--resume` — continue from existing outputs
 - `--dry-run` — validate without writing artifacts
 - `--llm-mode {off,local_only,allow_remote}` — remote-call policy
+- `--container-runtime {docker,podman}` — container backend for `eval`, `run`, and `analyze`
 
 ## Try it on RepoGauge itself
 
