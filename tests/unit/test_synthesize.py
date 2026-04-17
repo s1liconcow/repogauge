@@ -144,7 +144,9 @@ class TestProblemStatementSynthesis(unittest.TestCase):
         self.assertEqual(source, "linked_issue")
         self.assertEqual(source_ref, "123")
         self.assertIn("Primary regression", statement)
-        self.assertIn("Related GitHub issue #456: Secondary timeout regression", statement)
+        self.assertIn(
+            "Related GitHub issue #456: Secondary timeout regression", statement
+        )
 
 
 if __name__ == "__main__":
