@@ -895,6 +895,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             instance_row=instance_row,
         )
         command = list(self.command)
+        command.extend(["--ask-for-approval", "never"])
         command.append("exec")
         for key, value in self._BATCH_CONFIG_OVERRIDES:
             command.extend(["-c", f"{key}={value}"])
@@ -902,8 +903,6 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             [
                 "--json",
                 "--color",
-                "never",
-                "--ask-for-approval",
                 "never",
                 "--sandbox",
                 "danger-full-access",

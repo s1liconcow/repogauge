@@ -908,7 +908,7 @@ class SolverScheduler:
                         ended_at=None,
                     )
                     continue
-                job_status = SolverAttemptState.BUDGET_EXCEEDED
+                job_status = attempt_state
                 ended_at = _now_ts()
                 break
 
@@ -927,7 +927,7 @@ class SolverScheduler:
                     )
                     continue
 
-                job_status = SolverAttemptState.BUDGET_EXCEEDED
+                job_status = attempt_state
                 ended_at = _now_ts()
                 break
 

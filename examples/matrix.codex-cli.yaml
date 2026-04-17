@@ -25,11 +25,3 @@ solvers:
       template: concise
     tool_policy:
       safe: true
-  - id: codex-cli-spark
-    provider: codex
-    adapter: codex_cli
-    model: gpt-5.3-codex-spark
-    prompt_policy:
-      template: concise
-    tool_policy:
-      safe: true

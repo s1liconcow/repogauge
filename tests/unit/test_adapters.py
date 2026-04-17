@@ -337,11 +337,19 @@ class TestAdapters(unittest.TestCase):
 
         command = mock_run_command.call_args.args[0]
         self.assertEqual(
-            command[:6], ["codex", "exec", "-c", "notify=[]", "-c", "mcp_servers={}"]
+            command[:7],
+            [
+                "codex",
+                "--ask-for-approval",
+                "never",
+                "exec",
+                "-c",
+                "notify=[]",
+                "-c",
+            ],
         )
+        self.assertEqual(command[7], "mcp_servers={}")
         self.assertIn("--json", command)
-        self.assertIn("--ask-for-approval", command)
-        self.assertIn("never", command)
         self.assertIn("--sandbox", command)
         self.assertIn("danger-full-access", command)
         self.assertEqual(command[-2:], ["--model", "gpt-5.4"])

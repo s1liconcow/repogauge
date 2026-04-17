@@ -565,7 +565,7 @@ def test_scheduler_persists_per_attempt_stdout_and_stderr_logs(tmp_path: Path) -
 
     summary = scheduler.run([job], adapters={"solver-a": adapter})
 
-    assert summary.jobs[0].final_status == SolverAttemptState.BUDGET_EXCEEDED
+    assert summary.jobs[0].final_status == SolverAttemptState.FAILED
     attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
     assert len(attempt_rows) == 1
     stdout_log = Path(attempt_rows[0]["stdout_log_path"])
@@ -592,7 +592,7 @@ def test_scheduler_retries_are_budgeted_and_exhausted(tmp_path: Path) -> None:
 
     summary = scheduler.run([job], adapters={"solver-b": adapter})
 
-    assert summary.jobs[0].final_status == "budget_exceeded"
+    assert summary.jobs[0].final_status == SolverAttemptState.TIMED_OUT
     assert summary.jobs[0].attempts == 2
     assert len(_read_jsonl(tmp_path / "attempts.jsonl")) == 2
 
@@ -789,7 +789,7 @@ def test_scheduler_finalize_error_marks_attempt_as_failed(tmp_path: Path) -> Non
 
     summary = scheduler.run([job], adapters={"solver-a": adapter})
 
-    assert summary.jobs[0].final_status == SolverAttemptState.BUDGET_EXCEEDED
+    assert summary.jobs[0].final_status == SolverAttemptState.FAILED
     attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
     assert len(attempt_rows) == 1
     assert attempt_rows[0]["attempt_state"] == SolverAttemptState.FAILED
