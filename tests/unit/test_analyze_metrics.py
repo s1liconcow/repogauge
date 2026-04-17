@@ -382,6 +382,91 @@ def test_join_attempt_rows_estimates_claude_cost_from_tokens_when_missing() -> N
     assert joined[0]["attempt_cost_usd"] == pytest.approx(0.4781922, rel=1e-9)
 
 
+def test_join_attempt_rows_extracts_opencode_telemetry_usage_cost_and_tool_calls() -> (
+    None
+):
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "duration_ms": 100,
+            "metadata": {
+                "model": "fireworks-ai/accounts/fireworks/models/kimi-k2p5",
+                "telemetry": [
+                    {"type": "tool_use", "part": {"type": "tool", "tool": "read"}},
+                    {
+                        "type": "step_finish",
+                        "part": {
+                            "type": "step-finish",
+                            "tokens": {
+                                "input": 1000,
+                                "output": 100,
+                                "total": 1300,
+                                "cache": {"read": 200},
+                            },
+                            "cost": 0.0042,
+                        },
+                    },
+                ],
+            },
+        }
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True)
+    ]
+
+    joined = join_attempt_rows(attempts, instance_results)
+
+    assert joined[0]["attempt_cost_source"] == "explicit"
+    assert joined[0]["attempt_cost_usd"] == pytest.approx(0.0042, rel=1e-9)
+    assert joined[0]["tool_calls"] == 1
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+    )
+    assert summaries[0].total_input_tokens == 1200
+    assert summaries[0].total_output_tokens == 100
+    assert summaries[0].total_tokens == 1300
+    assert summaries[0].total_tool_calls == 1
+
+
+def test_join_attempt_rows_estimates_fireworks_cost_from_opencode_telemetry() -> None:
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "duration_ms": 100,
+            "metadata": {
+                "model": "fireworks-ai/accounts/fireworks/models/kimi-k2p5",
+                "telemetry": [
+                    {
+                        "type": "step_finish",
+                        "part": {
+                            "type": "step-finish",
+                            "tokens": {
+                                "input": 1000,
+                                "output": 100,
+                                "total": 1300,
+                                "cache": {"read": 200},
+                            },
+                        },
+                    }
+                ],
+            },
+        }
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True)
+    ]
+
+    joined = join_attempt_rows(attempts, instance_results)
+
+    assert joined[0]["attempt_cost_source"] == "estimated_from_tokens"
+    assert joined[0]["attempt_cost_usd"] == pytest.approx(0.00092, rel=1e-9)
+    assert joined[0]["tool_calls"] == 0
+
+
 def test_summarize_attempt_metrics_counts_claude_tool_use_blocks() -> None:
     attempts = [
         {
@@ -401,6 +486,34 @@ def test_summarize_attempt_metrics_counts_claude_tool_use_blocks() -> None:
                             ]
                         },
                     }
+                ]
+            },
+        }
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True)
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+    )
+
+    assert summaries[0].total_tool_calls == 2
+    assert summaries[0].avg_tool_calls_per_attempt == 2.0
+
+
+def test_summarize_attempt_metrics_counts_opencode_tool_use_events() -> None:
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "duration_ms": 100,
+            "cost": {"total_cost": 1.0},
+            "metadata": {
+                "telemetry": [
+                    {"type": "tool_use", "part": {"type": "tool", "tool": "read"}},
+                    {"type": "tool_use", "part": {"type": "tool", "tool": "bash"}},
                 ]
             },
         }

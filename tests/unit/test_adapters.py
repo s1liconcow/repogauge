@@ -758,6 +758,87 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.usage, {"input_tokens": 5})
         self.assertEqual(result.cost, {"total_cost": 0.5})
 
+    def test_opencode_cli_adapter_extracts_step_finish_telemetry(self) -> None:
+        provider = self._opencode_provider("/bin/echo")
+        adapter = OpenCodeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="opencode",
+            provider_config=provider.config,
+            behavior={"model": "fireworks-ai/accounts/fireworks/models/kimi-k2p5"},
+        )
+        request = self._opencode_request(adapter)
+        output = "\n".join(
+            [
+                '{"type":"tool_use","part":{"type":"tool","tool":"read"}}',
+                (
+                    '{"type":"step_finish","part":{"type":"step-finish","tokens":'
+                    '{"input":1000,"output":100,"total":1300,"cache":{"read":200}},'
+                    '"cost":0.0042}}'
+                ),
+                '{"type":"tool_use","part":{"type":"tool","tool":"bash"}}',
+                '{"type":"message","message":{"content":"diff --git a/x b/x\\n+ok"}}',
+            ]
+        )
+        command_result = CommandResult(
+            command=["/bin/echo", "run", "--format", "json"],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.usage_source, "opencode_cli.event.step_finish.tokens")
+        self.assertEqual(result.cost_source, "opencode_cli.event.step_finish.cost")
+        self.assertEqual(
+            result.usage,
+            {
+                "input_tokens": 1200,
+                "output_tokens": 100,
+                "total_tokens": 1300,
+                "cached_input_tokens": 200,
+            },
+        )
+        self.assertEqual(result.cost, {"total_cost_usd": 0.0042})
+        self.assertEqual(result.metadata["tool_calls"], 2)
+
+    def test_opencode_cli_adapter_estimates_fireworks_cost_from_public_pricing(
+        self,
+    ) -> None:
+        provider = self._opencode_provider("/bin/echo")
+        adapter = OpenCodeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="opencode",
+            provider_config=provider.config,
+            behavior={"model": "fireworks-ai/accounts/fireworks/models/kimi-k2p5"},
+        )
+        request = self._opencode_request(adapter)
+        output = "\n".join(
+            [
+                (
+                    '{"type":"step_finish","part":{"type":"step-finish","tokens":'
+                    '{"input":1000,"output":100,"total":1300,"cache":{"read":200}}}}'
+                ),
+                '{"type":"message","message":{"content":"diff --git a/x b/x\\n+ok"}}',
+            ]
+        )
+        command_result = CommandResult(
+            command=["/bin/echo", "run", "--format", "json"],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.usage_source, "opencode_cli.event.step_finish.tokens")
+        self.assertEqual(result.cost_source, "public_api_pricing")
+        self.assertEqual(result.cost, {"total_cost_usd": 0.00092})
+
     def test_opencode_cli_adapter_uses_default_agent_and_workspace(self) -> None:
         provider = self._opencode_provider("opencode")
         adapter = OpenCodeCLIAdapter(

@@ -77,7 +77,39 @@ def _coerce_non_negative_float(value: Any) -> float:
 
 
 def _read_row_cost(row: Mapping[str, Any]) -> float | None:
-    return read_cost_usd(row.get("cost"))
+    direct_cost = read_cost_usd(row.get("cost"))
+    if direct_cost is not None:
+        return direct_cost
+
+    metadata = row.get("metadata")
+    if isinstance(metadata, Mapping):
+        metadata_cost = read_cost_usd(metadata.get("cost"))
+        if metadata_cost is not None:
+            return metadata_cost
+
+    telemetry = _telemetry_events(row)
+    if not telemetry:
+        return None
+    total_cost = 0.0
+    saw_cost = False
+    for event in telemetry:
+        part = event.get("part")
+        part_mapping = part if isinstance(part, Mapping) else {}
+        for candidate in (event, part_mapping):
+            mapped_cost = read_cost_usd(candidate.get("cost"))
+            if mapped_cost is not None and mapped_cost > 0:
+                total_cost += mapped_cost
+                saw_cost = True
+                break
+            try:
+                numeric_cost = max(0.0, float(candidate.get("cost")))
+            except (TypeError, ValueError):
+                continue
+            if numeric_cost > 0:
+                total_cost += numeric_cost
+                saw_cost = True
+                break
+    return total_cost if saw_cost else None
 
 
 def _normalize_model_name(value: Any) -> str:
@@ -140,7 +172,71 @@ def _safe_json_parse(value: str) -> Any:
 
 def _usage_mapping(row: Mapping[str, Any]) -> Mapping[str, Any]:
     usage = row.get("usage")
-    return usage if isinstance(usage, Mapping) else {}
+    if isinstance(usage, Mapping) and usage:
+        return usage
+
+    metadata = row.get("metadata")
+    if isinstance(metadata, Mapping):
+        metadata_usage = metadata.get("usage")
+        if isinstance(metadata_usage, Mapping) and metadata_usage:
+            return metadata_usage
+
+    telemetry = _telemetry_events(row)
+    if not telemetry:
+        return {}
+
+    uncached_input_tokens = 0
+    cached_input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    reasoning_tokens = 0
+    saw_tokens = False
+
+    for event in telemetry:
+        part = event.get("part")
+        part_mapping = part if isinstance(part, Mapping) else {}
+        for candidate in (event, part_mapping):
+            explicit_usage = candidate.get("usage")
+            if isinstance(explicit_usage, Mapping) and explicit_usage:
+                return explicit_usage
+
+        tokens = part_mapping.get("tokens")
+        if not isinstance(tokens, Mapping):
+            continue
+        saw_tokens = True
+        uncached_input_tokens += _int_from_candidates(tokens, ("input",)) or 0
+        output_tokens += _int_from_candidates(tokens, ("output",)) or 0
+        total_tokens += _int_from_candidates(tokens, ("total",)) or 0
+        reasoning_tokens += _int_from_candidates(tokens, ("reasoning",)) or 0
+        cache = tokens.get("cache")
+        if isinstance(cache, Mapping):
+            cached_input_tokens += _int_from_candidates(cache, ("read",)) or 0
+
+    if not saw_tokens:
+        return {}
+
+    usage = {
+        "input_tokens": uncached_input_tokens + cached_input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens
+        if total_tokens > 0
+        else uncached_input_tokens + cached_input_tokens + output_tokens,
+    }
+    if cached_input_tokens > 0:
+        usage["cached_input_tokens"] = cached_input_tokens
+    if reasoning_tokens > 0:
+        usage["reasoning_tokens"] = reasoning_tokens
+    return usage
+
+
+def _telemetry_events(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    metadata = row.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return []
+    telemetry = metadata.get("telemetry")
+    if not isinstance(telemetry, list):
+        return []
+    return [event for event in telemetry if isinstance(event, Mapping)]
 
 
 def _nested_mapping(mapping: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -234,7 +330,7 @@ def _read_tool_call_count_from_mapping(mapping: Mapping[str, Any]) -> int | None
 
 def _tool_call_count_in_event(payload: Mapping[str, Any]) -> int:
     payload_type = _coerce_str(payload.get("type"))
-    if payload_type in {"tool_call", "function_call"}:
+    if payload_type in {"tool_call", "function_call", "tool_use"}:
         return 1
 
     item = payload.get("item")
@@ -276,12 +372,10 @@ def _read_tool_call_count(row: Mapping[str, Any]) -> int:
         metadata_count = _read_tool_call_count_from_mapping(metadata)
         if metadata_count is not None:
             return metadata_count
-        telemetry = metadata.get("telemetry")
-        if isinstance(telemetry, list):
+        telemetry = _telemetry_events(row)
+        if telemetry:
             telemetry_count = sum(
-                _tool_call_count_in_event(event)
-                for event in telemetry
-                if isinstance(event, Mapping)
+                _tool_call_count_in_event(event) for event in telemetry
             )
             if telemetry_count:
                 return telemetry_count

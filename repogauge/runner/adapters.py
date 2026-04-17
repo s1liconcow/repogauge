@@ -24,7 +24,7 @@ from typing import Any, Mapping
 from repogauge.exec import run_command
 
 from .container_exec import WorkspaceContainerError, run_solver_command_in_container
-from .pricing import estimate_public_api_cost_usd
+from .pricing import estimate_public_api_cost_usd, read_cost_usd
 from .scheduler import (
     SolverAdapter,
     SolverAdapterRequest,
@@ -383,6 +383,104 @@ def _coerce_usage(value: Any) -> Mapping[str, Any]:
 
 def _coerce_cost(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _coerce_non_negative_int_soft(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+def _coerce_non_negative_float_soft(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return parsed if parsed > 0 else 0.0
+
+
+def _extract_opencode_cli_metrics(
+    events: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str, dict[str, Any], str, int]:
+    usage: dict[str, Any] = {}
+    usage_source = ""
+    cost: dict[str, Any] = {}
+    cost_source = ""
+    tool_calls = 0
+
+    uncached_input_tokens = 0
+    cached_input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    reasoning_tokens = 0
+    aggregated_cost = 0.0
+    saw_tokens = False
+    saw_cost = False
+
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        event_type = str(event.get("type") or "").strip().lower()
+        if event_type == "tool_use":
+            tool_calls += 1
+
+        part = event.get("part")
+        part_mapping = part if isinstance(part, Mapping) else {}
+
+        for candidate in (event, part_mapping):
+            explicit_usage = candidate.get("usage")
+            if isinstance(explicit_usage, Mapping):
+                usage = dict(explicit_usage)
+                usage_source = "opencode_cli.event.usage"
+            explicit_cost = _coerce_cost(candidate.get("cost"))
+            if explicit_cost:
+                cost = dict(explicit_cost)
+                cost_source = "opencode_cli.event.cost"
+
+        tokens = part_mapping.get("tokens")
+        if isinstance(tokens, Mapping):
+            saw_tokens = True
+            uncached_input_tokens += _coerce_non_negative_int_soft(tokens.get("input"))
+            output_tokens += _coerce_non_negative_int_soft(tokens.get("output"))
+            total_tokens += _coerce_non_negative_int_soft(tokens.get("total"))
+            reasoning_tokens += _coerce_non_negative_int_soft(tokens.get("reasoning"))
+            cache = tokens.get("cache")
+            if isinstance(cache, Mapping):
+                cached_input_tokens += _coerce_non_negative_int_soft(cache.get("read"))
+
+        if not cost:
+            numeric_cost = _coerce_non_negative_float_soft(part_mapping.get("cost"))
+            if numeric_cost > 0:
+                aggregated_cost += numeric_cost
+                saw_cost = True
+            elif isinstance(part_mapping.get("cost"), Mapping):
+                mapped_cost = read_cost_usd(part_mapping.get("cost"))
+                if mapped_cost is not None and mapped_cost > 0:
+                    aggregated_cost += mapped_cost
+                    saw_cost = True
+
+    if not usage and saw_tokens:
+        input_tokens = uncached_input_tokens + cached_input_tokens
+        usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens
+            if total_tokens > 0
+            else input_tokens + output_tokens,
+        }
+        if cached_input_tokens > 0:
+            usage["cached_input_tokens"] = cached_input_tokens
+        if reasoning_tokens > 0:
+            usage["reasoning_tokens"] = reasoning_tokens
+        usage_source = "opencode_cli.event.step_finish.tokens"
+
+    if not cost and saw_cost:
+        cost = {"total_cost_usd": aggregated_cost}
+        cost_source = "opencode_cli.event.step_finish.cost"
+
+    return usage, usage_source, cost, cost_source, tool_calls
 
 
 def _required_instance_fields(instance_row: Mapping[str, Any] | None) -> dict[str, str]:
@@ -1224,6 +1322,7 @@ class OpenCodeCLIAdapter(_BaseConcreteSolverAdapter):
         cost: dict[str, Any] = {}
         usage_source = ""
         cost_source = ""
+        tool_calls = 0
 
         if output.strip():
             for event in _parse_json_lines(output):
@@ -1243,6 +1342,20 @@ class OpenCodeCLIAdapter(_BaseConcreteSolverAdapter):
                         cost = dict(candidate["cost"])
                         cost_source = "opencode_cli.event.cost"
 
+        (
+            opencode_usage,
+            opencode_usage_source,
+            opencode_cost,
+            opencode_cost_source,
+            tool_calls,
+        ) = _extract_opencode_cli_metrics(telemetry_events)
+        if not usage and opencode_usage:
+            usage = opencode_usage
+            usage_source = opencode_usage_source
+        if not cost and opencode_cost:
+            cost = opencode_cost
+            cost_source = opencode_cost_source
+
         text = _extract_structured_output_text(output)
         cost, cost_source = _ensure_public_api_estimated_cost(
             model=self.model,
@@ -1256,6 +1369,8 @@ class OpenCodeCLIAdapter(_BaseConcreteSolverAdapter):
             "telemetry": telemetry_events,
             "agent": self.agent,
         }
+        if tool_calls > 0:
+            metadata["tool_calls"] = tool_calls
         if command_result.timed_out:
             return SolverAdapterResult(
                 attempt_id=request.attempt_id,

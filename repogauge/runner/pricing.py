@@ -3,6 +3,7 @@
 Pricing is based on the public API pricing pages as of 2026-04-17:
 - OpenAI: https://openai.com/api/pricing/
 - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
+- Fireworks: https://fireworks.ai/pricing
 
 When a CLI does not emit an explicit cost, RepoGauge falls back to these token
 rates so analysis can still report approximate spend. These estimates are best
@@ -73,6 +74,9 @@ MODEL_TOKEN_PRICING_USD_PER_MILLION: dict[str, dict[str, float]] = {
         "cache_write_1h": 2.00,
         "output": 5.00,
     },
+    # Fireworks standard pricing.
+    "kimi-k2p5": {"input": 0.60, "cached_input": 0.10, "output": 3.00},
+    "kimi-k2p5-turbo": {"input": 0.99, "cached_input": 0.16, "output": 4.94},
 }
 
 
@@ -83,6 +87,8 @@ _MODEL_ALIASES = {
     "claude-sonnet-4-6": "claude-sonnet-4.6",
     "claude-sonnet-4-5": "claude-sonnet-4.5",
     "claude-haiku-4-5": "claude-haiku-4.5",
+    "kimi-k2.5": "kimi-k2p5",
+    "kimi-k2.5-turbo": "kimi-k2p5-turbo",
 }
 
 
@@ -115,6 +121,19 @@ def _int_from_candidates(mapping: Mapping[str, Any], keys: tuple[str, ...]) -> i
 
 def normalize_model_name(value: Any) -> str:
     normalized = str(value or "").strip().lower().replace("_", "-")
+    candidates = [normalized]
+    if "/" in normalized:
+        candidates.append(normalized.rsplit("/", 1)[-1])
+    if "models/" in normalized:
+        candidates.append(normalized.split("models/", 1)[-1])
+    if "accounts/" in normalized:
+        candidates.append(normalized.split("accounts/", 1)[-1])
+
+    for candidate in candidates:
+        aliased = _MODEL_ALIASES.get(candidate, candidate)
+        if aliased in MODEL_TOKEN_PRICING_USD_PER_MILLION:
+            return aliased
+
     return _MODEL_ALIASES.get(normalized, normalized)
 
 
