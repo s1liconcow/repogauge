@@ -309,6 +309,73 @@ def test_run_harness_evaluation_writes_resolved_only_dataset_slice(
     ]
 
 
+def test_run_harness_evaluation_carries_solver_id_from_predictions(
+    tmp_path: Path,
+) -> None:
+    dataset_rows = [
+        {
+            "instance_id": "inst-a",
+            "patch": "diff --git a/x b/x\n+print('ok')",
+            "repo": "repo",
+            "version": "1",
+        }
+    ]
+    predictions_rows = [
+        {
+            "instance_id": "inst-a",
+            "model_name_or_path": "solver-x",
+            "model_patch": "diff-a",
+        }
+    ]
+
+    dataset_path = tmp_path / "dataset.jsonl"
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+        encoding="utf-8",
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in predictions_rows),
+        encoding="utf-8",
+    )
+
+    def fake_run_batch(*, batch_key: str, rows: list[tuple[dict, dict]], **kwargs):
+        instance_rows = [
+            _result_row_from_instance(dataset_row=rows[0][0], status="resolved")
+        ]
+        return JudgeBatchResult(
+            instance_rows=instance_rows,
+            metadata={"batch_key": batch_key},
+            batch_key=batch_key,
+        )
+
+    with patch("repogauge.runner.judge._run_batch") as mock_run_batch:
+        mock_run_batch.side_effect = fake_run_batch
+        run_harness_evaluation(
+            dataset_path=dataset_path,
+            predictions_path=predictions_path,
+            out_root=tmp_path,
+            adapter_path=None,
+            workers=1,
+            timeout_seconds=120,
+            gold_if_missing=False,
+            container_runtime="docker",
+            judge_config=JudgeSchedulerConfig(batch_size=32),
+        )
+
+    instance_results = [
+        json.loads(line)
+        for line in (tmp_path / "instance_results.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(instance_results) == 1
+    assert instance_results[0]["instance_id"] == "inst-a"
+    assert instance_results[0]["solver_id"] == "solver-x"
+    assert instance_results[0]["status"] == "resolved"
+    assert instance_results[0]["resolved"] is True
+
+
 def test_parse_harness_results_supports_swebench_4x_id_lists() -> None:
     dataset_rows = [
         _dataset_row(instance_id="inst-a", model="solver-x"),

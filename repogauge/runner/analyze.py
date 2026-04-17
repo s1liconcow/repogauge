@@ -45,6 +45,17 @@ class ResolutionMetrics:
     tool_calls_per_resolved_issue: float | None
 
 
+MODEL_TOKEN_PRICING_USD_PER_MILLION: dict[str, dict[str, float]] = {
+    # OpenAI standard pricing, captured from the public pricing pages on 2026-04-16.
+    "gpt-5.4": {"input": 2.50, "cached_input": 0.25, "output": 15.00},
+    "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.50},
+    "gpt-5.4-nano": {"input": 0.20, "cached_input": 0.02, "output": 1.25},
+    "gpt-5": {"input": 1.25, "cached_input": 0.125, "output": 10.00},
+    "gpt-5-mini": {"input": 0.25, "cached_input": 0.025, "output": 2.00},
+    "gpt-5-nano": {"input": 0.05, "cached_input": 0.005, "output": 0.40},
+}
+
+
 def _coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -91,6 +102,47 @@ def _read_row_cost(row: Mapping[str, Any]) -> float | None:
     return None
 
 
+def _normalize_model_name(value: Any) -> str:
+    return _coerce_str(value).strip().lower().replace("_", "-")
+
+
+def _read_model_name(row: Mapping[str, Any]) -> str:
+    direct = _normalize_model_name(
+        row.get("model") or row.get("model_name_or_path") or row.get("model_id")
+    )
+    if direct:
+        return direct
+    metadata = row.get("metadata")
+    if isinstance(metadata, Mapping):
+        metadata_model = _normalize_model_name(
+            metadata.get("model")
+            or metadata.get("model_name_or_path")
+            or metadata.get("model_id")
+        )
+        if metadata_model:
+            return metadata_model
+    return ""
+
+
+def _estimate_row_cost_from_tokens(row: Mapping[str, Any]) -> float | None:
+    model_name = _read_model_name(row)
+    pricing = MODEL_TOKEN_PRICING_USD_PER_MILLION.get(model_name)
+    if pricing is None:
+        return None
+
+    input_tokens, output_tokens, _ = _read_usage_tokens(row)
+    cached_input_tokens = min(input_tokens, _read_cached_input_tokens(row))
+    uncached_input_tokens = max(0, input_tokens - cached_input_tokens)
+    if input_tokens <= 0 and output_tokens <= 0:
+        return None
+
+    return (
+        (uncached_input_tokens * pricing["input"])
+        + (cached_input_tokens * pricing["cached_input"])
+        + (output_tokens * pricing["output"])
+    ) / 1_000_000
+
+
 def _read_group_value(row: Mapping[str, Any], field: str) -> str:
     if field in row:
         return _coerce_str(row.get(field))
@@ -123,6 +175,11 @@ def _safe_json_parse(value: str) -> Any:
 def _usage_mapping(row: Mapping[str, Any]) -> Mapping[str, Any]:
     usage = row.get("usage")
     return usage if isinstance(usage, Mapping) else {}
+
+
+def _nested_mapping(mapping: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = mapping.get(key)
+    return value if isinstance(value, Mapping) else {}
 
 
 def _int_from_candidates(
@@ -169,6 +226,26 @@ def _read_usage_tokens(row: Mapping[str, Any]) -> tuple[int, int, int]:
         total_tokens if total_tokens is not None else input_total + output_total
     )
     return input_total, output_total, combined_total
+
+
+def _read_cached_input_tokens(row: Mapping[str, Any]) -> int:
+    usage = _usage_mapping(row)
+    direct = _int_from_candidates(
+        usage,
+        (
+            "cached_input_tokens",
+            "input_cached_tokens",
+            "cached_prompt_tokens",
+        ),
+    )
+    if direct is not None:
+        return direct
+    for nested_key in ("input_tokens_details", "prompt_tokens_details"):
+        nested = _nested_mapping(usage, nested_key)
+        nested_value = _int_from_candidates(nested, ("cached_tokens",))
+        if nested_value is not None:
+            return nested_value
+    return 0
 
 
 def _read_tool_call_count_from_mapping(mapping: Mapping[str, Any]) -> int | None:
@@ -2358,7 +2435,15 @@ def join_attempt_rows(
                 "eval_metadata": eval_row.get("metadata", {}),
             }
         )
-        item["attempt_cost_usd"] = _read_row_cost(item)
+        explicit_cost = _read_row_cost(item)
+        if explicit_cost is not None:
+            item["attempt_cost_usd"] = explicit_cost
+            item["attempt_cost_source"] = "explicit"
+        else:
+            item["attempt_cost_usd"] = _estimate_row_cost_from_tokens(item)
+            item["attempt_cost_source"] = (
+                "estimated_from_tokens" if item["attempt_cost_usd"] is not None else ""
+            )
         item["instance_id"] = attempt_instance
         input_tokens, output_tokens, total_tokens = _read_usage_tokens(item)
         item["input_tokens"] = input_tokens

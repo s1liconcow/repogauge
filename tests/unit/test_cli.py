@@ -1086,7 +1086,9 @@ solvers:
                 (out_root / "analyze" / "manifest.json").read_text(encoding="utf-8")
             )
             paths = manifest["artifact_paths"]
-            self.assertEqual(Path(paths["analyze_attempts"]), run_root / "attempts.jsonl")
+            self.assertEqual(
+                Path(paths["analyze_attempts"]), run_root / "attempts.jsonl"
+            )
             self.assertEqual(
                 Path(paths["analyze_instance_results"]),
                 eval_root / "instance_results.jsonl",

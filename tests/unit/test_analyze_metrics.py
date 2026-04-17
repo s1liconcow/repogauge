@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from repogauge.runner.analyze import join_attempt_rows, summarize_attempt_metrics
 
 
@@ -253,3 +255,37 @@ def test_summarize_attempt_metrics_tracks_tokens_and_tool_calls() -> None:
     assert summary.avg_attempt_duration_ms == 175.0
     assert summary.p50_attempt_duration_ms == 250
     assert summary.p95_attempt_duration_ms == 250
+
+
+def test_join_attempt_rows_estimates_cost_from_tokens_when_explicit_cost_missing() -> (
+    None
+):
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "duration_ms": 100,
+            "usage": {
+                "input_tokens": 100_000,
+                "output_tokens": 5_000,
+                "cached_input_tokens": 20_000,
+            },
+            "metadata": {"model": "gpt-5.4-mini"},
+        }
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True)
+    ]
+
+    joined = join_attempt_rows(attempts, instance_results)
+
+    assert len(joined) == 1
+    assert joined[0]["attempt_cost_source"] == "estimated_from_tokens"
+    assert joined[0]["attempt_cost_usd"] == pytest.approx(0.084, rel=1e-9)
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+    )
+    assert summaries[0].total_cost_usd == pytest.approx(0.084, rel=1e-9)
+    assert summaries[0].cost_per_resolved_issue == pytest.approx(0.084, rel=1e-9)

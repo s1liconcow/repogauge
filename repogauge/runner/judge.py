@@ -392,6 +392,10 @@ def _augment_instance_rows_with_harness_logs(
         for row in prediction_rows
         if _coerce_text(row.get("instance_id"))
     }
+    _augment_instance_rows_with_prediction_solver_ids(
+        instance_rows=instance_rows,
+        prediction_rows=prediction_rows,
+    )
     for row in instance_rows:
         instance_id = _coerce_text(row.get("instance_id"))
         dataset_row = dataset_by_id.get(instance_id)
@@ -436,6 +440,28 @@ def _prepare_prediction_index(
             continue
         by_id[instance_id] = dict(prediction)
     return by_id
+
+
+def _augment_instance_rows_with_prediction_solver_ids(
+    *,
+    instance_rows: list[dict[str, Any]],
+    prediction_rows: list[Dict[str, Any]],
+) -> None:
+    prediction_by_id = _prepare_prediction_index(prediction_rows)
+    for row in instance_rows:
+        if _coerce_text(row.get("solver_id")):
+            continue
+        instance_id = _coerce_text(row.get("instance_id"))
+        if not instance_id:
+            continue
+        prediction_row = prediction_by_id.get(instance_id)
+        if prediction_row is None:
+            continue
+        solver_id = _coerce_text(
+            prediction_row.get("solver_id") or prediction_row.get("model_name_or_path")
+        )
+        if solver_id:
+            row["solver_id"] = solver_id
 
 
 BatchRows = list[tuple[Dict[str, Any], Dict[str, Any]]]
@@ -1207,6 +1233,11 @@ def run_harness_evaluation(
             )
             for row in dataset_rows
         ]
+
+    _augment_instance_rows_with_prediction_solver_ids(
+        instance_rows=instance_rows,
+        prediction_rows=predictions_rows,
+    )
 
     for row in instance_rows:
         existing_metadata = row.get("metadata")
