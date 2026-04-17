@@ -82,21 +82,27 @@ def _extract_unified_patch(raw: str) -> str:
         return ""
 
     def _extract_patch_fragment(text: str) -> str:
+        m = re.search(r"```(?:diff|patch)\r?\n(.*?)```", text, flags=re.S | re.I)
+        if m:
+            code = m.group(1).strip()
+            if "diff --git" in code:
+                return code if code.endswith("\n") else code + "\n"
+
         lines = text.splitlines()
         for index, line in enumerate(lines):
             if line.startswith("diff --git"):
-                patch_lines = "\n".join(lines[index:]).strip("\n")
+                patch_body: list[str] = []
+                for patch_line in lines[index:]:
+                    if patch_line.strip() == "```":
+                        break
+                    patch_body.append(patch_line)
+                patch_lines = "\n".join(patch_body).strip("\n")
                 if patch_lines:
                     return (
                         patch_lines
                         if patch_lines.endswith("\n")
                         else patch_lines + "\n"
                     )
-        m = re.search(r"```(?:diff|patch)\n(.*?)```", text, flags=re.S | re.I)
-        if m:
-            code = m.group(1).strip()
-            if "diff --git" in code:
-                return code if code.endswith("\n") else code + "\n"
         return ""
 
     patch = _extract_patch_fragment(normalized)

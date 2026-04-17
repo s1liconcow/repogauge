@@ -180,16 +180,6 @@ def _extract_patch_from_text(raw_output: str) -> str:
         if not stripped:
             return ""
 
-        for line_no, line in enumerate(stripped.splitlines()):
-            if line.startswith("diff --git "):
-                lines = "\n".join(stripped.splitlines()[line_no:])
-                normalized = lines.strip("\n")
-                if normalized:
-                    return (
-                        normalized if normalized.endswith("\n") else normalized + "\n"
-                    )
-                break
-
         fenced = re.search(
             r"```(?:diff|patch)\r?\n(.*?)```", stripped, flags=re.S | re.I
         )
@@ -198,6 +188,21 @@ def _extract_patch_from_text(raw_output: str) -> str:
             if "diff --git" in code:
                 normalized = code.strip("\n")
                 return normalized if normalized.endswith("\n") else normalized + "\n"
+
+        for line_no, line in enumerate(stripped.splitlines()):
+            if line.startswith("diff --git "):
+                patch_lines: list[str] = []
+                for patch_line in stripped.splitlines()[line_no:]:
+                    if patch_line.strip() == "```":
+                        break
+                    patch_lines.append(patch_line)
+                lines = "\n".join(patch_lines)
+                normalized = lines.strip("\n")
+                if normalized:
+                    return (
+                        normalized if normalized.endswith("\n") else normalized + "\n"
+                    )
+                break
 
         return ""
 

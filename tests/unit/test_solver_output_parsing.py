@@ -145,6 +145,41 @@ def test_codex_cli_adapter_extracts_fenced_diff_from_nested_jsonl_events() -> No
     assert not result.model_patch.startswith("f\\n")
 
 
+def test_codex_cli_adapter_strips_trailing_fence_after_diff_text() -> None:
+    adapter = CodexCLIAdapter(
+        solver_id="solver-a",
+        provider_id="codex",
+        provider_config=_provider_config(),
+        behavior={"model": "gpt-5.4"},
+    )
+    request = adapter.prepare_request(
+        job=_job("run-1:repo__sample-1:solver-a:0"),
+        attempt_id="run-1:repo__sample-1:solver-a:0:attempt-3",
+        attempt_index=1,
+        instance_row=_instance_row(),
+    )
+    output = (
+        "diff --git a/src.py b/src.py\n"
+        "--- a/src.py\n"
+        "+++ b/src.py\n"
+        "@@ -1 +1 @@\n"
+        "-print('before')\n"
+        "+print('after')\n"
+        "```\n"
+    )
+    with mock.patch(
+        "repogauge.runner.adapters.run_command",
+        return_value=CommandResult(
+            command=["/bin/echo"], returncode=0, stdout=output, stderr=""
+        ),
+    ):
+        result = adapter.execute_attempt(request)
+
+    assert result.status == SolverAttemptState.SUCCEEDED
+    assert result.model_patch.endswith("+print('after')\n")
+    assert "```" not in result.model_patch
+
+
 def test_finalize_output_recovers_nested_edit_plan_from_raw_jsonl() -> None:
     adapter = CodexCLIAdapter(
         solver_id="solver-a",
@@ -219,6 +254,41 @@ def test_normalize_solver_output_recovers_nested_diff_from_jsonl(
         result = normalize_solver_output(raw_output, attempt=attempt)
 
     assert result.patch.startswith("diff --git a/src.py b/src.py\n")
+
+
+def test_normalize_solver_output_strips_trailing_fence_after_diff_text(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _create_repo(tmp_path)
+    row = {
+        "instance_id": "repo__sample-1",
+        "repo": "demo/repo",
+        "base_commit": commit,
+        "problem_statement": "Update the log line.",
+        "version": "1",
+    }
+    raw_output = (
+        "diff --git a/src.py b/src.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/src.py\n"
+        "+++ b/src.py\n"
+        "@@ -1 +1 @@\n"
+        "-print('before')\n"
+        "+print('after')\n"
+        "```\n"
+    )
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-plain-diff-trailing-fence",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        result = normalize_solver_output(raw_output, attempt=attempt)
+
+    assert result.patch.startswith("diff --git a/src.py b/src.py\n")
+    assert "```" not in result.patch
 
 
 def test_normalize_solver_output_recovers_nested_edit_plan_from_jsonl(
