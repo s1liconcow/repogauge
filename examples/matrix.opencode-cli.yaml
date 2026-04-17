@@ -1,0 +1,21 @@
+run_id: repogauge-opencode-cli
+dataset:
+  path: ../out/eval/dataset.resolved.jsonl
+providers:
+  opencode:
+    kind: opencode_cli
+    command: opencode
+execution:
+  repeats: 1
+  seed: 13
+solvers:
+  - id: opencode-kimi-k2p5
+    provider: opencode
+    adapter: opencode_cli
+    model: fireworks-ai/accounts/fireworks/models/kimi-k2p5
+    agent: build
+    timeout_seconds: 300
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
