@@ -63,9 +63,7 @@ def test_prepare_attempt_workspace_is_isolated_and_persists_artifacts(
         assert pack["base_commit"] == commit
         assert pack["solver_id"] == "solver-a"
         assert pack["instance_id"] == row["instance_id"]
-        agents_text = (attempt.workspace_path / "AGENTS.md").read_text(
-            encoding="utf-8"
-        )
+        agents_text = (attempt.workspace_path / "AGENTS.md").read_text(encoding="utf-8")
         assert "disposable benchmark attempt sandbox" in agents_text
         assert "Do not run repo triage workflows" in agents_text
         codex_config = (attempt.codex_home_root / ".codex" / "config.toml").read_text(
@@ -94,11 +92,11 @@ def test_prepare_attempt_workspace_overrides_repo_agents_file(tmp_path: Path) ->
         solver_id="solver-a",
         workspaces_root=tmp_path / "workspaces",
     ) as attempt:
-        agents_text = (attempt.workspace_path / "AGENTS.md").read_text(
-            encoding="utf-8"
-        )
+        agents_text = (attempt.workspace_path / "AGENTS.md").read_text(encoding="utf-8")
         assert agents_text != "repo-specific instructions\n"
-        assert "Return the patch/output requested by the benchmark harness." in agents_text
+        assert (
+            "Return the patch/output requested by the benchmark harness." in agents_text
+        )
 
 
 def test_normalize_solver_output_from_diff(tmp_path: Path) -> None:
