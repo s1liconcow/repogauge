@@ -281,6 +281,26 @@ And an end-to-end pytest that validates every artifact at every stage:
 uv run python -m pytest tests/e2e/test_self_gauge.py -v
 ```
 
+## Sample GitHub Actions
+
+The repo also includes two sample manual workflows under
+`.github/workflows/`:
+
+- `sample-harvest-testcases.yml` checks out full history, runs
+  `mine -> review -> export -> eval --gold`, and uploads the harvested
+  testcase bundle as a GitHub Actions artifact. This is the easiest way to
+  produce a reusable `dataset.resolved.jsonl` plus the generated
+  `adapter_<repo>.py` in CI.
+- `sample-evaluate-matrix.yml` is the matching matrix runner. It can consume
+  either a dataset path already present in the repository or the artifact
+  emitted by the harvest workflow, then runs `repogauge run` followed by
+  `repogauge analyze`.
+
+`sample-evaluate-matrix.yml` is intentionally checked in disabled right now
+via `if: ${{ false }}` at the job level, so it serves as a concrete template
+without accidentally burning solver budget. Re-enable that job when you are
+ready to spend tokens on matrix runs.
+
 ## Artifact contract
 
 Every command writes `manifest.json` and `events.jsonl` alongside its
