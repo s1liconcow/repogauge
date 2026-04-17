@@ -905,9 +905,11 @@ def test_scheduler_workspace_normalizes_from_model_patch_when_raw_output_is_json
     row = attempt_rows[0]
     assert row["attempt_state"] == SolverAttemptState.SUCCEEDED
     assert row["metadata"]["normalized_patch_path"]
-    assert Path(row["metadata"]["normalized_patch_path"]).read_text(
-        encoding="utf-8"
-    ).startswith("diff --git a/src.py b/src.py\n")
+    assert (
+        Path(row["metadata"]["normalized_patch_path"])
+        .read_text(encoding="utf-8")
+        .startswith("diff --git a/src.py b/src.py\n")
+    )
 
 
 def test_scheduler_rate_limit_is_respected(tmp_path: Path) -> None:
@@ -1011,5 +1013,7 @@ def test_scheduler_marks_unfinished_jobs_failed_when_worker_raises(
 
     job_rows = _read_jsonl(tmp_path / "jobs.jsonl")
     latest_by_job = {row["job_id"]: row for row in job_rows}
-    assert latest_by_job["run-1:i-1:solver-a:0"]["status"] == SolverAttemptState.SUCCEEDED
+    assert (
+        latest_by_job["run-1:i-1:solver-a:0"]["status"] == SolverAttemptState.SUCCEEDED
+    )
     assert latest_by_job["run-1:i-2:solver-b:0"]["status"] == SolverAttemptState.FAILED

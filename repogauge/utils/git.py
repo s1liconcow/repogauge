@@ -162,9 +162,8 @@ def create_worktree(
         ["git", "-C", str(repo), "worktree", "add", "--detach", str(temp_path), ref]
     )
     combined_output = result.stderr.strip() or result.stdout.strip()
-    if (
-        not result.success
-        and _worktree_add_failed_due_to_stale_registration(combined_output)
+    if not result.success and _worktree_add_failed_due_to_stale_registration(
+        combined_output
     ):
         run_command(
             ["git", "-C", str(repo), "worktree", "remove", "--force", str(temp_path)]

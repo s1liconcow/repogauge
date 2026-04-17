@@ -142,7 +142,9 @@ def _classify_codex_cli_timeout(
     *, stderr_output: str, telemetry_events: list[dict[str, Any]]
 ) -> str | None:
     haystack = "\n".join(
-        part for part in (stderr_output, json.dumps(telemetry_events, sort_keys=True)) if part
+        part
+        for part in (stderr_output, json.dumps(telemetry_events, sort_keys=True))
+        if part
     ).lower()
     if any(marker in haystack for marker in _CODEX_INFRA_TIMEOUT_MARKERS):
         return "infra_tool_exec"
