@@ -1,0 +1,157 @@
+name: sample-evaluate-matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      matrix_path:
+        description: Matrix config path relative to the repository root
+        default: examples/matrix.yaml
+        required: true
+        type: string
+      dataset_path:
+        description: Dataset path to evaluate, relative to the repository root or absolute
+        required: false
+        type: string
+      harvest_run_id:
+        description: Optional workflow run id for sample-harvest-testcases artifact download
+        required: false
+        type: string
+      harvest_artifact_name:
+        description: Harvest artifact name to download when harvest_run_id is set
+        default: repogauge-harvest
+        required: true
+        type: string
+      llm_mode:
+        description: LLM mode for solver runs that need remote providers
+        default: off
+        required: true
+        type: choice
+        options:
+          - off
+          - local_only
+          - allow_remote
+      container_runtime:
+        description: Container runtime used by run and analyze
+        default: docker
+        required: true
+        type: choice
+        options:
+          - docker
+          - podman
+      run_id:
+        description: Optional override for the repogauge run id
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  evaluate:
+    name: Run solver matrix
+    # Leave the sample checked in but inert until we're ready to spend budget on solver runs.
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      UV_CACHE_DIR: /tmp/codex-uv-cache
+      RUN_ROOT: ${{ runner.temp }}/repogauge-run
+      HARVEST_ROOT: ${{ runner.temp }}/repogauge-harvest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: uv sync --group dev --frozen
+
+      - name: Download harvested testcase bundle
+        if: ${{ inputs.harvest_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.harvest_artifact_name }}
+          path: ${{ env.HARVEST_ROOT }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.harvest_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve dataset and adapter paths
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          dataset_path=""
+          adapter_path=""
+
+          if [[ -n "${{ inputs.dataset_path }}" ]]; then
+            dataset_path="${{ inputs.dataset_path }}"
+          elif [[ -n "${{ inputs.harvest_run_id }}" ]]; then
+            dataset_path="$HARVEST_ROOT/eval/dataset.resolved.jsonl"
+            adapter_path="$(find "$HARVEST_ROOT/export" -maxdepth 1 -name 'adapter_*.py' -print -quit)"
+          else
+            echo "Provide either dataset_path or harvest_run_id." >&2
+            exit 1
+          fi
+
+          if [[ ! -f "$dataset_path" ]]; then
+            echo "Dataset not found: $dataset_path" >&2
+            exit 1
+          fi
+
+          if [[ -z "$adapter_path" ]]; then
+            candidate_root="$(dirname "$dataset_path")"
+            adapter_path="$(find "$(dirname "$candidate_root")" -maxdepth 2 -name 'adapter_*.py' -print -quit || true)"
+          fi
+
+          echo "dataset_path=$dataset_path" >> "$GITHUB_OUTPUT"
+          if [[ -n "$adapter_path" ]]; then
+            echo "adapter_path=$adapter_path" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Execute matrix
+        id: run
+        run: |
+          set -euo pipefail
+          run_id="${{ inputs.run_id }}"
+          if [[ -z "$run_id" ]]; then
+            run_id="sample-matrix-${GITHUB_RUN_ID}"
+          fi
+
+          uv run repogauge run \
+            "${{ inputs.matrix_path }}" \
+            --dataset "${{ steps.resolve.outputs.dataset_path }}" \
+            --out "$RUN_ROOT" \
+            --run-id "$run_id" \
+            --llm-mode "${{ inputs.llm_mode }}" \
+            --container-runtime "${{ inputs.container_runtime }}"
+
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "run_dir=$RUN_ROOT/$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Analyze run outputs
+        run: |
+          set -euo pipefail
+          args=(
+            uv run repogauge analyze
+            "${{ steps.run.outputs.run_dir }}"
+            --dataset "${{ steps.resolve.outputs.dataset_path }}"
+            --container-runtime "${{ inputs.container_runtime }}"
+          )
+          if [[ -n "${{ steps.resolve.outputs.adapter_path }}" ]]; then
+            args+=(--adapter "${{ steps.resolve.outputs.adapter_path }}")
+          fi
+          "${args[@]}"
+
+      - name: Upload run artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: repogauge-run-${{ github.run_id }}
+          path: ${{ env.RUN_ROOT }}
+          retention-days: 7
+          if-no-files-found: error

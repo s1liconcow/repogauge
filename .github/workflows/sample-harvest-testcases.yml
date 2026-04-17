@@ -1,0 +1,120 @@
+name: sample-harvest-testcases
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_range:
+        description: Optional git commit range to scan, for example HEAD~50..HEAD
+        required: false
+        type: string
+      max_commits:
+        description: Maximum number of commits to inspect when commit_range is empty
+        default: "200"
+        required: true
+        type: string
+      llm_mode:
+        description: Advisory review mode used by repogauge review
+        default: off
+        required: true
+        type: choice
+        options:
+          - off
+          - local_only
+          - allow_remote
+      enrich_github:
+        description: Enrich commits with linked GitHub issue and PR metadata
+        default: false
+        required: false
+        type: boolean
+      artifact_name:
+        description: Artifact name for the harvested testcase bundle
+        default: repogauge-harvest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    name: Harvest testcases
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      UV_CACHE_DIR: /tmp/codex-uv-cache
+      OUT_ROOT: ${{ runner.temp }}/repogauge-harvest
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: uv sync --group dev --frozen
+
+      - name: Mine candidate commits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=(
+            uv run repogauge mine .
+            --out "$OUT_ROOT/mine"
+            --max-commits "${{ inputs.max_commits }}"
+            --llm-mode "${{ inputs.llm_mode }}"
+          )
+          if [[ -n "${{ inputs.commit_range }}" ]]; then
+            args+=(--commit-range "${{ inputs.commit_range }}")
+          fi
+          if [[ "${{ inputs.enrich_github }}" == "true" ]]; then
+            args+=(--enrich-github --github-token "$GITHUB_TOKEN")
+          fi
+          "${args[@]}"
+
+      - name: Review candidates
+        run: |
+          set -euo pipefail
+          uv run repogauge review \
+            "$OUT_ROOT/mine/candidates.jsonl" \
+            --out "$OUT_ROOT/review" \
+            --llm-mode "${{ inputs.llm_mode }}"
+
+      - name: Export testcase dataset
+        run: |
+          set -euo pipefail
+          uv run repogauge export \
+            "$OUT_ROOT/review/reviewed.jsonl" \
+            --out "$OUT_ROOT/export" \
+            --llm-mode "${{ inputs.llm_mode }}"
+
+      - name: Validate gold patches
+        run: |
+          set -euo pipefail
+          uv run repogauge eval \
+            "$OUT_ROOT/export/dataset/dataset.jsonl" \
+            --gold \
+            --out "$OUT_ROOT/eval" \
+            --container-runtime docker
+
+      - name: Record bundle pointers
+        run: |
+          set -euo pipefail
+          {
+            echo "dataset=$OUT_ROOT/export/dataset/dataset.jsonl"
+            echo "resolved_dataset=$OUT_ROOT/eval/dataset.resolved.jsonl"
+            echo "adapter=$(find "$OUT_ROOT/export" -maxdepth 1 -name 'adapter_*.py' -print -quit)"
+          } > "$OUT_ROOT/paths.env"
+
+      - name: Upload harvested artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ env.OUT_ROOT }}
+          retention-days: 7
+          if-no-files-found: error
