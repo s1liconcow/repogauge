@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -110,22 +111,40 @@ def _parse_json_lines(text: str) -> list[dict[str, Any]]:
 
 
 def _extract_text_candidates(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if not isinstance(value, Mapping):
-        return []
-
     candidates: list[str] = []
-    for key in ("text", "patch", "model_patch", "content", "output_text"):
-        text = value.get(key)
-        if isinstance(text, str) and text.strip():
-            candidates.append(text.strip())
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        for item in value:
+            candidates.extend(_extract_text_candidates(item))
+        return candidates
+    if not isinstance(value, Mapping):
+        return candidates
 
-    output = value.get("output")
-    if isinstance(output, list):
-        for item in output:
-            for part in _extract_text_candidates(item):
-                candidates.append(part)
+    for key in (
+        "text",
+        "patch",
+        "model_patch",
+        "content",
+        "output_text",
+        "aggregated_output",
+    ):
+        if key in value:
+            candidates.extend(_extract_text_candidates(value.get(key)))
+
+    for key, nested in value.items():
+        if key in {
+            "text",
+            "patch",
+            "model_patch",
+            "content",
+            "output_text",
+            "aggregated_output",
+        }:
+            continue
+        if isinstance(nested, (Mapping, list)):
+            candidates.extend(_extract_text_candidates(nested))
 
     return candidates
 
@@ -156,6 +175,37 @@ def _extract_patch_from_text(raw_output: str) -> str:
     if not text:
         return ""
 
+    def _extract_patch_fragment(candidate: str) -> str:
+        stripped = candidate.strip()
+        if not stripped:
+            return ""
+
+        for line_no, line in enumerate(stripped.splitlines()):
+            if line.startswith("diff --git "):
+                lines = "\n".join(stripped.splitlines()[line_no:])
+                normalized = lines.strip("\n")
+                if normalized:
+                    return normalized if normalized.endswith("\n") else normalized + "\n"
+                break
+
+        block_start = (
+            stripped.lower().find("```diff"),
+            stripped.lower().find("```patch"),
+        )
+        for start in block_start:
+            if start != -1:
+                chunk = stripped[start:]
+                end = chunk.find("```", 6)
+                if end != -1:
+                    code = chunk[6:end].strip()
+                    if "diff --git" in code:
+                        normalized = code.strip("\n")
+                        return (
+                            normalized if normalized.endswith("\n") else normalized + "\n"
+                        )
+
+        return ""
+
     payload = _safe_parse_json(text)
     if isinstance(payload, Mapping):
         for key in ("model_patch", "patch"):
@@ -170,38 +220,146 @@ def _extract_patch_from_text(raw_output: str) -> str:
                 if maybe_patch:
                     return maybe_patch
 
-    for line_no, line in enumerate(text.splitlines()):
-        if line.startswith("diff --git "):
-            lines = "\n".join(text.splitlines()[line_no:])
-            normalized = lines.strip("\n")
-            if normalized:
-                return normalized if normalized.endswith("\n") else normalized + "\n"
-            break
+    patch = _extract_patch_fragment(text)
+    if patch:
+        return patch
 
-    for candidate in _extract_text_candidates(
-        payload if isinstance(payload, Mapping) else {}
-    ):
-        if candidate and "diff --git" in candidate:
-            normalized = candidate.strip("\n")
-            return normalized if normalized.endswith("\n") else normalized + "\n"
+    parsed_lines = _parse_json_lines(text)
+    for event in reversed(parsed_lines):
+        for candidate in reversed(_extract_text_candidates(event)):
+            patch = _extract_patch_fragment(candidate)
+            if patch:
+                return patch
 
-    block_start = (
-        text.lower().find("```diff"),
-        text.lower().find("```patch"),
-    )
-    for start in block_start:
-        if start != -1:
-            chunk = text[start:]
-            end = chunk.find("```", 6)
-            if end != -1:
-                code = chunk[6:end].strip()
-                if "diff --git" in code:
-                    normalized = code.strip("\n")
-                    return (
-                        normalized if normalized.endswith("\n") else normalized + "\n"
-                    )
+    if isinstance(payload, Mapping):
+        for candidate in reversed(_extract_text_candidates(payload)):
+            patch = _extract_patch_fragment(candidate)
+            if patch:
+                return patch
 
     return ""
+
+
+def _extract_edit_plan_text(raw_output: str) -> str:
+    text = raw_output.strip()
+    if not text:
+        return ""
+
+    def _has_direct_edit_plan(payload: Any) -> bool:
+        if isinstance(payload, Mapping):
+            files = payload.get("files")
+            edits = payload.get("edits")
+            return isinstance(files, (Mapping, list)) or isinstance(edits, list)
+        if isinstance(payload, list):
+            return any(
+                isinstance(entry, Mapping)
+                and isinstance(entry.get("path"), str)
+                and isinstance(
+                    entry.get("content"), (str, int, float, bool, type(None))
+                )
+                for entry in payload
+            )
+        return False
+
+    def _collect_edit_entries(payload: Any) -> list[tuple[str, str]]:
+        files: list[tuple[str, str]] = []
+        if isinstance(payload, Mapping):
+            mapping = payload.get("files")
+            if isinstance(mapping, Mapping):
+                for path, content in mapping.items():
+                    if isinstance(path, str) and isinstance(
+                        content, (str, int, float, bool, type(None))
+                    ):
+                        files.append((path, str(content) if content is not None else ""))
+            elif isinstance(mapping, list):
+                for entry in mapping:
+                    if isinstance(entry, Mapping):
+                        path = entry.get("path")
+                        content = entry.get("content")
+                        if isinstance(path, str) and isinstance(
+                            content, (str, int, float, bool, type(None))
+                        ):
+                            files.append(
+                                (path, str(content) if content is not None else "")
+                            )
+
+            edits = payload.get("edits")
+            if isinstance(edits, list):
+                for entry in edits:
+                    if isinstance(entry, Mapping):
+                        path = entry.get("path")
+                        content = entry.get("content")
+                        if isinstance(path, str) and isinstance(
+                            content, (str, int, float, bool, type(None))
+                        ):
+                            files.append(
+                                (path, str(content) if content is not None else "")
+                            )
+
+            if files:
+                return files
+
+            for nested in payload.values():
+                if isinstance(nested, (Mapping, list)):
+                    nested_files = _collect_edit_entries(nested)
+                    if nested_files:
+                        return nested_files
+
+            for candidate in _extract_text_candidates(payload):
+                if candidate == text:
+                    continue
+                nested_payload = _safe_parse_json(candidate)
+                if nested_payload is not None:
+                    nested_files = _collect_edit_entries(nested_payload)
+                    if nested_files:
+                        return nested_files
+
+        elif isinstance(payload, list):
+            direct_files: list[tuple[str, str]] = []
+            for entry in payload:
+                if isinstance(entry, Mapping):
+                    path = entry.get("path")
+                    content = entry.get("content")
+                    if isinstance(path, str) and isinstance(
+                        content, (str, int, float, bool, type(None))
+                    ):
+                        direct_files.append(
+                            (path, str(content) if content is not None else "")
+                        )
+            if direct_files:
+                return direct_files
+            for nested in payload:
+                if isinstance(nested, (Mapping, list)):
+                    nested_files = _collect_edit_entries(nested)
+                    if nested_files:
+                        return nested_files
+        return []
+
+    for event in reversed(_parse_json_lines(text)):
+        for candidate in reversed(_extract_text_candidates(event)):
+            payload = _safe_parse_json(candidate)
+            if payload is not None and _collect_edit_entries(payload):
+                return candidate.strip()
+
+    json_block = re.search(r"```json\n(.*?)```", text, flags=re.S | re.I)
+    if json_block:
+        candidate = json_block.group(1).strip()
+        payload = _safe_parse_json(candidate)
+        if payload is not None and _collect_edit_entries(payload):
+            return candidate
+
+    payload = _safe_parse_json(text)
+    if payload is not None and _has_direct_edit_plan(payload) and _collect_edit_entries(payload):
+        return text
+
+    return ""
+
+
+def _extract_structured_output_text(raw_output: str) -> str:
+    patch = _extract_patch_from_text(raw_output)
+    if patch:
+        return patch
+    return _extract_edit_plan_text(raw_output)
 
 
 def _coerce_usage(value: Any) -> Mapping[str, Any]:
@@ -372,7 +530,9 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
     def finalize_output(
         self, request: SolverAdapterRequest, result: SolverAdapterResult
     ) -> SolverAdapterResult:
-        patch = result.model_patch or _extract_patch_from_text(result.raw_output)
+        patch = _extract_structured_output_text(result.model_patch) or _extract_structured_output_text(
+            result.raw_output
+        )
         metadata = dict(result.metadata)
         metadata["solver_id"] = self.solver_id
         metadata["provider_id"] = self.provider_id
@@ -958,7 +1118,6 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         text = ""
         if output.strip():
             parsed = _parse_json_lines(output)
-            text_parts = []
             for event in parsed:
                 telemetry_events.append(event)
                 if "usage" in event and isinstance(event["usage"], Mapping):
@@ -967,15 +1126,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                 if "cost" in event and isinstance(event["cost"], Mapping):
                     cost = dict(event["cost"])
                     cost_source = "codex_cli.event.cost"
-                if "message" in event and isinstance(event["message"], Mapping):
-                    text = event["message"].get("content")
-                    if isinstance(text, str):
-                        text_parts.append(text)
-                if "text" in event and isinstance(event["text"], str):
-                    text_parts.append(event["text"])
-            text = "".join(text_parts).strip()
-            if not text and output.strip():
-                text = output.strip()
+            text = _extract_structured_output_text(output)
 
         metadata = {"telemetry": telemetry_events}
         if command_result.timed_out:

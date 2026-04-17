@@ -81,21 +81,51 @@ def _extract_unified_patch(raw: str) -> str:
     if not normalized:
         return ""
 
-    lines = normalized.splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("diff --git"):
-            patch_lines = "\n".join(lines[index:]).strip("\n")
-            if patch_lines:
-                return patch_lines if patch_lines.endswith("\n") else patch_lines + "\n"
-
-    m = re.search(r"```(?:diff|patch)\n(.*?)```", normalized, flags=re.S | re.I)
-    if m:
-        code = m.group(1).strip()
-        if "diff --git" in code:
-            return code if code.endswith("\n") else code + "\n"
-
-    if normalized.startswith("{") or normalized.startswith("["):
+    def _extract_patch_fragment(text: str) -> str:
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            if line.startswith("diff --git"):
+                patch_lines = "\n".join(lines[index:]).strip("\n")
+                if patch_lines:
+                    return (
+                        patch_lines if patch_lines.endswith("\n") else patch_lines + "\n"
+                    )
+        m = re.search(r"```(?:diff|patch)\n(.*?)```", text, flags=re.S | re.I)
+        if m:
+            code = m.group(1).strip()
+            if "diff --git" in code:
+                return code if code.endswith("\n") else code + "\n"
         return ""
+
+    patch = _extract_patch_fragment(normalized)
+    if patch:
+        return patch
+
+    for raw_line in normalized.splitlines():
+        line = raw_line.strip()
+        if line[:1] not in "{[":
+            continue
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(payload, (Mapping, list)):
+            for candidate in _extract_text_candidates(payload):
+                patch = _extract_patch_fragment(candidate)
+                if patch:
+                    return patch
+
+    payload: Any = None
+    if normalized.startswith("{") or normalized.startswith("["):
+        try:
+            payload = json.loads(normalized)
+        except Exception:
+            payload = None
+    if isinstance(payload, (Mapping, list)):
+        for candidate in _extract_text_candidates(payload):
+            patch = _extract_patch_fragment(candidate)
+            if patch:
+                return patch
 
     return ""
 
@@ -105,68 +135,150 @@ def _extract_edit_plan(raw: str) -> list[tuple[str, str]]:
     if not text:
         return []
 
+    def _extract_from_payload(payload: Any) -> list[tuple[str, str]]:
+        files: list[tuple[str, str]] = []
+        if isinstance(payload, Mapping):
+            if (
+                isinstance(payload.get("model_patch"), str)
+                and "diff --git" in payload["model_patch"]
+            ):
+                return []
+            if isinstance(payload.get("patch"), str) and "diff --git" in payload["patch"]:
+                return []
+
+            mapping = payload.get("files")
+            if isinstance(mapping, Mapping):
+                for path, content in mapping.items():
+                    if isinstance(path, str) and isinstance(
+                        content, (str, int, float, bool, type(None))
+                    ):
+                        files.append((path, _coerce_str(content)))
+            elif isinstance(mapping, list):
+                for entry in mapping:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    path = entry.get("path")
+                    content = entry.get("content")
+                    if isinstance(path, str) and isinstance(
+                        content, (str, int, float, bool, type(None))
+                    ):
+                        files.append((path, _coerce_str(content)))
+
+            edits = payload.get("edits")
+            if isinstance(edits, list):
+                for entry in edits:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    path = entry.get("path")
+                    content = entry.get("content")
+                    if isinstance(path, str) and isinstance(
+                        content, (str, int, float, bool, type(None))
+                    ):
+                        files.append((path, _coerce_str(content)))
+
+            if files:
+                return files
+
+            for nested in payload.values():
+                if isinstance(nested, (Mapping, list)):
+                    nested_files = _extract_from_payload(nested)
+                    if nested_files:
+                        return nested_files
+
+            for candidate in _extract_text_candidates(payload):
+                if candidate == text:
+                    continue
+                try:
+                    nested_payload = json.loads(candidate)
+                except Exception:
+                    continue
+                nested_files = _extract_from_payload(nested_payload)
+                if nested_files:
+                    return nested_files
+
+        if isinstance(payload, list):
+            for entry in payload:
+                if not isinstance(entry, Mapping):
+                    continue
+                path = entry.get("path")
+                content = entry.get("content")
+                if isinstance(path, str) and isinstance(
+                    content, (str, int, float, bool, type(None))
+                ):
+                    files.append((path, _coerce_str(content)))
+            if files:
+                return files
+
+            for nested in payload:
+                if isinstance(nested, (Mapping, list)):
+                    nested_files = _extract_from_payload(nested)
+                    if nested_files:
+                        return nested_files
+        return []
+
     payload: Any
     try:
         payload = json.loads(text)
     except Exception:
         m = re.search(r"```json\n(.*?)```", text, flags=re.S | re.I)
-        if not m:
-            return []
-        payload = json.loads(m.group(1).strip())
-
-    files: list[tuple[str, str]] = []
-
-    if isinstance(payload, Mapping):
-        if (
-            isinstance(payload.get("model_patch"), str)
-            and "diff --git" in payload["model_patch"]
-        ):
-            return []
-        if isinstance(payload.get("patch"), str) and "diff --git" in payload["patch"]:
-            return []
-
-        mapping = payload.get("files")
-        if isinstance(mapping, Mapping):
-            for path, content in mapping.items():
-                if isinstance(path, str) and isinstance(
-                    content, (str, int, float, bool, type(None))
-                ):
-                    files.append((path, _coerce_str(content)))
-        elif isinstance(mapping, list):
-            for entry in mapping:
-                if not isinstance(entry, Mapping):
-                    continue
-                path = entry.get("path")
-                content = entry.get("content")
-                if isinstance(path, str) and isinstance(
-                    content, (str, int, float, bool, type(None))
-                ):
-                    files.append((path, _coerce_str(content)))
-
-        edits = payload.get("edits")
-        if isinstance(edits, list):
-            for entry in edits:
-                if not isinstance(entry, Mapping):
-                    continue
-                path = entry.get("path")
-                content = entry.get("content")
-                if isinstance(path, str) and isinstance(
-                    content, (str, int, float, bool, type(None))
-                ):
-                    files.append((path, _coerce_str(content)))
-
-    if isinstance(payload, list):
-        for entry in payload:
-            if not isinstance(entry, Mapping):
+        if m:
+            payload = json.loads(m.group(1).strip())
+            files = _extract_from_payload(payload)
+            if files:
+                return files
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line[:1] not in "{[":
                 continue
-            path = entry.get("path")
-            content = entry.get("content")
-            if isinstance(path, str) and isinstance(
-                content, (str, int, float, bool, type(None))
-            ):
-                files.append((path, _coerce_str(content)))
+            try:
+                payload = json.loads(line)
+            except Exception:
+                continue
+            files = _extract_from_payload(payload)
+            if files:
+                return files
+        return []
 
-    return files
+    return _extract_from_payload(payload)
+
+
+def _extract_text_candidates(value: Any) -> list[str]:
+    candidates: list[str] = []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        for item in value:
+            candidates.extend(_extract_text_candidates(item))
+        return candidates
+    if not isinstance(value, Mapping):
+        return candidates
+
+    for key in (
+        "text",
+        "patch",
+        "model_patch",
+        "content",
+        "output_text",
+        "aggregated_output",
+    ):
+        if key in value:
+            candidates.extend(_extract_text_candidates(value.get(key)))
+
+    for key, nested in value.items():
+        if key in {
+            "text",
+            "patch",
+            "model_patch",
+            "content",
+            "output_text",
+            "aggregated_output",
+        }:
+            continue
+        if isinstance(nested, (Mapping, list)):
+            candidates.extend(_extract_text_candidates(nested))
+
+    return candidates
 
 
 def _safe_path_for_workspace(workspace: Path, path: str) -> Path:
