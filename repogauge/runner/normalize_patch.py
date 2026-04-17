@@ -332,6 +332,9 @@ def normalize_solver_output(
             raise PatchNormalizationError("unrecognized solver output format")
         _normalize_from_file_edits(attempt.workspace_path, edits)
 
+    if attempt.benchmark_agents_path.exists():
+        attempt.benchmark_agents_path.unlink()
+
     stage_result = run_command(["git", "-C", str(attempt.workspace_path), "add", "-A"])
     if not stage_result.success:
         raise PatchNormalizationError(

@@ -391,3 +391,7 @@ class TestAdapters(unittest.TestCase):
         assert "--cd" in command
         assert command[command.index("--cd") + 1] == workspace
         assert kwargs["cwd"] == workspace
+        assert kwargs["env"]["HOME"] == str(Path(workspace).parent / "codex-home")
+        assert kwargs["env"]["CODEX_HOME"] == str(
+            Path(workspace).parent / "codex-home" / ".codex"
+        )

@@ -11,6 +11,7 @@ The module provides:
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -912,9 +913,17 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         if request.workspace_path is not None:
             command.extend(["--cd", str(request.workspace_path)])
         command.extend(["--model", self.model])
+        command_env = None
+        if request.workspace_path is not None:
+            codex_home_root = request.workspace_path.parent / "codex-home"
+            command_env = dict(os.environ)
+            command_env["HOME"] = str(codex_home_root)
+            command_env["XDG_CONFIG_HOME"] = str(codex_home_root / ".config")
+            command_env["CODEX_HOME"] = str(codex_home_root / ".codex")
         command_result = run_command(
             command,
             cwd=str(request.workspace_path) if request.workspace_path else None,
+            env=command_env,
             input_text=prompt,
             timeout_seconds=self.timeout_seconds,
         )

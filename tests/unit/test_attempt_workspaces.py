@@ -63,10 +63,42 @@ def test_prepare_attempt_workspace_is_isolated_and_persists_artifacts(
         assert pack["base_commit"] == commit
         assert pack["solver_id"] == "solver-a"
         assert pack["instance_id"] == row["instance_id"]
+        agents_text = (attempt.workspace_path / "AGENTS.md").read_text(
+            encoding="utf-8"
+        )
+        assert "disposable benchmark attempt sandbox" in agents_text
+        assert "Do not run repo triage workflows" in agents_text
+        codex_config = (attempt.codex_home_root / ".codex" / "config.toml").read_text(
+            encoding="utf-8"
+        )
+        assert codex_config == "notify = []\n"
 
     assert not (attempt.workspace_path).exists()
     assert attempt.attempt_root.exists()
     assert attempt.instruction_pack_path.exists()
+    assert not attempt.codex_home_root.exists()
+
+
+def test_prepare_attempt_workspace_overrides_repo_agents_file(tmp_path: Path) -> None:
+    repo, commit = _create_repo(tmp_path)
+    (repo / "AGENTS.md").write_text("repo-specific instructions\n", encoding="utf-8")
+    run_command(["git", "add", "AGENTS.md"], cwd=str(repo))
+    run_command(["git", "commit", "-m", "add agents"], cwd=str(repo))
+    commit = run_command(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip()
+    row = _attempt_row(commit)
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-agents",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        agents_text = (attempt.workspace_path / "AGENTS.md").read_text(
+            encoding="utf-8"
+        )
+        assert agents_text != "repo-specific instructions\n"
+        assert "Return the patch/output requested by the benchmark harness." in agents_text
 
 
 def test_normalize_solver_output_from_diff(tmp_path: Path) -> None:

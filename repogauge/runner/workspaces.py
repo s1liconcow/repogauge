@@ -13,6 +13,26 @@ from contextlib import contextmanager
 from repogauge.utils.git import scoped_worktree
 
 
+_BENCHMARK_AGENTS_FILENAME = "AGENTS.md"
+_CODEX_HOME_DIRNAME = "codex-home"
+_CODEX_CONFIG_DIRNAME = ".codex"
+_CODEX_MINIMAL_CONFIG = """notify = []
+"""
+_BENCHMARK_AGENTS_TEXT = """# RepoGauge Benchmark Workspace
+
+This workspace is a disposable benchmark attempt sandbox.
+
+Rules:
+- Focus only on producing the requested patch for the benchmark task.
+- Do not run repo triage workflows such as `bv`, `br`, issue management, or planning tools.
+- Do not browse the web unless the prompt explicitly requires it.
+- Do not push, commit, branch, or modify git metadata.
+- Do not perform session wrap-up steps such as smoke tests, release checks, or handoff docs.
+- Prefer the smallest useful set of reads, one patch, and only the most relevant validation command.
+- Return the patch/output requested by the benchmark harness.
+"""
+
+
 @dataclass(frozen=True)
 class AttemptWorkspace:
     attempt_id: str
@@ -25,6 +45,8 @@ class AttemptWorkspace:
     raw_output_path: Path
     normalized_patch_path: Path
     patch_stats_path: Path
+    benchmark_agents_path: Path
+    codex_home_root: Path
 
 
 def _coerce_dict(value: Any) -> dict[str, Any]:
@@ -75,6 +97,27 @@ def _write_instruction_pack(
     )
 
 
+def _write_benchmark_agents(workspace_root: Path) -> None:
+    # Override repo-local agent instructions inside disposable solver worktrees so
+    # benchmark attempts follow the task prompt instead of full repo session policy.
+    (workspace_root / _BENCHMARK_AGENTS_FILENAME).write_text(
+        _BENCHMARK_AGENTS_TEXT,
+        encoding="utf-8",
+    )
+
+
+def _prepare_codex_home(codex_home_root: Path) -> None:
+    config_root = codex_home_root / _CODEX_CONFIG_DIRNAME
+    config_root.mkdir(parents=True, exist_ok=True)
+    (config_root / "config.toml").write_text(_CODEX_MINIMAL_CONFIG, encoding="utf-8")
+
+    source_root = Path.home() / _CODEX_CONFIG_DIRNAME
+    for name in ("auth.json", "installation_id"):
+        source = source_root / name
+        if source.exists():
+            shutil.copy2(source, config_root / name)
+
+
 @contextmanager
 def prepare_attempt_workspace(
     *,
@@ -107,6 +150,8 @@ def prepare_attempt_workspace(
     raw_output_path = attempt_root / "raw_output.txt"
     normalized_patch_path = attempt_root / "normalized.patch"
     patch_stats_path = attempt_root / "patch_stats.json"
+    benchmark_agents_path = workspace_root / _BENCHMARK_AGENTS_FILENAME
+    codex_home_root = attempt_root / _CODEX_HOME_DIRNAME
 
     _write_instruction_pack(
         path=instruction_pack_path,
@@ -121,6 +166,8 @@ def prepare_attempt_workspace(
     with scoped_worktree(
         repo_root, ref=base_commit, worktree_path=workspace_root
     ) as worktree:
+        _write_benchmark_agents(worktree)
+        _prepare_codex_home(codex_home_root)
         attempt = AttemptWorkspace(
             attempt_id=attempt_id,
             instance_id=instance_id,
@@ -132,8 +179,12 @@ def prepare_attempt_workspace(
             raw_output_path=raw_output_path,
             normalized_patch_path=normalized_patch_path,
             patch_stats_path=patch_stats_path,
+            benchmark_agents_path=benchmark_agents_path,
+            codex_home_root=codex_home_root,
         )
         yield attempt
 
+    if codex_home_root.exists():
+        shutil.rmtree(codex_home_root, ignore_errors=True)
     if workspace_root.exists():
         shutil.rmtree(workspace_root, ignore_errors=True)
