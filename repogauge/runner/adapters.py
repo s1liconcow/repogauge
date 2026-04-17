@@ -1140,7 +1140,10 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         )
         if request.workspace_path is not None:
             command.extend(
-                ["--cd", "/testbed" if self.containerized else str(request.workspace_path)]
+                [
+                    "--cd",
+                    "/testbed" if self.containerized else str(request.workspace_path),
+                ]
             )
         command.extend(["--model", self.model])
         codex_home_root = (
@@ -1149,9 +1152,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
             else None
         )
         command_env = (
-            _codex_cli_env(codex_home_root)
-            if codex_home_root is not None
-            else None
+            _codex_cli_env(codex_home_root) if codex_home_root is not None else None
         )
         try:
             if self.containerized and request.workspace_path is not None:

@@ -589,7 +589,9 @@ class TestAdapters(unittest.TestCase):
         assert command[command.index("--cd") + 1] == "/testbed"
         assert kwargs["container_host"] == "unix:///tmp/podman.sock"
         assert kwargs["image_override"] == "ghcr.io/example/codex:latest"
-        assert kwargs["environment"]["HOME"] == str(Path(workspace).parent / "codex-home")
+        assert kwargs["environment"]["HOME"] == str(
+            Path(workspace).parent / "codex-home"
+        )
 
     def test_codex_cli_finalize_output_prefers_model_patch(self) -> None:
         provider = _provider_for_command("codex")

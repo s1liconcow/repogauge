@@ -86,9 +86,7 @@ def _resolve_image(
     if image_override:
         return image_override, None, []
 
-    logger = setup_logger(
-        attempt_id, attempt_root / "container_image.log", mode="a"
-    )
+    logger = setup_logger(attempt_id, attempt_root / "container_image.log", mode="a")
     try:
         try:
             test_spec = make_test_spec(dict(instance_row), namespace=None)
@@ -106,7 +104,9 @@ def _resolve_image(
         close_logger(logger)
 
 
-def _exec_in_container(container, cmd: str, timeout_seconds: int | None) -> _ExecOutcome:
+def _exec_in_container(
+    container, cmd: str, timeout_seconds: int | None
+) -> _ExecOutcome:
     exec_id: str | None = None
     exception: BaseException | None = None
 
@@ -186,9 +186,7 @@ def run_solver_command_in_container(
 
     client = _docker_client(container_host=container_host)
     container = None
-    logger = setup_logger(
-        attempt_id, attempt_root / "container_run.log", mode="a"
-    )
+    logger = setup_logger(attempt_id, attempt_root / "container_run.log", mode="a")
     try:
         image, platform, cap_add = _resolve_image(
             attempt_id=attempt_id,
@@ -199,9 +197,7 @@ def run_solver_command_in_container(
             client=client,
         )
 
-        container_name = _sanitize_container_name(
-            f"repogauge-{attempt_id}-solver"
-        )
+        container_name = _sanitize_container_name(f"repogauge-{attempt_id}-solver")
         try:
             existing = client.containers.get(container_name)
             existing.remove(force=True)
