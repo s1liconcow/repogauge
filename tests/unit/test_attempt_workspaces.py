@@ -176,8 +176,12 @@ def test_normalize_solver_output_resets_dirty_workspace_before_applying_diff(
         solver_id="solver-a",
         workspaces_root=tmp_path / "workspaces",
     ) as attempt:
-        (attempt.workspace_path / "src.py").write_text("print('after')\n", encoding="utf-8")
-        (attempt.workspace_path / "noise.txt").write_text("solver scratch\n", encoding="utf-8")
+        (attempt.workspace_path / "src.py").write_text(
+            "print('after')\n", encoding="utf-8"
+        )
+        (attempt.workspace_path / "noise.txt").write_text(
+            "solver scratch\n", encoding="utf-8"
+        )
 
         raw = (
             "diff --git a/src.py b/src.py\n"
@@ -209,8 +213,12 @@ def test_normalize_solver_output_resets_dirty_workspace_before_file_edits(
         solver_id="solver-a",
         workspaces_root=tmp_path / "workspaces",
     ) as attempt:
-        (attempt.workspace_path / "src.py").write_text("print('solver-side')\n", encoding="utf-8")
-        (attempt.workspace_path / "noise.txt").write_text("solver scratch\n", encoding="utf-8")
+        (attempt.workspace_path / "src.py").write_text(
+            "print('solver-side')\n", encoding="utf-8"
+        )
+        (attempt.workspace_path / "noise.txt").write_text(
+            "solver scratch\n", encoding="utf-8"
+        )
 
         result = normalize_solver_output(json.dumps(edit_plan), attempt=attempt)
 
