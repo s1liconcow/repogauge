@@ -527,6 +527,11 @@
       margin-bottom: 14px;
     }
 
+    .board__topline > div:first-child,
+    .panel__header > div:first-child {
+      min-width: 0;
+    }
+
     .panel__title {
       font-size: 1rem;
       font-weight: 800;
@@ -1785,7 +1790,17 @@
       }
 
       .board__topline,
-      .panel__header,
+      .panel__header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .board__topline .pill,
+      .panel__header .pill {
+        max-width: 100%;
+        white-space: normal;
+      }
+
       .solver-row {
         grid-template-columns: 1fr;
         align-items: flex-start;
