@@ -1090,9 +1090,7 @@ def _copy_file_if_present(source: Path, destination: Path) -> None:
 
 def _seed_opencode_cli_home(home_root: Path) -> None:
     auth_source = _default_xdg_data_home() / "opencode" / "auth.json"
-    auth_destination = (
-        home_root / ".local" / "share" / "opencode" / "auth.json"
-    )
+    auth_destination = home_root / ".local" / "share" / "opencode" / "auth.json"
     _copy_file_if_present(auth_source, auth_destination)
 
 

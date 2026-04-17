@@ -788,9 +788,8 @@ class TestAdapters(unittest.TestCase):
         assert command[command.index("--model") + 1] == "anthropic/claude-sonnet-4-5"
         assert kwargs["cwd"] == workspace
         assert kwargs["env"]["HOME"] == str(Path(workspace).parent / "opencode-home")
-        assert (
-            kwargs["env"]["XDG_DATA_HOME"]
-            == str(Path(workspace).parent / "opencode-home" / ".local" / "share")
+        assert kwargs["env"]["XDG_DATA_HOME"] == str(
+            Path(workspace).parent / "opencode-home" / ".local" / "share"
         )
         assert kwargs["env"]["OPENCODE_CONFIG_CONTENT"] == "{}"
 
@@ -836,9 +835,8 @@ class TestAdapters(unittest.TestCase):
         assert kwargs["environment"]["HOME"] == str(
             Path(workspace).parent / "opencode-home"
         )
-        assert (
-            kwargs["environment"]["XDG_DATA_HOME"]
-            == str(Path(workspace).parent / "opencode-home" / ".local" / "share")
+        assert kwargs["environment"]["XDG_DATA_HOME"] == str(
+            Path(workspace).parent / "opencode-home" / ".local" / "share"
         )
 
     def _claude_provider(self, command: str = "claude") -> MatrixProvider:
