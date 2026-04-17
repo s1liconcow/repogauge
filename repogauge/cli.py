@@ -1565,6 +1565,12 @@ def _run_command(namespace: argparse.Namespace) -> int:
             return 1
 
         if attempts_path is None:
+            error_message = (
+                f"attempt artifacts not found in {analyze_root}; expected "
+                "`attempts.jsonl` or `attempts.parquet` in the target directory, "
+                "or under `<target>/run/<run-id>/`. Pass the specific run directory "
+                "if you pointed analyze at a broader output tree."
+            )
             manifest.mark_step(
                 "inspect",
                 ManifestStepStatus.FAILED,
@@ -1592,10 +1598,11 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "command": command,
                     "status": manifest.status,
                     "timestamp": manifest.ended_at,
-                    "error": f"attempt artifacts not found in {analyze_root}",
+                    "error": error_message,
                 },
                 events_path,
             )
+            print(f"repogauge analyze: error: {error_message}", file=sys.stderr)
             return 1
 
         auto_eval_metadata: dict[str, Any] | None = None
@@ -1781,6 +1788,9 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 if getattr(namespace, "skip_eval", False)
                 else "pass --dataset pointing at the dataset the run used"
             )
+            error_message = (
+                f"instance_results artifact not found in {analyze_root}; {hint}"
+            )
             manifest.mark_step(
                 "inspect",
                 ManifestStepStatus.FAILED,
@@ -1808,12 +1818,11 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "command": command,
                     "status": manifest.status,
                     "timestamp": manifest.ended_at,
-                    "error": (
-                        f"instance_results artifact not found in {analyze_root}; {hint}"
-                    ),
+                    "error": error_message,
                 },
                 events_path,
             )
+            print(f"repogauge analyze: error: {error_message}", file=sys.stderr)
             return 1
 
         manifest.mark_step(
@@ -1960,6 +1969,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
             return 0
         except Exception as exc:
+            error_message = _format_unexpected_error(exc)
             manifest.mark_step(
                 "inspect",
                 ManifestStepStatus.FAILED,
@@ -1984,10 +1994,11 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "command": command,
                     "status": manifest.status,
                     "timestamp": manifest.ended_at,
-                    "error": str(exc),
+                    "error": error_message,
                 },
                 events_path,
             )
+            print(f"repogauge analyze: error: {error_message}", file=sys.stderr)
             return 1
 
     if command == "train-router":

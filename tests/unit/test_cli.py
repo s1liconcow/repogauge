@@ -1603,8 +1603,13 @@ solvers:
                 encoding="utf-8",
             )
 
-            result = main(["analyze", str(run_root)])
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                result = main(["analyze", str(run_root)])
             self.assertEqual(result, 1)
+            self.assertIn("repogauge analyze: error:", stderr.getvalue())
+            self.assertIn("attempt artifacts not found", stderr.getvalue())
+            self.assertIn("attempts.jsonl", stderr.getvalue())
 
             manifest = json.loads(
                 (run_root / "analyze" / "manifest.json").read_text(encoding="utf-8")
