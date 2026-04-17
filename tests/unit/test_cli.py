@@ -760,6 +760,74 @@ class TestCliSurface(unittest.TestCase):
             self.assertEqual(paths["results"], str(results_path))
             self.assertEqual(paths["instance_results"], str(instance_results_path))
 
+    def test_eval_discovers_matching_adapter_in_out_export(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            artifact_root = Path(workspace) / "out"
+            dataset_root = artifact_root / "eval"
+            export_root = artifact_root / "export"
+            dataset_root.mkdir(parents=True)
+            export_root.mkdir(parents=True)
+
+            dataset_path = dataset_root / "dataset.resolved.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "owner/repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            predictions_path = Path(workspace) / "predictions.jsonl"
+            predictions_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "model_name_or_path": "agent",
+                        "model_patch": "diff",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            adapter_path = export_root / "adapter_owner_repo.py"
+            adapter_path.write_text(
+                'REPO = "owner/repo"\n',
+                encoding="utf-8",
+            )
+
+            out_root = Path(workspace) / "eval_out"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                )
+                result = main(
+                    [
+                        "eval",
+                        str(dataset_path),
+                        "--predictions",
+                        str(predictions_path),
+                        "--out",
+                        str(out_root),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                Path(mock_eval.call_args.kwargs["adapter_path"]),
+                adapter_path,
+            )
+
     def test_run_command_builds_run_root_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             root = Path(workspace)
@@ -1108,6 +1176,91 @@ solvers:
             train_router_result = main(["train-router", str(out_root)])
             self.assertEqual(train_router_result, 0)
             self.assertTrue((out_root / "analyze" / "router_report.json").exists())
+
+    def test_analyze_auto_eval_discovers_matching_adapter_in_out_export(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            out_root = Path(workspace) / "out"
+            run_root = out_root / "run" / "unit-run"
+            eval_root = out_root / "eval"
+            export_root = out_root / "export"
+            run_root.mkdir(parents=True)
+            eval_root.mkdir(parents=True)
+            export_root.mkdir(parents=True)
+
+            dataset_path = eval_root / "dataset.resolved.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "owner/repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            adapter_path = export_root / "adapter_owner_repo.py"
+            adapter_path.write_text(
+                'REPO = "owner/repo"\n',
+                encoding="utf-8",
+            )
+            (run_root / "attempts.jsonl").write_text(
+                json.dumps(
+                    {
+                        "run_id": "unit-run",
+                        "solver_id": "solver-a",
+                        "instance_id": "inst-1",
+                        "duration_ms": 100,
+                        "cost": {"total_cost": 2.0},
+                        "attempt_state": "succeeded",
+                        "model_patch": "diff --git a/x b/x\n+print('ok')",
+                        "dataset_path": str(dataset_path),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            eval_out = run_root / "eval"
+            instance_results_path = eval_out / "instance_results.jsonl"
+
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                def _fake_eval(**kwargs):
+                    eval_out.mkdir(parents=True, exist_ok=True)
+                    instance_results_path.write_text(
+                        json.dumps(
+                            {
+                                "instance_id": "inst-1",
+                                "solver_id": "solver-a",
+                                "status": "resolved",
+                                "resolved": True,
+                                "harness_outcome": "resolved",
+                            }
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    return HarnessRunSummary(
+                        validation_path=str(eval_out / "validation.jsonl"),
+                        total=1,
+                        resolved=1,
+                        not_resolved=0,
+                        error=0,
+                        skipped=0,
+                        resolve_rate=1.0,
+                        harness_output="official_swebench",
+                        instance_results_path=str(instance_results_path),
+                    )
+
+                mock_eval.side_effect = _fake_eval
+                result = main(["analyze", str(run_root)])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                Path(mock_eval.call_args.kwargs["adapter_path"]),
+                adapter_path,
+            )
 
     def test_train_router_writes_report_from_router_training_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

@@ -13,9 +13,11 @@ import hashlib
 import json
 import os
 import platform
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from repogauge.export import run_export, run_materialization
 from repogauge.review import run_review
@@ -26,6 +28,7 @@ from .mining.inspect import inspect_repository
 from .mining.scan import scan_repository
 from repogauge.runner.analyze import (
     build_analysis_report,
+    build_predictions_from_attempts,
     load_attempt_rows,
     load_instance_result_rows,
     summarize_attempt_metrics,
@@ -202,6 +205,68 @@ def _build_parser() -> argparse.ArgumentParser:
                 type=float,
                 help="Threshold for classifying expensive attempts in metrics.",
             )
+            cmd.add_argument(
+                "--dataset",
+                help=(
+                    "Dataset path for the automatic eval pass. Auto-discovered"
+                    " from the run's attempts when omitted."
+                ),
+            )
+            cmd.add_argument(
+                "--adapter",
+                help=(
+                    "Path to adapter_*.py for the automatic eval pass."
+                    " Auto-discovered near the dataset when omitted."
+                ),
+            )
+            cmd.add_argument(
+                "--skip-eval",
+                action="store_true",
+                help=(
+                    "Do not auto-run the harness. Requires instance_results.jsonl"
+                    " to already exist under the run directory."
+                ),
+            )
+            cmd.add_argument(
+                "--timeout",
+                default=120,
+                type=int,
+                help="Per-instance pytest timeout for the automatic eval pass.",
+            )
+            cmd.add_argument(
+                "--workers",
+                default=4,
+                type=int,
+                help="Max parallel instance evaluations for the automatic eval pass.",
+            )
+            cmd.add_argument(
+                "--batch-size",
+                default=32,
+                type=int,
+                help="Max instances per harness batch for the automatic eval pass.",
+            )
+            cmd.add_argument(
+                "--max-parallel-batches",
+                default=1,
+                type=int,
+                help="Max concurrent harness batches for the automatic eval pass.",
+            )
+            cmd.add_argument(
+                "--workers-per-batch",
+                default=1,
+                type=int,
+                help="Worker multiplier per concurrent batch for the auto eval pass.",
+            )
+            cmd.add_argument(
+                "--container-runtime",
+                choices=["docker", "podman"],
+                default="podman",
+                help="Container runtime for the automatic eval pass.",
+            )
+            cmd.add_argument(
+                "--container-host",
+                help="Docker-compatible socket/host override for the auto eval pass.",
+            )
         if name == "train-router":
             cmd.add_argument(
                 "--seed",
@@ -291,6 +356,110 @@ def _resolve_eval_paths(source: Path) -> tuple[Path, Path]:
         dataset = source
         predictions = source.parent / "predictions.gold.jsonl"
     return dataset, predictions
+
+
+def _discover_harness_adapter(search_roots: list[Path]) -> Path | None:
+    """Walk candidate directories looking for a generated ``adapter_*.py``."""
+    return _discover_harness_adapter_for_repo(search_roots, expected_repo=None)
+
+
+_ADAPTER_REPO_PATTERN = re.compile(
+    r"""^REPO\s*=\s*['"](?P<repo>[^'"]+)['"]\s*$""",
+    re.MULTILINE,
+)
+
+
+def _dataset_repo_hint(dataset_path: Path) -> str | None:
+    """Return the repo slug declared by the first dataset row, when available."""
+    try:
+        with dataset_path.open(encoding="utf-8") as stream:
+            for line in stream:
+                value = line.strip()
+                if not value:
+                    continue
+                row = json.loads(value)
+                repo = str(row.get("repo", "")).strip()
+                if repo:
+                    return repo
+                return None
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return None
+
+
+def _adapter_repo_hint(adapter_path: Path) -> str | None:
+    """Read a generated adapter and return its declared repo slug."""
+    try:
+        match = _ADAPTER_REPO_PATTERN.search(
+            adapter_path.read_text(encoding="utf-8")
+        )
+    except OSError:
+        return None
+    if match is None:
+        return None
+    repo = match.group("repo").strip()
+    return repo or None
+
+
+def _iter_adapter_search_roots(search_roots: list[Path]) -> list[Path]:
+    expanded: list[Path] = []
+    seen: set[Path] = set()
+    for root in search_roots:
+        if root is None:
+            continue
+        for candidate in (root, root / "export", root / "out" / "export"):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            expanded.append(candidate)
+    return expanded
+
+
+def _discover_harness_adapter_for_repo(
+    search_roots: list[Path], expected_repo: str | None
+) -> Path | None:
+    """Walk likely artifact locations looking for a matching adapter."""
+    matching_candidates: list[Path] = []
+    fallback_candidates: list[Path] = []
+    seen_files: set[Path] = set()
+    repo_hint = (expected_repo or "").strip()
+    for root in _iter_adapter_search_roots(search_roots):
+        if not root.is_dir():
+            continue
+        for candidate in sorted(root.glob("adapter_*.py")):
+            if candidate in seen_files:
+                continue
+            seen_files.add(candidate)
+            fallback_candidates.append(candidate)
+            if repo_hint and _adapter_repo_hint(candidate) == repo_hint:
+                matching_candidates.append(candidate)
+    if matching_candidates:
+        return matching_candidates[0]
+    if fallback_candidates:
+        return fallback_candidates[0]
+    return None
+
+
+def _dataset_path_from_attempts(attempts_path: Path) -> Path | None:
+    """Read the ``dataset_path`` field from the first attempts row."""
+    try:
+        import json as _json
+
+        with attempts_path.open(encoding="utf-8") as stream:
+            for line in stream:
+                value = line.strip()
+                if not value:
+                    continue
+                row = _json.loads(value)
+                raw = row.get("dataset_path")
+                if raw:
+                    candidate = Path(raw)
+                    if candidate.exists():
+                        return candidate
+                    return None
+    except Exception:
+        return None
+    return None
 
 
 def _parse_group_by(value: str) -> tuple[str, ...]:
@@ -1141,6 +1310,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
 
         # --- Load/locate adapter (per-repo harness settings) -------------------
         adapter_path: Path | None = None
+        expected_repo = _dataset_repo_hint(dataset_path)
         if namespace.adapter:
             candidate = Path(namespace.adapter).resolve()
             if not candidate.exists():
@@ -1168,30 +1338,13 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 return 1
             adapter_path = candidate
         else:
-            seen_dirs: set[Path] = set()
             search_roots: list[Path] = [source]
             if source.is_file():
                 search_roots.append(source.parent)
             search_roots.extend(source.parents[:3])
-            for root in search_roots:
-                if root in seen_dirs:
-                    continue
-                seen_dirs.add(root)
-                if not root.is_dir():
-                    continue
-                candidates = sorted(root.glob("adapter_*.py"))
-                if candidates:
-                    adapter_path = candidates[0]
-                    break
-
-            if adapter_path is None and source.name == "dataset":
-                for root in [source.parent, source.parent.parent]:
-                    if not root.is_dir():
-                        continue
-                    candidates = sorted(root.glob("adapter_*.py"))
-                    if candidates:
-                        adapter_path = candidates[0]
-                        break
+            adapter_path = _discover_harness_adapter_for_repo(
+                search_roots, expected_repo=expected_repo
+            )
 
         if adapter_path is not None:
             print(f"repogauge eval: adapter={adapter_path}", file=sys.stderr)
@@ -1423,7 +1576,193 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
             return 1
 
+        auto_eval_metadata: dict[str, Any] | None = None
+
+        if instance_results_path is None and not getattr(namespace, "skip_eval", False):
+            dataset_override = getattr(namespace, "dataset", None)
+            if dataset_override:
+                dataset_path = Path(dataset_override).resolve()
+                if not dataset_path.exists():
+                    auto_eval_error = f"dataset not found: {dataset_path}"
+                    dataset_path = None
+                else:
+                    auto_eval_error = None
+            else:
+                dataset_path = _dataset_path_from_attempts(attempts_path)
+                auto_eval_error = (
+                    None
+                    if dataset_path is not None
+                    else (
+                        "could not determine dataset path from attempts; "
+                        "pass --dataset or --skip-eval"
+                    )
+                )
+
+            adapter_override = getattr(namespace, "adapter", None)
+            adapter_path: Path | None = None
+            if dataset_path is not None:
+                expected_repo = _dataset_repo_hint(dataset_path)
+                if adapter_override:
+                    candidate = Path(adapter_override).resolve()
+                    if not candidate.exists():
+                        auto_eval_error = f"adapter not found: {candidate}"
+                    else:
+                        adapter_path = candidate
+                else:
+                    adapter_path = _discover_harness_adapter_for_repo(
+                        [
+                            dataset_path.parent,
+                            dataset_path.parent.parent,
+                            dataset_path.parent.parent.parent,
+                            analyze_root,
+                            analyze_root.parent,
+                        ],
+                        expected_repo=expected_repo,
+                    )
+
+            if auto_eval_error is None and dataset_path is not None:
+                eval_out_root = analyze_root / "eval"
+                predictions_path = analyze_root / "predictions.jsonl"
+                print(
+                    f"repogauge analyze: building predictions from {attempts_path}",
+                    file=sys.stderr,
+                )
+                prediction_count = build_predictions_from_attempts(
+                    attempts_path, predictions_path
+                )
+                print(
+                    f"repogauge analyze: wrote {prediction_count} predictions"
+                    f" -> {predictions_path}",
+                    file=sys.stderr,
+                )
+                if prediction_count == 0:
+                    auto_eval_error = (
+                        "no predictions to evaluate: attempts.jsonl has no rows"
+                        " with a model_patch"
+                    )
+                else:
+                    if adapter_path is not None:
+                        print(
+                            f"repogauge analyze: adapter={adapter_path}",
+                            file=sys.stderr,
+                        )
+                    else:
+                        print(
+                            "repogauge analyze: no adapter found;"
+                            " attempting built-in SWE-bench behavior",
+                            file=sys.stderr,
+                        )
+                    print(
+                        f"repogauge analyze: running harness"
+                        f" dataset={dataset_path} out={eval_out_root}",
+                        file=sys.stderr,
+                    )
+                    try:
+                        from repogauge.runner.judge import (
+                            JudgeSchedulerConfig,
+                            run_harness_evaluation,
+                        )
+
+                        eval_summary = run_harness_evaluation(
+                            dataset_path=dataset_path,
+                            predictions_path=predictions_path,
+                            out_root=eval_out_root,
+                            adapter_path=adapter_path,
+                            workers=getattr(namespace, "workers", 4),
+                            timeout_seconds=getattr(namespace, "timeout", 120),
+                            gold_if_missing=False,
+                            judge_config=JudgeSchedulerConfig(
+                                batch_size=getattr(namespace, "batch_size", 32),
+                                max_parallel_batches=getattr(
+                                    namespace, "max_parallel_batches", 1
+                                ),
+                                workers_per_batch=getattr(
+                                    namespace, "workers_per_batch", 1
+                                ),
+                            ),
+                            container_runtime=getattr(
+                                namespace, "container_runtime", "podman"
+                            ),
+                            container_host=getattr(namespace, "container_host", None),
+                        )
+                        print(
+                            f"repogauge analyze: eval resolved"
+                            f" {eval_summary.resolved}/{eval_summary.total}"
+                            f" ({eval_summary.resolve_rate:.1%})",
+                            file=sys.stderr,
+                        )
+                        auto_eval_metadata = {
+                            "dataset": str(dataset_path),
+                            "adapter": str(adapter_path) if adapter_path else None,
+                            "predictions": str(predictions_path),
+                            "predictions_written": prediction_count,
+                            "out_root": str(eval_out_root),
+                            "total": eval_summary.total,
+                            "resolved": eval_summary.resolved,
+                            "not_resolved": eval_summary.not_resolved,
+                            "error": eval_summary.error,
+                            "skipped": eval_summary.skipped,
+                            "resolve_rate": eval_summary.resolve_rate,
+                        }
+                        if eval_summary.instance_results_path is not None:
+                            instance_results_path = Path(
+                                eval_summary.instance_results_path
+                            )
+                        elif eval_summary.validation_path:
+                            instance_results_path = Path(eval_summary.validation_path)
+                    except Exception as exc:
+                        auto_eval_error = (
+                            f"automatic eval pass failed: {exc}. "
+                            "Inspect the harness error above, fix it, then rerun"
+                            " `repogauge analyze`."
+                        )
+
+            if auto_eval_error is not None:
+                manifest.mark_step(
+                    "inspect",
+                    ManifestStepStatus.FAILED,
+                    ended_at=datetime.now(timezone.utc)
+                    .replace(tzinfo=None)
+                    .isoformat()
+                    + "Z",
+                )
+                manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+                manifest.finish(
+                    status="failed",
+                    metadata={
+                        "reason": "analyze_auto_eval_failed",
+                        "path": str(analyze_root),
+                        "error": auto_eval_error,
+                    },
+                )
+                manifest.mark_step(
+                    "finish",
+                    ManifestStepStatus.FAILED,
+                    ended_at=datetime.now(timezone.utc)
+                    .replace(tzinfo=None)
+                    .isoformat()
+                    + "Z",
+                )
+                manifest.write(manifest_path)
+                log_event(
+                    {
+                        "event": "command.finish",
+                        "command": command,
+                        "status": manifest.status,
+                        "timestamp": manifest.ended_at,
+                        "error": auto_eval_error,
+                    },
+                    events_path,
+                )
+                print(f"repogauge analyze: error: {auto_eval_error}", file=sys.stderr)
+                return 1
+
         if instance_results_path is None:
+            hint = (
+                "pass --dataset or drop --skip-eval so analyze can run the harness"
+                if getattr(namespace, "skip_eval", False)
+                else "pass --dataset pointing at the dataset the run used"
+            )
             manifest.mark_step(
                 "inspect",
                 ManifestStepStatus.FAILED,
@@ -1451,7 +1790,10 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "command": command,
                     "status": manifest.status,
                     "timestamp": manifest.ended_at,
-                    "error": f"instance_results artifact not found in {analyze_root}",
+                    "error": (
+                        f"instance_results artifact not found in {analyze_root};"
+                        f" {hint}"
+                    ),
                 },
                 events_path,
             )
@@ -1580,6 +1922,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 "router_training_rows": len(router_rows),
                 "source": str(analyze_root),
                 "input_root": str(source),
+                "auto_eval": auto_eval_metadata,
             }
             manifest.mark_step(
                 "finish",
