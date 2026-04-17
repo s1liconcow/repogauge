@@ -101,6 +101,50 @@ def test_codex_cli_adapter_extracts_nested_diff_from_jsonl_events() -> None:
     assert result.model_patch.startswith("diff --git a/src.py b/src.py\n")
 
 
+def test_codex_cli_adapter_extracts_fenced_diff_from_nested_jsonl_events() -> None:
+    adapter = CodexCLIAdapter(
+        solver_id="solver-a",
+        provider_id="codex",
+        provider_config=_provider_config(),
+        behavior={"model": "gpt-5.4"},
+    )
+    request = adapter.prepare_request(
+        job=_job("run-1:repo__sample-1:solver-a:0"),
+        attempt_id="run-1:repo__sample-1:solver-a:0:attempt-2",
+        attempt_index=1,
+        instance_row=_instance_row(),
+    )
+    output = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": (
+                    "```diff\n"
+                    "diff --git a/src.py b/src.py\n"
+                    "--- a/src.py\n"
+                    "+++ b/src.py\n"
+                    "@@ -1 +1 @@\n"
+                    "-print('before')\n"
+                    "+print('after')\n"
+                    "```"
+                ),
+            },
+        }
+    )
+    with mock.patch(
+        "repogauge.runner.adapters.run_command",
+        return_value=CommandResult(
+            command=["/bin/echo"], returncode=0, stdout=output, stderr=""
+        ),
+    ):
+        result = adapter.execute_attempt(request)
+
+    assert result.status == SolverAttemptState.SUCCEEDED
+    assert result.model_patch.startswith("diff --git a/src.py b/src.py\n")
+    assert not result.model_patch.startswith("f\\n")
+
+
 def test_finalize_output_recovers_nested_edit_plan_from_raw_jsonl() -> None:
     adapter = CodexCLIAdapter(
         solver_id="solver-a",

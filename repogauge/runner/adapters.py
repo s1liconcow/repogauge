@@ -190,23 +190,14 @@ def _extract_patch_from_text(raw_output: str) -> str:
                     )
                 break
 
-        block_start = (
-            stripped.lower().find("```diff"),
-            stripped.lower().find("```patch"),
+        fenced = re.search(
+            r"```(?:diff|patch)\r?\n(.*?)```", stripped, flags=re.S | re.I
         )
-        for start in block_start:
-            if start != -1:
-                chunk = stripped[start:]
-                end = chunk.find("```", 6)
-                if end != -1:
-                    code = chunk[6:end].strip()
-                    if "diff --git" in code:
-                        normalized = code.strip("\n")
-                        return (
-                            normalized
-                            if normalized.endswith("\n")
-                            else normalized + "\n"
-                        )
+        if fenced:
+            code = fenced.group(1).strip()
+            if "diff --git" in code:
+                normalized = code.strip("\n")
+                return normalized if normalized.endswith("\n") else normalized + "\n"
 
         return ""
 
