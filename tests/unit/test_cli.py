@@ -1029,6 +1029,10 @@ solvers:
             self.assertTrue(Path(paths["analyze_report_parquet"]).exists())
             self.assertTrue(Path(paths["analyze_report_html"]).exists())
             self.assertTrue(Path(paths["router_train"]).exists())
+            self.assertEqual(
+                Path(paths["router_train"]),
+                run_root / "analyze" / "router_train.parquet",
+            )
             self.assertEqual(manifest["step_statuses"]["execute"], "succeeded")
 
             summary = json.loads(
@@ -1038,6 +1042,70 @@ solvers:
             self.assertEqual(summary["metadata"]["instance_result_rows"], 2)
             self.assertEqual(len(summary["summary"]), 1)
             self.assertEqual(summary["metadata"]["router_training_rows"], 2)
+            self.assertEqual(summary["metadata"]["input_root"], str(run_root))
+
+    def test_analyze_discovers_run_and_eval_artifacts_from_out_root(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            out_root = Path(workspace) / "out"
+            run_root = out_root / "run" / "unit-run"
+            eval_root = out_root / "eval"
+            run_root.mkdir(parents=True)
+            eval_root.mkdir(parents=True)
+            (run_root / "attempts.jsonl").write_text(
+                json.dumps(
+                    {
+                        "run_id": "unit-run",
+                        "solver_id": "solver-a",
+                        "instance_id": "inst-1",
+                        "duration_ms": 100,
+                        "cost": {"total_cost": 2.0},
+                        "attempt_state": "succeeded",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (eval_root / "instance_results.jsonl").write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-1",
+                        "solver_id": "solver-a",
+                        "status": "resolved",
+                        "resolved": True,
+                        "harness_outcome": "resolved",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = main(["analyze", str(out_root)])
+            self.assertEqual(result, 0)
+
+            manifest = json.loads(
+                (out_root / "analyze" / "manifest.json").read_text(encoding="utf-8")
+            )
+            paths = manifest["artifact_paths"]
+            self.assertEqual(Path(paths["analyze_attempts"]), run_root / "attempts.jsonl")
+            self.assertEqual(
+                Path(paths["analyze_instance_results"]),
+                eval_root / "instance_results.jsonl",
+            )
+            self.assertEqual(
+                Path(paths["router_train"]),
+                out_root / "analyze" / "router_train.parquet",
+            )
+            self.assertTrue(Path(paths["router_train"]).exists())
+
+            summary = json.loads(
+                Path(paths["analyze_summary"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["metadata"]["run_root"], str(out_root))
+            self.assertEqual(summary["metadata"]["input_root"], str(out_root))
+
+            train_router_result = main(["train-router", str(out_root)])
+            self.assertEqual(train_router_result, 0)
+            self.assertTrue((out_root / "analyze" / "router_report.json").exists())
 
     def test_train_router_writes_report_from_router_training_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
@@ -1166,6 +1234,54 @@ solvers:
             self.assertEqual(manifest["status"], "failed")
             self.assertEqual(manifest["step_statuses"]["inspect"], "failed")
             self.assertEqual(manifest["step_statuses"]["execute"], "skipped")
+
+    def test_analyze_fails_when_instance_results_do_not_match_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            run_root = Path(workspace) / "unit-run"
+            run_root.mkdir()
+            (run_root / "attempts.jsonl").write_text(
+                json.dumps(
+                    {
+                        "run_id": "unit-run",
+                        "solver_id": "solver-a",
+                        "instance_id": "inst-1",
+                        "duration_ms": 100,
+                        "cost": {"total_cost": 2.0},
+                        "attempt_state": "succeeded",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (run_root / "instance_results.jsonl").write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-1",
+                        "solver_id": "",
+                        "status": "resolved",
+                        "resolved": True,
+                        "harness_outcome": "resolved",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = main(["analyze", str(run_root)])
+            self.assertEqual(result, 1)
+
+            manifest = json.loads(
+                (run_root / "analyze" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["status"], "failed")
+            self.assertEqual(
+                manifest["metadata"]["reason"],
+                "analyze_failed",
+            )
+            self.assertIn(
+                "instance_results rows do not match any attempt",
+                manifest["metadata"]["error"],
+            )
 
 
 if __name__ == "__main__":

@@ -336,6 +336,101 @@ def _load_dataset_rows(dataset_path: Path) -> dict[str, dict[str, object]]:
     return rows
 
 
+def _resolve_analyze_paths(source: Path) -> tuple[Path | None, Path | None, Path]:
+    if source.is_file():
+        analyze_root = source.parent
+    elif source.is_dir():
+        analyze_root = source
+    else:
+        analyze_root = source.parent
+    if not analyze_root.is_dir():
+        analyze_root = Path(".").resolve()
+
+    attempts_path = next(
+        (
+            candidate
+            for candidate in (
+                analyze_root / "attempts.jsonl",
+                analyze_root / "attempts.parquet",
+            )
+            if candidate.exists()
+        ),
+        None,
+    )
+    if attempts_path is None:
+        nested_attempts: list[Path] = []
+        run_root = analyze_root / "run"
+        if run_root.is_dir():
+            for child in sorted(path for path in run_root.iterdir() if path.is_dir()):
+                nested = next(
+                    (
+                        candidate
+                        for candidate in (
+                            child / "attempts.jsonl",
+                            child / "attempts.parquet",
+                        )
+                        if candidate.exists()
+                    ),
+                    None,
+                )
+                if nested is not None:
+                    nested_attempts.append(nested)
+        if len(nested_attempts) == 1:
+            attempts_path = nested_attempts[0]
+        elif len(nested_attempts) > 1:
+            raise RuntimeError(
+                f"multiple attempt artifacts found under {run_root}; "
+                "pass a specific run directory to analyze"
+            )
+
+    instance_results_path = next(
+        (
+            candidate
+            for candidate in (
+                analyze_root / "instance_results.jsonl",
+                analyze_root / "validation.jsonl",
+            )
+            if candidate.exists()
+        ),
+        None,
+    )
+    if instance_results_path is None:
+        eval_root = analyze_root / "eval"
+        instance_results_path = next(
+            (
+                candidate
+                for candidate in (
+                    eval_root / "instance_results.jsonl",
+                    eval_root / "validation.jsonl",
+                )
+                if candidate.exists()
+            ),
+            None,
+        )
+
+    return attempts_path, instance_results_path, analyze_root
+
+
+def _count_matching_instance_results(
+    attempt_rows: list[dict[str, object]],
+    instance_results: list[dict[str, object]],
+) -> int:
+    attempt_keys = {
+        (str(row.get("solver_id", "")), str(row.get("instance_id", "")))
+        for row in attempt_rows
+        if str(row.get("solver_id", "")) and str(row.get("instance_id", ""))
+    }
+    if not attempt_keys:
+        return 0
+
+    instance_result_keys = {
+        (str(row.get("solver_id", "")), str(row.get("instance_id", "")))
+        for row in instance_results
+        if str(row.get("solver_id", "")) and str(row.get("instance_id", ""))
+    }
+    return len(attempt_keys & instance_result_keys)
+
+
 def _run_command(namespace: argparse.Namespace) -> int:
     command = namespace.command
     source = Path(namespace.path).resolve() if namespace.path else Path(".").resolve()
@@ -1254,18 +1349,46 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
             return 1
 
-        analyze_root = run_root if run_root.is_dir() else run_root.parent
-        if not analyze_root.is_dir():
-            analyze_root = Path(".").resolve()
+        try:
+            attempts_path, instance_results_path, analyze_root = _resolve_analyze_paths(
+                source
+            )
+        except RuntimeError as exc:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={
+                    "reason": "analyze_input_resolution_failed",
+                    "path": str(source),
+                    "error": str(exc),
+                },
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            print(f"repogauge analyze: error: {exc}", file=sys.stderr)
+            return 1
 
-        attempts_path = None
-        for candidate in (
-            analyze_root / "attempts.jsonl",
-            analyze_root / "attempts.parquet",
-        ):
-            if candidate.exists():
-                attempts_path = candidate
-                break
         if attempts_path is None:
             manifest.mark_step(
                 "inspect",
@@ -1300,14 +1423,6 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
             return 1
 
-        instance_results_path = None
-        for candidate in (
-            analyze_root / "instance_results.jsonl",
-            analyze_root / "validation.jsonl",
-        ):
-            if candidate.exists():
-                instance_results_path = candidate
-                break
         if instance_results_path is None:
             manifest.mark_step(
                 "inspect",
@@ -1348,8 +1463,18 @@ def _run_command(namespace: argparse.Namespace) -> int:
         try:
             attempt_rows = load_attempt_rows(attempts_path)
             instance_results = load_instance_result_rows(instance_results_path)
+            matched_instance_results = _count_matching_instance_results(
+                attempt_rows,
+                instance_results,
+            )
+            if attempt_rows and instance_results and matched_instance_results == 0:
+                raise RuntimeError(
+                    "instance_results rows do not match any attempt "
+                    f"(solver_id, instance_id) pairs; attempts={attempts_path} "
+                    f"instance_results={instance_results_path}"
+                )
             router_rows = build_router_training_rows(attempt_rows, instance_results)
-            router_train_path = run_root / "router_train.parquet"
+            router_train_path = out_root / "router_train.parquet"
             summary_rows = summarize_attempt_metrics(
                 attempts=attempt_rows,
                 instance_results=instance_results,
@@ -1371,6 +1496,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 expensive_cost_threshold=float(namespace.expensive_cost_threshold),
                 metadata={
                     "run_root": str(analyze_root),
+                    "input_root": str(source),
                     "group_by": _parse_group_by(namespace.group_by),
                     "expensive_cost_threshold": namespace.expensive_cost_threshold,
                     "task_feature_version": TASK_FEATURE_VERSION,
@@ -1390,6 +1516,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 summary_rows,
                 metadata={
                     "run_root": str(analyze_root),
+                    "input_root": str(source),
                     "group_by": _parse_group_by(namespace.group_by),
                     "expensive_cost_threshold": namespace.expensive_cost_threshold,
                     "task_feature_version": TASK_FEATURE_VERSION,
@@ -1415,6 +1542,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 group_by=_parse_group_by(namespace.group_by),
                 metadata={
                     "run_root": str(analyze_root),
+                    "input_root": str(source),
                     "group_by": _parse_group_by(namespace.group_by),
                     "task_feature_version": TASK_FEATURE_VERSION,
                     "attempt_rows": len(attempt_rows),
@@ -1451,6 +1579,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 "summary_rows": len(summary_rows),
                 "router_training_rows": len(router_rows),
                 "source": str(analyze_root),
+                "input_root": str(source),
             }
             manifest.mark_step(
                 "finish",
