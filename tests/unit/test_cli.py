@@ -1141,6 +1141,102 @@ solvers:
                 "unix:///tmp/docker.sock",
             )
 
+    def test_run_builds_default_dataset_images_from_row_list(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            dataset_path = root / "dataset.jsonl"
+            dataset_row = {
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc",
+                "problem_statement": "fix foo",
+                "version": "1",
+                "patch": "diff --git a/x b/x\n+print('ok')",
+                "test_patch": "",
+                "FAIL_TO_PASS": [],
+                "PASS_TO_PASS": [],
+            }
+            dataset_path.write_text(
+                json.dumps(dataset_row) + "\n",
+                encoding="utf-8",
+            )
+
+            matrix_path = root / "matrix.yaml"
+            matrix_path.write_text(
+                """
+run_id: unit-run
+dataset:
+  path: dataset.jsonl
+providers:
+  codex:
+    kind: codex_cli
+    command: codex
+solvers:
+  - id: solver-a
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.4
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            @contextmanager
+            def fake_runtime(*, container_runtime: str, container_host: str | None):
+                self.assertEqual(container_runtime, "podman")
+                self.assertIsNone(container_host)
+                yield "unix:///tmp/podman.sock"
+
+            fake_adapter = unittest.mock.Mock()
+            fake_adapter.requires_workspace.return_value = False
+            fake_summary = SolverScheduleResult(
+                jobs=(
+                    SolverJobProgress(
+                        job_id="job-1",
+                        final_status="succeeded",
+                        attempts=1,
+                        attempt_ids=("job-1:attempt-1",),
+                    ),
+                ),
+                completed_at="2026-01-01T00:00:00Z",
+            )
+            fake_client = object()
+
+            with (
+                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
+                patch("docker.from_env", return_value=fake_client) as mock_from_env,
+                patch(
+                    "swebench.harness.docker_build.build_env_images"
+                ) as mock_build_env_images,
+                patch("repogauge.cli.build_solver_adapters") as mock_build_adapters,
+                patch("repogauge.cli.SolverScheduler.run") as mock_run,
+            ):
+                mock_build_adapters.return_value = {"solver-a": fake_adapter}
+                mock_run.return_value = fake_summary
+
+                result = main(["run", str(matrix_path), "--out", str(root / "out")])
+
+            self.assertEqual(result, 0)
+            self.assertIs(mock_from_env.return_value, fake_client)
+            self.assertEqual(mock_build_env_images.call_args.args[0], fake_client)
+            self.assertEqual(mock_build_env_images.call_args.args[1], [dataset_row])
+
+    def test_run_reports_unexpected_exception_type(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            matrix_path = root / "matrix.yaml"
+            matrix_path.write_text("run_id: broken\n", encoding="utf-8")
+            stderr = StringIO()
+
+            with (
+                patch("repogauge.cli.load_matrix_config", side_effect=KeyError(0)),
+                redirect_stderr(stderr),
+            ):
+                result = main(["run", str(matrix_path), "--out", str(root / "out")])
+
+            self.assertEqual(result, 1)
+            self.assertIn("repogauge run: error: KeyError: 0", stderr.getvalue())
+
     def test_analyze_generates_reports_and_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             run_root = Path(workspace) / "unit-run"

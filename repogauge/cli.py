@@ -517,6 +517,14 @@ def _load_dataset_rows(dataset_path: Path) -> dict[str, dict[str, object]]:
     return rows
 
 
+def _format_unexpected_error(exc: Exception) -> str:
+    detail = str(exc).strip()
+    exc_name = type(exc).__name__
+    if not detail:
+        return exc_name
+    return f"{exc_name}: {detail}"
+
+
 def _resolve_analyze_paths(source: Path) -> tuple[Path | None, Path | None, Path]:
     if source.is_file():
         analyze_root = source.parent
@@ -2272,7 +2280,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                             client = docker_module.from_env()
                             build_env_images(
                                 client,
-                                dataset_rows,
+                                list(dataset_rows.values()),
                                 force_rebuild=False,
                                 max_workers=4,
                                 namespace=None,
@@ -2445,6 +2453,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             print(f"repogauge run: error: {exc}", file=sys.stderr)
             return 1
         except Exception as exc:  # pragma: no cover - defensive
+            formatted_error = _format_unexpected_error(exc)
             manifest.mark_step(
                 "inspect",
                 ManifestStepStatus.FAILED,
@@ -2454,7 +2463,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
             manifest.finish(
                 status="failed",
-                metadata={"reason": "run_unexpected_failure", "error": str(exc)},
+                metadata={"reason": "run_unexpected_failure", "error": formatted_error},
             )
             manifest.mark_step(
                 "finish",
@@ -2469,11 +2478,11 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "command": command,
                     "status": manifest.status,
                     "timestamp": manifest.ended_at,
-                    "error": str(exc),
+                    "error": formatted_error,
                 },
                 events_path,
             )
-            print(f"repogauge run: error: {exc}", file=sys.stderr)
+            print(f"repogauge run: error: {formatted_error}", file=sys.stderr)
             return 1
 
     # Scaffold implementations are intentionally explicit no-ops for unimplemented commands.
