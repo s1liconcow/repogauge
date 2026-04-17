@@ -185,7 +185,9 @@ def _extract_patch_from_text(raw_output: str) -> str:
                 lines = "\n".join(stripped.splitlines()[line_no:])
                 normalized = lines.strip("\n")
                 if normalized:
-                    return normalized if normalized.endswith("\n") else normalized + "\n"
+                    return (
+                        normalized if normalized.endswith("\n") else normalized + "\n"
+                    )
                 break
 
         block_start = (
@@ -201,7 +203,9 @@ def _extract_patch_from_text(raw_output: str) -> str:
                     if "diff --git" in code:
                         normalized = code.strip("\n")
                         return (
-                            normalized if normalized.endswith("\n") else normalized + "\n"
+                            normalized
+                            if normalized.endswith("\n")
+                            else normalized + "\n"
                         )
 
         return ""
@@ -270,7 +274,9 @@ def _extract_edit_plan_text(raw_output: str) -> str:
                     if isinstance(path, str) and isinstance(
                         content, (str, int, float, bool, type(None))
                     ):
-                        files.append((path, str(content) if content is not None else ""))
+                        files.append(
+                            (path, str(content) if content is not None else "")
+                        )
             elif isinstance(mapping, list):
                 for entry in mapping:
                     if isinstance(entry, Mapping):
@@ -349,7 +355,11 @@ def _extract_edit_plan_text(raw_output: str) -> str:
             return candidate
 
     payload = _safe_parse_json(text)
-    if payload is not None and _has_direct_edit_plan(payload) and _collect_edit_entries(payload):
+    if (
+        payload is not None
+        and _has_direct_edit_plan(payload)
+        and _collect_edit_entries(payload)
+    ):
         return text
 
     return ""
@@ -530,9 +540,9 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
     def finalize_output(
         self, request: SolverAdapterRequest, result: SolverAdapterResult
     ) -> SolverAdapterResult:
-        patch = _extract_structured_output_text(result.model_patch) or _extract_structured_output_text(
-            result.raw_output
-        )
+        patch = _extract_structured_output_text(
+            result.model_patch
+        ) or _extract_structured_output_text(result.raw_output)
         metadata = dict(result.metadata)
         metadata["solver_id"] = self.solver_id
         metadata["provider_id"] = self.provider_id

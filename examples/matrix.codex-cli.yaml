@@ -13,6 +13,7 @@ solvers:
     provider: codex
     adapter: codex_cli
     model: gpt-5.4-mini
+    timeout_seconds: 300
     prompt_policy:
       template: concise
     tool_policy:

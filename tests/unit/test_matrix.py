@@ -320,3 +320,63 @@ solvers:
             raise AssertionError("expected MatrixConfigurationError")
         except MatrixConfigurationError as exc:
             assert "incompatible" in str(exc)
+
+
+def test_solver_timeout_seconds_is_preserved_in_behavior() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        matrix_text = """
+dataset:
+  path: dataset.jsonl
+providers:
+  codex:
+    kind: codex_cli
+    command: codex
+solvers:
+  - id: solver-a
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.4-mini
+    timeout_seconds: 300
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        matrix = load_matrix_config(matrix_path)
+
+        assert matrix.solvers[0].behavior["timeout_seconds"] == 300
+
+
+def test_solver_timeout_seconds_must_be_positive_integer() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        matrix_text = """
+dataset:
+  path: dataset.jsonl
+providers:
+  codex:
+    kind: codex_cli
+    command: codex
+solvers:
+  - id: solver-a
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.4-mini
+    timeout_seconds: 0
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        try:
+            load_matrix_config(matrix_path)
+            raise AssertionError("expected MatrixConfigurationError")
+        except MatrixConfigurationError as exc:
+            assert "solver.timeout_seconds must be >= 1" in str(exc)

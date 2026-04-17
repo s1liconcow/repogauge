@@ -88,7 +88,9 @@ def _extract_unified_patch(raw: str) -> str:
                 patch_lines = "\n".join(lines[index:]).strip("\n")
                 if patch_lines:
                     return (
-                        patch_lines if patch_lines.endswith("\n") else patch_lines + "\n"
+                        patch_lines
+                        if patch_lines.endswith("\n")
+                        else patch_lines + "\n"
                     )
         m = re.search(r"```(?:diff|patch)\n(.*?)```", text, flags=re.S | re.I)
         if m:
@@ -143,7 +145,10 @@ def _extract_edit_plan(raw: str) -> list[tuple[str, str]]:
                 and "diff --git" in payload["model_patch"]
             ):
                 return []
-            if isinstance(payload.get("patch"), str) and "diff --git" in payload["patch"]:
+            if (
+                isinstance(payload.get("patch"), str)
+                and "diff --git" in payload["patch"]
+            ):
                 return []
 
             mapping = payload.get("files")

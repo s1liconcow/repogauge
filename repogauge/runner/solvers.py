@@ -89,6 +89,21 @@ def _coerce_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
     return dict(value)
 
 
+def _coerce_int(
+    value: Any,
+    *,
+    field_name: str,
+    minimum: int | None = None,
+) -> int:
+    if isinstance(value, bool):
+        raise SolverConfigurationError(f"{field_name} must be an integer")
+    if not isinstance(value, int):
+        raise SolverConfigurationError(f"{field_name} must be an integer")
+    if minimum is not None and value < minimum:
+        raise SolverConfigurationError(f"{field_name} must be >= {minimum}")
+    return value
+
+
 @dataclass(frozen=True)
 class SolverConfig:
     """Normalized solver configuration."""
@@ -167,6 +182,14 @@ def normalize_solver(
     behavior = dict(payload)
     for field in KNOWN_SOLVER_FIELDS:
         behavior.pop(field, None)
+
+    timeout_seconds = behavior.get("timeout_seconds")
+    if timeout_seconds is not None:
+        behavior["timeout_seconds"] = _coerce_int(
+            timeout_seconds,
+            field_name="solver.timeout_seconds",
+            minimum=1,
+        )
 
     return SolverConfig(
         solver_id=solver_id,

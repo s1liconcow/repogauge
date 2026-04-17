@@ -136,7 +136,9 @@ def test_finalize_output_recovers_nested_edit_plan_from_raw_jsonl() -> None:
     assert json.loads(result.model_patch) == edit_plan
 
 
-def test_normalize_solver_output_recovers_nested_diff_from_jsonl(tmp_path: Path) -> None:
+def test_normalize_solver_output_recovers_nested_diff_from_jsonl(
+    tmp_path: Path,
+) -> None:
     repo, commit = _create_repo(tmp_path)
     row = {
         "instance_id": "repo__sample-1",
