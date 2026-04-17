@@ -2404,6 +2404,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 },
                 events_path,
             )
+            print(f"repogauge run: error: {exc}", file=sys.stderr)
             return 1
         except (
             SolverAdapterError,
@@ -2441,6 +2442,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 },
                 events_path,
             )
+            print(f"repogauge run: error: {exc}", file=sys.stderr)
             return 1
         except Exception as exc:  # pragma: no cover - defensive
             manifest.mark_step(
@@ -2471,6 +2473,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 },
                 events_path,
             )
+            print(f"repogauge run: error: {exc}", file=sys.stderr)
             return 1
 
     # Scaffold implementations are intentionally explicit no-ops for unimplemented commands.

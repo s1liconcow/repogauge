@@ -2,6 +2,8 @@ import unittest
 
 import json
 from contextlib import contextmanager
+from io import StringIO
+from contextlib import redirect_stderr
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
@@ -1026,9 +1028,25 @@ solvers:
             )
 
             out = root / "out"
-            result = main(["run", str(matrix_path), "--out", str(out)])
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                result = main(["run", str(matrix_path), "--out", str(out)])
             self.assertEqual(result, 1)
             self.assertFalse((out / "matrix").exists())
+            self.assertIn("repogauge run: error:", stderr.getvalue())
+            self.assertIn("references unknown provider", stderr.getvalue())
+
+    def test_run_missing_matrix_prints_useful_error(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            out = Path(workspace) / "out"
+            missing = Path(workspace) / "missing.yaml"
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                result = main(["run", str(missing), "--out", str(out)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("repogauge run: error:", stderr.getvalue())
+            self.assertIn("matrix file not found", stderr.getvalue())
 
     def test_run_threads_container_runtime_flags_to_workspace_cli_solvers(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
