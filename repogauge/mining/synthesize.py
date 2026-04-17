@@ -19,6 +19,24 @@ def _coerce_text(value: Any) -> str:
     return " ".join(value.strip().split())
 
 
+def _coerce_block_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+
+    normalized_lines: list[str] = []
+    pending_blank = False
+    for raw_line in value.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = " ".join(raw_line.strip().split())
+        if line:
+            if pending_blank and normalized_lines:
+                normalized_lines.append("")
+            normalized_lines.append(line)
+            pending_blank = False
+        elif normalized_lines:
+            pending_blank = True
+    return "\n".join(normalized_lines).strip()
+
+
 def _coerce_list(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
@@ -34,13 +52,6 @@ def _coerce_mapping(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {}
-
-
-def _compact_text(value: Any, *, limit: int = 220) -> str:
-    text = _coerce_text(value)
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3].rstrip() + "..."
 
 
 def _unique_preserve(values: Iterable[str]) -> list[str]:
@@ -74,6 +85,18 @@ def _pick_ref(row: Dict[str, Any], keys: Iterable[str]) -> str:
         if value:
             return value
         value = _coerce_text(metadata.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _pick_block_text(row: Dict[str, Any], keys: Iterable[str]) -> str:
+    metadata = _coerce_mapping(row.get("metadata"))
+    for key in keys:
+        value = _coerce_block_text(row.get(key))
+        if value:
+            return value
+        value = _coerce_block_text(metadata.get(key))
         if value:
             return value
     return ""
@@ -127,7 +150,7 @@ def _issue_contexts(row: Dict[str, Any]) -> list[Dict[str, str]]:
             return
         ref = _coerce_text(context.get("ref") or context.get("issue_ref"))
         title = _coerce_text(context.get("title") or context.get("issue_title"))
-        body = _coerce_text(context.get("body") or context.get("issue_body"))
+        body = _coerce_block_text(context.get("body") or context.get("issue_body"))
         url = _coerce_text(context.get("url") or context.get("issue_url"))
         key = ref or title or body or url
         if not key:
@@ -158,7 +181,7 @@ def _issue_contexts(row: Dict[str, Any]) -> list[Dict[str, str]]:
                 row,
                 ("issue_title", "linked_issue_title", "source_issue_title"),
             ),
-            "body": _pick_text(
+            "body": _pick_block_text(
                 row,
                 ("issue_body", "linked_issue_body", "source_issue_body"),
             ),
@@ -200,9 +223,11 @@ def _load_bead_contexts(repo_root: str) -> dict[str, Dict[str, str]]:
         contexts[bead_id] = {
             "id": bead_id,
             "title": _coerce_text(payload.get("title")),
-            "description": _coerce_text(payload.get("description")),
-            "acceptance_criteria": _coerce_text(payload.get("acceptance_criteria")),
-            "design": _coerce_text(payload.get("design")),
+            "description": _coerce_block_text(payload.get("description")),
+            "acceptance_criteria": _coerce_block_text(
+                payload.get("acceptance_criteria")
+            ),
+            "design": _coerce_block_text(payload.get("design")),
         }
     return contexts
 
@@ -244,6 +269,26 @@ def _render_file_summary(file_roles: Dict[str, list[str]]) -> str:
     return " ".join(details)
 
 
+def _indented_block(label: str, text: str, *, indent: str = "  ") -> list[str]:
+    block = _coerce_block_text(text)
+    if not block:
+        return []
+    lines = block.splitlines()
+    if len(lines) == 1:
+        return [f"{indent}{label}: {lines[0]}"]
+    return [f"{indent}{label}:"] + [f"{indent}{line}" for line in lines]
+
+
+def _bullet_labeled_block(label: str, text: str) -> list[str]:
+    block = _coerce_block_text(text)
+    if not block:
+        return []
+    lines = block.splitlines()
+    if len(lines) == 1:
+        return [f"- {label}: {lines[0]}"]
+    return [f"- {label}:"] + [f"  {line}" for line in lines]
+
+
 def _render_issue_context_lines(
     row: Dict[str, Any], *, skip_refs: set[str] | None = None
 ) -> list[str]:
@@ -253,16 +298,18 @@ def _render_issue_context_lines(
         if ref and skip_refs and ref in skip_refs:
             continue
         prefix = f"Related GitHub issue #{ref}" if ref else "Related GitHub issue"
-        title = _compact_text(context.get("title"), limit=140)
-        body = _compact_text(context.get("body"), limit=180)
+        title = _coerce_text(context.get("title"))
+        body = _coerce_block_text(context.get("body"))
         if title and body and body != title:
-            lines.append(f"- {prefix}: {title}. Context: {body}")
+            lines.append(f"- {prefix}: {title}")
+            lines.extend(_indented_block("Context", body))
             continue
         if title:
             lines.append(f"- {prefix}: {title}")
             continue
         if body:
-            lines.append(f"- {prefix}: {body}")
+            lines.append(f"- {prefix}.")
+            lines.extend(_indented_block("Context", body))
             continue
         lines.append(f"- {prefix}.")
     return lines
@@ -274,16 +321,15 @@ def _render_bead_context_lines(
     lines: list[str] = []
     for context in _bead_contexts(row, repo_root):
         bead_id = _coerce_text(context.get("id"))
-        title = _compact_text(context.get("title"), limit=140)
-        description = _compact_text(context.get("description"), limit=180)
-        acceptance = _compact_text(context.get("acceptance_criteria"), limit=140)
+        title = _coerce_text(context.get("title"))
+        description = _coerce_block_text(context.get("description"))
+        acceptance = _coerce_block_text(context.get("acceptance_criteria"))
         detail = title or description or acceptance or "Referenced bead context."
-        line = f"- Bead {bead_id}: {detail}"
+        lines.append(f"- Bead {bead_id}: {detail}")
         if description and description != detail:
-            line += f" Context: {description}"
+            lines.extend(_indented_block("Context", description))
         if acceptance:
-            line += f" Acceptance: {acceptance}"
-        lines.append(line)
+            lines.extend(_indented_block("Acceptance", acceptance))
     return lines
 
 
@@ -319,7 +365,7 @@ def _issue_style_statement(
     if reference:
         parts.append(f"- Source reference: {reference}")
     if body_text:
-        parts.append(f"- Context: {body_text}")
+        parts.extend(_bullet_labeled_block("Context", body_text))
     parts.extend(line for line in supporting_lines if line)
     parts.extend(
         [
@@ -402,7 +448,7 @@ def synthesize_problem_statement(
         row,
         ("issue_title", "linked_issue_title", "source_issue_title"),
     )
-    issue_body = _pick_text(
+    issue_body = _pick_block_text(
         row,
         ("issue_body", "linked_issue_body", "source_issue_body"),
     )
@@ -426,7 +472,7 @@ def synthesize_problem_statement(
         row,
         ("pr_title", "pull_request_title", "source_pr_title"),
     )
-    pr_body = _pick_text(
+    pr_body = _pick_block_text(
         row,
         ("pr_body", "pull_request_body", "source_pr_body"),
     )

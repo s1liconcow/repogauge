@@ -13,7 +13,7 @@ REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 OUT_DIR="$REPO_ROOT/out"
 # NOTE: --out must be a path inside the repo so that the export step can
 # resolve the git root by walking up from the output directory.
-MAX_COMMITS=100
+MAX_COMMITS=300
 DECISIONS_FILE=""
 EVAL_WORKERS=4
 EVAL_BATCH_SIZE=32
@@ -92,6 +92,8 @@ if [[ "$EVAL_OK" -eq 1 ]]; then
     echo "  review/review.html"
     echo "  export/dataset/dataset.jsonl"
     echo "  export/dataset/predictions.gold.jsonl"
+    echo "  eval/dataset.resolved.jsonl"
+    echo "  eval/predictions.resolved.jsonl"
     echo "  eval/validation.jsonl"
 else
     echo "Artifacts written to $OUT_DIR:"

@@ -113,6 +113,9 @@ review/reviewed.jsonl               accept/reject decisions
 review/review.html                  human-readable review report
 export/dataset/dataset.jsonl        SWE-bench-compatible instances
 export/dataset/predictions.gold.jsonl
+eval/dataset.resolved.jsonl         resolved-only dataset slice from eval
+eval/predictions.resolved.jsonl     predictions for resolved-only slice
+eval/validation.jsonl               full per-instance evaluation ledger
 ```
 
 ### Command artifact contract (current scaffold)
@@ -127,7 +130,8 @@ For `--out` directory `./out`, the scaffold writes command-specific artifacts:
 - `reviewed.jsonl`, `review.md`, `review.html` for `review`
 - `materialized.jsonl`, `materialization_rejections.jsonl`, `dataset/dataset.jsonl`,
   `dataset/predictions.gold.jsonl`, `adapter_<repo>.py`, `specs.json` for `export`
-- `validation.jsonl` for `eval`
+- `dataset.resolved.jsonl`, `predictions.resolved.jsonl`, `validation.jsonl`,
+  `instance_results.jsonl` for `eval`
 
 This list reflects what the v0.1 scaffold guarantees today; future stages
 extend it to include run-level and analysis artifacts.
@@ -155,10 +159,10 @@ uv run repogauge eval ./out/export/dataset/dataset.jsonl --gold --llm-mode off
 ```
 
 For a runnable matrix run using only local behavior, use the included
-`examples/matrix.yaml` and a dataset from your export step:
+`examples/matrix.yaml` and the resolved-only dataset emitted by `eval`:
 
 ```bash
-uv run repogauge run examples/matrix.yaml --dataset ./out/export/dataset/dataset.jsonl --out ./out/run
+uv run repogauge run examples/matrix.yaml --dataset ./out/eval/dataset.resolved.jsonl --out ./out/run
 ```
 
 ### Tutorials and examples

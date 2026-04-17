@@ -20,6 +20,13 @@ class CommandPatchError(RuntimeError):
     """Raised when patch application or reversal fails."""
 
 
+_STALE_WORKTREE_ERROR_MARKERS = (
+    "missing but already registered worktree",
+    "already registered worktree",
+    "already checked out at",
+)
+
+
 def get_repo_root(path: str | Path) -> Path:
     """Return the repository root for ``path``."""
     result = run_command(["git", "-C", str(path), "rev-parse", "--show-toplevel"])
@@ -127,6 +134,15 @@ class WorktreeHandle:
         remove_worktree(self.repo, self.path)
 
 
+def _prune_worktrees(repo: Path) -> None:
+    run_command(["git", "-C", str(repo), "worktree", "prune"])
+
+
+def _worktree_add_failed_due_to_stale_registration(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in _STALE_WORKTREE_ERROR_MARKERS)
+
+
 def create_worktree(
     path: str | Path,
     *,
@@ -141,9 +157,24 @@ def create_worktree(
     else:
         temp_path = Path(worktree_path)
 
+    _prune_worktrees(repo)
     result = run_command(
         ["git", "-C", str(repo), "worktree", "add", "--detach", str(temp_path), ref]
     )
+    combined_output = result.stderr.strip() or result.stdout.strip()
+    if (
+        not result.success
+        and _worktree_add_failed_due_to_stale_registration(combined_output)
+    ):
+        run_command(
+            ["git", "-C", str(repo), "worktree", "remove", "--force", str(temp_path)]
+        )
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
+        _prune_worktrees(repo)
+        result = run_command(
+            ["git", "-C", str(repo), "worktree", "add", "--detach", str(temp_path), ref]
+        )
     if not result.success:
         if worktree_path is None and temp_path.exists():
             shutil.rmtree(temp_path, ignore_errors=True)
@@ -160,6 +191,7 @@ def remove_worktree(path: str | Path, worktree_path: str | Path) -> None:
     run_command(["git", "-C", str(root), "worktree", "remove", "--force", str(wt_path)])
     if wt_path.exists():
         shutil.rmtree(wt_path, ignore_errors=True)
+    _prune_worktrees(root)
 
 
 @contextmanager

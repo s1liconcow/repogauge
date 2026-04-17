@@ -456,10 +456,11 @@ class SolverScheduler:
         if not jobs_list:
             return SolverScheduleResult(jobs=(), completed_at=_now_ts())
 
-        job_futures = []
-        results: list[SolverJobProgress] = []
+        job_futures: dict[Any, PlannedRunJob] = {}
+        results_by_job_id: dict[str, SolverJobProgress] = {}
         dataset_rows = dict(dataset_rows or {})
         progress = _create_progress_reporter(len(jobs_list))
+        execution_error: Exception | None = None
 
         try:
             with ThreadPoolExecutor(max_workers=self.config.max_parallel_jobs) as pool:
@@ -470,25 +471,52 @@ class SolverScheduler:
                             f"no adapter for solver '{job.solver_id}'"
                         )
 
-                    job_futures.append(
-                        pool.submit(
-                            self._execute_job,
-                            job=job,
-                            adapter=adapter,
-                            dataset_row=dataset_rows.get(job.instance_id),
-                        )
+                    future = pool.submit(
+                        self._execute_job,
+                        job=job,
+                        adapter=adapter,
+                        dataset_row=dataset_rows.get(job.instance_id),
                     )
+                    job_futures[future] = job
 
                 for future in as_completed(job_futures):
-                    job_result = future.result()
-                    results.append(job_result)
+                    try:
+                        job_result = future.result()
+                    except Exception as exc:
+                        execution_error = exc
+                        break
+                    results_by_job_id[job_result.job_id] = job_result
                     progress.update(job_result.final_status)
-                self._flush_attempts_parquet()
         finally:
+            for future, job in job_futures.items():
+                if job.job_id in results_by_job_id:
+                    continue
+                if future.done() and not future.cancelled():
+                    try:
+                        job_result = future.result()
+                    except Exception:
+                        results_by_job_id[job.job_id] = self._persist_interrupted_job(
+                            job=job
+                        )
+                    else:
+                        results_by_job_id[job_result.job_id] = job_result
+                    continue
+                if execution_error is not None:
+                    results_by_job_id[job.job_id] = self._persist_interrupted_job(
+                        job=job
+                    )
+            self._flush_attempts_parquet()
             progress.close()
 
+        if execution_error is not None:
+            raise execution_error
+
         return SolverScheduleResult(
-            jobs=tuple(results),
+            jobs=tuple(
+                results_by_job_id[job.job_id]
+                for job in jobs_list
+                if job.job_id in results_by_job_id
+            ),
             completed_at=_now_ts(),
         )
 
@@ -544,6 +572,22 @@ class SolverScheduler:
             ended_at=ended_at,
         )
         self._writer.append_jsonl(self.config.persist_jobs_to, payload)
+
+    def _persist_interrupted_job(self, *, job: PlannedRunJob) -> SolverJobProgress:
+        final_status = SolverAttemptState.FAILED
+        self._persist_job(
+            job=job,
+            status=final_status,
+            attempts=0,
+            started_at=None,
+            ended_at=_now_ts(),
+        )
+        return SolverJobProgress(
+            job_id=job.job_id,
+            final_status=final_status,
+            attempts=0,
+            attempt_ids=(),
+        )
 
     def _persist_attempt(
         self,
@@ -641,7 +685,7 @@ class SolverScheduler:
 
         try:
             normalized = normalize_solver_output(
-                result.raw_output, attempt=attempt_workspace
+                result.model_patch or result.raw_output, attempt=attempt_workspace
             )
         except PatchNormalizationError as exc:
             return SolverAdapterResult(

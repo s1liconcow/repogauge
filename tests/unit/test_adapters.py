@@ -17,6 +17,7 @@ from repogauge.runner.adapters import (
 from repogauge.runner.matrix import MatrixProvider, MatrixSolver
 from repogauge.runner.planner import PlannedRunJob
 from repogauge.runner.scheduler import SolverAttemptState
+from repogauge.runner.scheduler import SolverAdapterResult
 from repogauge.runner.solvers import (
     SOLVER_ADAPTER_MOCK,
     SOLVER_ADAPTER_OPENAI_RESPONSES,
@@ -305,6 +306,82 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.raw_output, output)
         self.assertEqual(result.stderr_output, "boom")
 
+    def test_codex_cli_adapter_reclassifies_infra_timeouts_as_failed(self) -> None:
+        provider = _provider_for_command("/bin/echo")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+            attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        stderr = (
+            "command timeout: Reading prompt from stdin...\n"
+            "ERROR codex_core::tools::router: error=exec_command failed "
+            'CreateProcess { message: "Rejected(\\"Failed to create unified exec '
+            'process: No such file or directory (os error 2)\\")" }'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo"],
+            returncode=-1,
+            stdout='{"text":"Reading prompt from stdin..."}\n',
+            stderr=stderr,
+            timed_out=True,
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.FAILED)
+        self.assertEqual(result.metadata["failure_code"], "infra_tool_exec")
+        self.assertEqual(result.metadata["timeout_classification"], "infra")
+
+    def test_codex_cli_adapter_keeps_wall_clock_timeouts_as_timed_out(self) -> None:
+        provider = _provider_for_command("/bin/echo")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+            attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        command_result = CommandResult(
+            command=["/bin/echo"],
+            returncode=-1,
+            stdout="",
+            stderr="solver timed out",
+            timed_out=True,
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.TIMED_OUT)
+        self.assertEqual(result.metadata["timeout_classification"], "wall_clock")
+        self.assertNotIn("failure_code", result.metadata)
+
     def test_codex_cli_adapter_disables_ambient_codex_config(self) -> None:
         provider = _provider_for_command("codex")
         adapter = CodexCLIAdapter(
@@ -395,3 +472,36 @@ class TestAdapters(unittest.TestCase):
         assert kwargs["env"]["CODEX_HOME"] == str(
             Path(workspace).parent / "codex-home" / ".codex"
         )
+
+    def test_codex_cli_finalize_output_prefers_model_patch(self) -> None:
+        provider = _provider_for_command("codex")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:5"),
+            attempt_id="run-1:repo__sample-1:solver-a:5:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        patch = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n+ok\n"
+        result = adapter.finalize_output(
+            request,
+            SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.SUCCEEDED,
+                model_patch=patch,
+                raw_output='{"type":"item.completed","item":{"text":"not a plain diff"}}\n',
+            ),
+        )
+
+        self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
+        self.assertEqual(result.model_patch, patch)

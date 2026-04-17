@@ -844,6 +844,8 @@ class TestGoldEvalAgainstFixture:
             out_root: Path,
             workers: int,
             timeout_seconds: int,
+            container_runtime: str = "podman",
+            container_host: str | None = None,
         ):
             output_rows = [
                 {
@@ -871,6 +873,8 @@ class TestGoldEvalAgainstFixture:
                     "--gold",
                     "--out",
                     str(eval_out),
+                    "--container-runtime",
+                    "docker",
                     "--llm-mode",
                     "off",
                 ]

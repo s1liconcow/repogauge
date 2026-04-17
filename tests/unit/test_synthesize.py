@@ -1,4 +1,5 @@
 import unittest
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -121,6 +122,84 @@ class TestProblemStatementSynthesis(unittest.TestCase):
                 "Related GitHub issue #456: Cache path handling regressed",
                 statement,
             )
+
+    def test_bead_and_issue_context_keep_full_multiline_text(self) -> None:
+        with TemporaryDirectory() as workspace:
+            repo_root = Path(workspace)
+            bead_dir = repo_root / ".beads"
+            bead_dir.mkdir()
+            bead_description = "\n".join(
+                [
+                    "- Implement the canonical file-role classifier used by:",
+                    "  - candidate scanning",
+                    "  - patch splitting",
+                    "  - validation test targeting",
+                    "- Roles:",
+                    "  - `prod`",
+                    "  - `test`",
+                    "  - `test_support`",
+                    "  - `config_build`",
+                    "  - `docs`",
+                    "  - `generated_vendor`",
+                    "  - `unknown`",
+                ]
+            )
+            bead_acceptance = "\n".join(
+                [
+                    "- File-role classification is centralized and tested.",
+                    "- Patch splitting and scan scoring can import the same logic.",
+                    "- Ambiguous files remain visible for human or LLM review instead of being silently misclassified.",
+                ]
+            )
+            issue_body = "\n".join(
+                [
+                    "The parser still fails on empty input.",
+                    "",
+                    "Reproduction:",
+                    "- call parse('')",
+                    "- observe an unexpected exception",
+                ]
+            )
+            bead_payload = {
+                "id": "oss_repogauge-p46",
+                "title": "Define file-role taxonomy and path-based classifier",
+                "description": bead_description,
+                "acceptance_criteria": bead_acceptance,
+            }
+            (bead_dir / "issues.jsonl").write_text(
+                json.dumps(bead_payload) + "\n",
+                encoding="utf-8",
+            )
+
+            statement, source, _ = synthesize_problem_statement(
+                {
+                    "source_subject": "Land oss_repogauge-p46: add file role classifier",
+                    "source_body": "Fixes #123",
+                    "metadata": {
+                        "issue_contexts": [
+                            {
+                                "ref": "123",
+                                "title": "Parser crashes on empty input",
+                                "body": issue_body,
+                            }
+                        ],
+                    },
+                },
+                patch="@@ -1,2 +1,2 ...",
+                repo_root=repo_root,
+            )
+
+            self.assertEqual(source, "commit")
+            self.assertIn("validation test targeting", statement)
+            self.assertIn("generated_vendor", statement)
+            self.assertIn(
+                "Ambiguous files remain visible for human or LLM review",
+                statement,
+            )
+            self.assertIn("Reproduction:", statement)
+            self.assertIn("observe an unexpected exception", statement)
+            self.assertNotIn("config_...", statement)
+            self.assertNotIn("misclassified....", statement)
 
     def test_primary_issue_statement_keeps_additional_issue_refs(self) -> None:
         statement, source, source_ref = synthesize_problem_statement(

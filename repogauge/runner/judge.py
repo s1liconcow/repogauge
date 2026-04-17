@@ -53,6 +53,8 @@ class HarnessRunSummary:
     harness_output: str | None = None
     results_path: str | None = None
     instance_results_path: str | None = None
+    dataset_path: str | None = None
+    predictions_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -213,6 +215,41 @@ def _write_jsonl_rows(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+def _write_resolved_eval_artifacts(
+    *,
+    out_root: Path,
+    dataset_rows: list[Dict[str, Any]],
+    predictions_rows: list[Dict[str, Any]],
+    instance_rows: list[Mapping[str, Any]],
+) -> tuple[Path, Path]:
+    dataset_path = out_root / "dataset.resolved.jsonl"
+    predictions_path = out_root / "predictions.resolved.jsonl"
+    prediction_by_id = _prepare_prediction_index(predictions_rows)
+    resolved_ids = {
+        _coerce_text(row.get("instance_id"))
+        for row in instance_rows
+        if _coerce_text(row.get("status")) == "resolved"
+    }
+
+    resolved_dataset_rows = [
+        dict(dataset_row)
+        for dataset_row in dataset_rows
+        if _coerce_text(dataset_row.get("instance_id")) in resolved_ids
+    ]
+    resolved_prediction_rows = [
+        prediction_by_id[instance_id]
+        for instance_id in [
+            _coerce_text(dataset_row.get("instance_id"))
+            for dataset_row in resolved_dataset_rows
+        ]
+        if instance_id in prediction_by_id
+    ]
+
+    _write_jsonl_rows(dataset_path, resolved_dataset_rows)
+    _write_jsonl_rows(predictions_path, resolved_prediction_rows)
+    return dataset_path, predictions_path
 
 
 def _batch_key_for_prediction(
@@ -1018,6 +1055,8 @@ def run_harness_evaluation(
     validation_path = out_root / "validation.jsonl"
     results_path = out_root / "results.json"
     instance_results_path = out_root / "instance_results.jsonl"
+    resolved_dataset_path = out_root / "dataset.resolved.jsonl"
+    resolved_predictions_path = out_root / "predictions.resolved.jsonl"
 
     dataset_rows = _read_jsonl(dataset_path)
     if not dataset_rows:
@@ -1031,8 +1070,12 @@ def run_harness_evaluation(
             resolve_rate=0.0,
             results_path=str(results_path),
             instance_results_path=str(instance_results_path),
+            dataset_path=str(resolved_dataset_path),
+            predictions_path=str(resolved_predictions_path),
             harness_output="dataset empty",
         )
+        _write_jsonl_rows(resolved_dataset_path, [])
+        _write_jsonl_rows(resolved_predictions_path, [])
         validation_path.write_text("", encoding="utf-8")
         results_path.write_text(
             json.dumps({"batches": []}, sort_keys=True),
@@ -1200,6 +1243,12 @@ def run_harness_evaluation(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in instance_rows),
         encoding="utf-8",
     )
+    resolved_dataset_path, resolved_predictions_path = _write_resolved_eval_artifacts(
+        out_root=out_root,
+        dataset_rows=dataset_rows,
+        predictions_rows=predictions_rows,
+        instance_rows=instance_rows,
+    )
 
     total = len(instance_rows)
     resolved = 0
@@ -1225,5 +1274,7 @@ def run_harness_evaluation(
         harness_output="official_swebench",
         results_path=str(results_path),
         instance_results_path=str(instance_results_path),
+        dataset_path=str(resolved_dataset_path),
+        predictions_path=str(resolved_predictions_path),
     )
     return summary

@@ -1154,6 +1154,12 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 manifest.artifact_paths["instance_results"] = (
                     eval_summary.instance_results_path
                 )
+            if eval_summary.dataset_path is not None:
+                manifest.artifact_paths["dataset"] = eval_summary.dataset_path
+            if eval_summary.predictions_path is not None:
+                manifest.artifact_paths["predictions"] = (
+                    eval_summary.predictions_path
+                )
             manifest.metadata["eval"] = {
                 "total": eval_summary.total,
                 "resolved": eval_summary.resolved,

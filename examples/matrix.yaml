@@ -1,6 +1,6 @@
 run_id: repogauge-mock-smoke
 dataset:
-  path: out/export/dataset/dataset.jsonl
+  path: out/eval/dataset.resolved.jsonl
 providers:
   mock:
     kind: mock

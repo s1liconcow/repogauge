@@ -4,6 +4,19 @@
 
 ---
 
+## Environment
+
+This repo uses the `uv`-managed environment. Always prefer that environment over the system Python.
+
+- Set `UV_CACHE_DIR=/tmp/codex-uv-cache` for `uv` commands so the cache stays writable in sandboxed environments.
+- Run Python entrypoints with `UV_CACHE_DIR=/tmp/codex-uv-cache uv run ...`, not bare `python` or `python3`.
+- Run tests, linters, and helper scripts with `UV_CACHE_DIR=/tmp/codex-uv-cache uv run ...` so project dependencies are available.
+- Use `UV_CACHE_DIR=/tmp/codex-uv-cache uv sync --group dev` when the environment needs to be prepared or refreshed.
+- If a command would otherwise rely on a missing global tool, rerun it through `uv run` first before assuming the repo is broken.
+
+## Docs
+Please ignore docs/ unless specifically asked to review them.
+
 ## Beads Workflow Integration
 
 This project uses [beads_rust](https://github.com/Dicklesworthstone/beads_rust) (`br`) for issue tracking and [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer) (`bv`) for graph-aware triage. Issues are stored in `.beads/` and tracked in git.

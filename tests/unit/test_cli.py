@@ -362,6 +362,53 @@ class TestCliSurface(unittest.TestCase):
                 predictions_path,
             )
 
+    def test_eval_records_resolved_dataset_artifacts_in_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            dataset_path = Path(workspace) / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            out_root = Path(workspace) / "out"
+            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+                mock_eval.return_value = HarnessRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    harness_output="official_swebench",
+                    dataset_path=str(out_root / "dataset.resolved.jsonl"),
+                    predictions_path=str(out_root / "predictions.resolved.jsonl"),
+                )
+                result = main(
+                    ["eval", str(dataset_path), "--gold", "--out", str(out_root)]
+                )
+
+            self.assertEqual(result, 0)
+            manifest = json.loads(
+                (out_root / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                manifest["artifact_paths"]["dataset"],
+                str(out_root / "dataset.resolved.jsonl"),
+            )
+            self.assertEqual(
+                manifest["artifact_paths"]["predictions"],
+                str(out_root / "predictions.resolved.jsonl"),
+            )
+
     def test_eval_prefers_nested_dataset_directory_when_root_has_dataset_jsonl(
         self,
     ) -> None:

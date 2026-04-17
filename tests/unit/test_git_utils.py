@@ -1,14 +1,17 @@
 import os
 from pathlib import Path
+from unittest import mock
 
-from repogauge.exec import run_command
+from repogauge.exec import CommandResult, run_command
 from repogauge.utils.git import (
     apply_patch_text,
+    create_worktree,
     extract_commit_diff,
     get_default_branch,
     get_repo_root,
     list_commit_parents,
     list_commits,
+    remove_worktree,
     scoped_worktree,
 )
 
@@ -76,3 +79,58 @@ def test_scoped_worktree_path_cleanup(tmp_path: Path):
         }
         tracked = os.path.abspath(str(worktree))
     assert not os.path.exists(tracked)
+
+
+def test_create_worktree_prunes_and_retries_stale_registration(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktree_path = tmp_path / "retry-worktree"
+
+    with (
+        mock.patch("repogauge.utils.git.get_repo_root", return_value=repo),
+        mock.patch("repogauge.utils.git.run_command") as mock_run_command,
+    ):
+        mock_run_command.side_effect = [
+            CommandResult(command=["git"], returncode=0, stdout="", stderr=""),
+            CommandResult(
+                command=["git"],
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "fatal: '/tmp/retry-worktree' is a missing but already "
+                    "registered worktree; use 'add -f' to override"
+                ),
+            ),
+            CommandResult(command=["git"], returncode=0, stdout="", stderr=""),
+            CommandResult(command=["git"], returncode=0, stdout="", stderr=""),
+            CommandResult(command=["git"], returncode=0, stdout="", stderr=""),
+        ]
+
+        handle = create_worktree(repo, worktree_path=worktree_path)
+
+    assert handle.path == worktree_path
+    calls = [call.args[0] for call in mock_run_command.call_args_list]
+    assert calls[0][-2:] == ["worktree", "prune"]
+    assert calls[1][4:7] == ["add", "--detach", str(worktree_path)]
+    assert calls[2][4:7] == ["remove", "--force", str(worktree_path)]
+    assert calls[3][-2:] == ["worktree", "prune"]
+    assert calls[4][4:7] == ["add", "--detach", str(worktree_path)]
+
+
+def test_remove_worktree_prunes_after_cleanup(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktree_path = tmp_path / "wt"
+    worktree_path.mkdir()
+    (worktree_path / "hello.txt").write_text("x\n", encoding="utf-8")
+
+    with (
+        mock.patch("repogauge.utils.git.get_repo_root", return_value=repo),
+        mock.patch("repogauge.utils.git.run_command") as mock_run_command,
+    ):
+        remove_worktree(repo, worktree_path)
+
+    calls = [call.args[0] for call in mock_run_command.call_args_list]
+    assert calls[0][4:7] == ["remove", "--force", str(worktree_path)]
+    assert calls[1][-2:] == ["worktree", "prune"]
+    assert not worktree_path.exists()

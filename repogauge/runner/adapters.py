@@ -130,6 +130,25 @@ def _extract_text_candidates(value: Any) -> list[str]:
     return candidates
 
 
+_CODEX_INFRA_TIMEOUT_MARKERS = (
+    "exec_command failed",
+    "failed to create unified exec process",
+    "createprocess",
+    'rejected("',
+)
+
+
+def _classify_codex_cli_timeout(
+    *, stderr_output: str, telemetry_events: list[dict[str, Any]]
+) -> str | None:
+    haystack = "\n".join(
+        part for part in (stderr_output, json.dumps(telemetry_events, sort_keys=True)) if part
+    ).lower()
+    if any(marker in haystack for marker in _CODEX_INFRA_TIMEOUT_MARKERS):
+        return "infra_tool_exec"
+    return None
+
+
 def _extract_patch_from_text(raw_output: str) -> str:
     text = raw_output.strip()
     if not text:
@@ -351,7 +370,7 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
     def finalize_output(
         self, request: SolverAdapterRequest, result: SolverAdapterResult
     ) -> SolverAdapterResult:
-        patch = _extract_patch_from_text(result.raw_output)
+        patch = result.model_patch or _extract_patch_from_text(result.raw_output)
         metadata = dict(result.metadata)
         metadata["solver_id"] = self.solver_id
         metadata["provider_id"] = self.provider_id
@@ -958,9 +977,22 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
 
         metadata = {"telemetry": telemetry_events}
         if command_result.timed_out:
+            failure_code = _classify_codex_cli_timeout(
+                stderr_output=command_result.stderr,
+                telemetry_events=telemetry_events,
+            )
+            if failure_code:
+                metadata["failure_code"] = failure_code
+                metadata["timeout_classification"] = "infra"
+            else:
+                metadata["timeout_classification"] = "wall_clock"
             return SolverAdapterResult(
                 attempt_id=request.attempt_id,
-                status=SolverAttemptState.TIMED_OUT,
+                status=(
+                    SolverAttemptState.FAILED
+                    if failure_code
+                    else SolverAttemptState.TIMED_OUT
+                ),
                 model_patch=None,
                 raw_output=output,
                 stderr_output=command_result.stderr,
