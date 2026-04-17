@@ -13,7 +13,8 @@ Common startup and execution issues and fast checks.
 - Check provider keys and solver references:
   - every `solver.provider` must match a key under `providers`
   - provider `kind` must be one of: `mock`, `local`, `openai_responses`,
-    `anthropic_api`, `openai_compatible`, `codex_cli`, `opencode_server`
+    `anthropic_api`, `claude_cli`, `openai_compatible`, `codex_cli`,
+    `opencode_server`
 - Validate YAML indentation and list formatting around `solvers` and `dataset`.
 
 ## `repogauge run` reuses stale outputs unexpectedly

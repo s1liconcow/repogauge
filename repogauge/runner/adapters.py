@@ -30,6 +30,7 @@ from .scheduler import (
 )
 from .solvers import (
     SOLVER_ADAPTER_CLAUDE,
+    SOLVER_ADAPTER_CLAUDE_CLI,
     SOLVER_ADAPTER_CODEX_CLI,
     SOLVER_ADAPTER_MOCK,
     SOLVER_ADAPTER_OPENAI_COMPATIBLE,
@@ -685,9 +686,9 @@ class AnthropicAgentSDKAdapter(_BaseConcreteSolverAdapter):
             model=None,
         )
         self.model = _coerce_text(
-            self.model or self.behavior.get("model") or "claude-3-5-sonnet-latest",
+            self.model or self.behavior.get("model") or "claude-sonnet-4-6",
             field_name="solver.model",
-            default="claude-3-5-sonnet-latest",
+            default="claude-sonnet-4-6",
         )
         self.api_key = _coerce_text(
             self.provider_config.get("api_key"),
@@ -1025,7 +1026,7 @@ class _CLIAdapterConfig:
 def _coerce_cli_command(config: Mapping[str, Any]) -> _CLIAdapterConfig:
     raw = config.get("command")
     if raw is None:
-        raise SolverAdapterError("provider.command is required for codex_cli adapter")
+        raise SolverAdapterError("provider.command is required for CLI adapters")
     if isinstance(raw, str):
         if not raw.strip():
             raise SolverAdapterError("provider.command cannot be empty")
@@ -1197,6 +1198,157 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         )
 
 
+class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
+    """Claude CLI adapter driven via non-interactive stream-json output.
+
+    Uses the user's existing local Claude CLI auth (``~/.claude/``) rather than
+    requiring an ``ANTHROPIC_API_KEY``.
+    """
+
+    def __init__(
+        self,
+        *,
+        solver_id: str,
+        provider_id: str,
+        provider_config: Mapping[str, Any] | None,
+        behavior: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            solver_id=solver_id,
+            provider_id=provider_id,
+            provider_config=provider_config,
+            behavior=behavior,
+            model=None,
+        )
+        self.model = _coerce_text(
+            self.model or self.behavior.get("model") or "claude-sonnet-4-6",
+            field_name="solver.model",
+            default="claude-sonnet-4-6",
+        )
+        config = _coerce_mapping(provider_config, field_name="provider_config")
+        resolved = _coerce_cli_command(config)
+        self.command = [resolved.command, *resolved.cli_args]
+
+    def requires_workspace(self) -> bool:
+        return True
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        instance_row = _required_instance_fields(request.instance_row)
+        prompt = _build_prompt(
+            solver_id=self.solver_id,
+            model=self.model,
+            attempt_index=request.attempt_index,
+            instance_row=instance_row,
+        )
+        command = list(self.command)
+        command.extend(
+            [
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--model",
+                self.model,
+                "--dangerously-skip-permissions",
+            ]
+        )
+        command_env = None
+        if request.workspace_path is not None:
+            claude_home_root = request.workspace_path.parent / "claude-home"
+            command_env = dict(os.environ)
+            command_env["HOME"] = str(claude_home_root)
+            command_env["XDG_CONFIG_HOME"] = str(claude_home_root / ".config")
+            command_env["CLAUDE_CONFIG_DIR"] = str(claude_home_root / ".claude")
+        command_result = run_command(
+            command,
+            cwd=str(request.workspace_path) if request.workspace_path else None,
+            env=command_env,
+            input_text=prompt,
+            timeout_seconds=self.timeout_seconds,
+        )
+        output = command_result.stdout
+        telemetry_events: list[dict[str, Any]] = []
+        usage: Mapping[str, Any] = {}
+        cost: Mapping[str, Any] = {}
+        usage_source = ""
+        cost_source = ""
+        result_text = ""
+
+        if output.strip():
+            parsed = _parse_json_lines(output)
+            for event in parsed:
+                telemetry_events.append(event)
+                message = event.get("message")
+                if isinstance(message, Mapping) and isinstance(
+                    message.get("usage"), Mapping
+                ):
+                    usage = dict(message["usage"])
+                    usage_source = "claude_cli.event.message.usage"
+                if isinstance(event.get("usage"), Mapping):
+                    usage = dict(event["usage"])
+                    usage_source = "claude_cli.event.usage"
+                if "cost_usd" in event and event["cost_usd"] is not None:
+                    cost = {"total_cost_usd": event["cost_usd"]}
+                    cost_source = "claude_cli.event.cost_usd"
+                if event.get("type") == "result" and isinstance(
+                    event.get("result"), str
+                ):
+                    result_text = event["result"]
+
+            text = _extract_structured_output_text(output) or result_text
+        else:
+            text = ""
+
+        metadata = {"telemetry": telemetry_events}
+        if command_result.timed_out:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.TIMED_OUT,
+                model_patch=None,
+                raw_output=output,
+                stderr_output=command_result.stderr,
+                exit_reason=f"command timeout: {command_result.stderr or 'timed out'}",
+                usage_source=usage_source,
+                cost_source=cost_source,
+                usage=usage,
+                cost=cost,
+                metadata={**metadata, "timeout_classification": "wall_clock"},
+            )
+
+        if not command_result.success:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output=output,
+                stderr_output=command_result.stderr,
+                exit_reason=(
+                    command_result.stderr
+                    or command_result.stdout
+                    or "command execution failed"
+                ),
+                usage_source=usage_source,
+                cost_source=cost_source,
+                usage=usage,
+                cost=cost,
+                metadata=metadata,
+            )
+
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=SolverAttemptState.SUCCEEDED,
+            model_patch=text,
+            raw_output=output,
+            stderr_output=command_result.stderr,
+            exit_reason="",
+            usage_source=usage_source,
+            cost_source=cost_source,
+            usage=usage,
+            cost=cost,
+            metadata=metadata,
+        )
+
+
 def build_solver_adapters(
     *,
     solvers: tuple[MatrixSolver, ...],
@@ -1248,6 +1400,13 @@ def build_solver_adapters(
                 provider_config=provider_config,
                 behavior=behavior,
             )
+        elif adapter_name == SOLVER_ADAPTER_CLAUDE_CLI:
+            adapter = ClaudeCLIAdapter(
+                solver_id=solver.solver_id,
+                provider_id=solver.provider_id,
+                provider_config=provider_config,
+                behavior=behavior,
+            )
         elif adapter_name == SOLVER_ADAPTER_OPEN_CODEX_SERVER:
             adapter = OpenCodeServerAdapter(
                 solver_id=solver.solver_id,
@@ -1273,6 +1432,7 @@ __all__ = [
     "SolverAdapterError",
     "MockSolverAdapter",
     "AnthropicAgentSDKAdapter",
+    "ClaudeCLIAdapter",
     "CodexCLIAdapter",
     "OpenAIResponsesAdapter",
     "OpenCodeServerAdapter",

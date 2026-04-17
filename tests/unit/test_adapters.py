@@ -7,6 +7,7 @@ from pathlib import Path
 
 from repogauge.exec import CommandResult
 from repogauge.runner.adapters import (
+    ClaudeCLIAdapter,
     CodexCLIAdapter,
     OpenAICompatibleAdapter,
     OpenAIResponsesAdapter,
@@ -535,3 +536,188 @@ class TestAdapters(unittest.TestCase):
 
         self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
         self.assertEqual(result.model_patch, patch)
+
+    def _claude_provider(self, command: str = "claude") -> MatrixProvider:
+        return MatrixProvider(
+            provider_id="claude",
+            kind="claude_cli",
+            config={"command": command},
+            redacted_config={},
+            raw={},
+        )
+
+    def _claude_request(
+        self, adapter: ClaudeCLIAdapter, *, workspace: Path | None = None
+    ):
+        return adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+            attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+            workspace_path=workspace,
+        )
+
+    def test_claude_cli_adapter_marks_usage_and_cost_source(self) -> None:
+        provider = self._claude_provider("/bin/echo")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        request = self._claude_request(adapter)
+        output = (
+            '{"type":"system","subtype":"init"}\n'
+            '{"type":"assistant","message":{"content":[{"type":"text",'
+            '"text":"diff --git a/x b/x\\n+ok"}],'
+            '"usage":{"input_tokens":10,"output_tokens":3}}}\n'
+            '{"type":"result","subtype":"success","cost_usd":0.12,'
+            '"result":"diff --git a/x b/x\\n+ok"}\n'
+        )
+        command_result = CommandResult(
+            command=[
+                "/bin/echo",
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--model",
+                "claude-sonnet-4-6",
+                "--dangerously-skip-permissions",
+            ],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
+        self.assertEqual(
+            result.usage_source, "claude_cli.event.message.usage"
+        )
+        self.assertEqual(result.cost_source, "claude_cli.event.cost_usd")
+        self.assertEqual(
+            result.usage, {"input_tokens": 10, "output_tokens": 3}
+        )
+        self.assertEqual(result.cost, {"total_cost_usd": 0.12})
+        self.assertEqual(
+            (result.model_patch or "").strip(), "diff --git a/x b/x\n+ok"
+        )
+
+    def test_claude_cli_adapter_preserves_usage_and_cost_on_failure(
+        self,
+    ) -> None:
+        provider = self._claude_provider("/bin/echo")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        request = self._claude_request(adapter)
+        output = (
+            '{"type":"result","subtype":"error","cost_usd":0.5,'
+            '"usage":{"input_tokens":7},"result":"partial"}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo"],
+            returncode=1,
+            stdout=output,
+            stderr="boom",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.FAILED)
+        self.assertEqual(result.exit_reason, "boom")
+        self.assertEqual(result.usage_source, "claude_cli.event.usage")
+        self.assertEqual(result.cost_source, "claude_cli.event.cost_usd")
+        self.assertEqual(result.usage, {"input_tokens": 7})
+        self.assertEqual(result.cost, {"total_cost_usd": 0.5})
+        self.assertEqual(result.raw_output, output)
+        self.assertEqual(result.stderr_output, "boom")
+
+    def test_claude_cli_adapter_classifies_wall_clock_timeout(self) -> None:
+        provider = self._claude_provider("/bin/echo")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        request = self._claude_request(adapter)
+        command_result = CommandResult(
+            command=["/bin/echo"],
+            returncode=-1,
+            stdout="",
+            stderr="solver timed out",
+            timed_out=True,
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.TIMED_OUT)
+        self.assertEqual(
+            result.metadata["timeout_classification"], "wall_clock"
+        )
+
+    def test_claude_cli_adapter_targets_attempt_workspace(self) -> None:
+        provider = self._claude_provider("claude")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            request = self._claude_request(adapter, workspace=Path(workspace))
+            command_result = CommandResult(
+                command=[],
+                returncode=0,
+                stdout='{"type":"result","result":"diff --git a/x b/x\\n+ok"}\n',
+                stderr="",
+            )
+            with mock.patch(
+                "repogauge.runner.adapters.run_command", return_value=command_result
+            ) as mock_run_command:
+                adapter.execute_attempt(request)
+
+        command = mock_run_command.call_args.args[0]
+        kwargs = mock_run_command.call_args.kwargs
+        self.assertEqual(command[0], "claude")
+        self.assertIn("-p", command)
+        self.assertIn("--output-format", command)
+        self.assertIn("stream-json", command)
+        self.assertIn("--dangerously-skip-permissions", command)
+        self.assertEqual(
+            command[command.index("--model") + 1], "claude-sonnet-4-6"
+        )
+        self.assertEqual(kwargs["cwd"], workspace)
+        self.assertEqual(
+            kwargs["env"]["HOME"], str(Path(workspace).parent / "claude-home")
+        )
+        self.assertEqual(
+            kwargs["env"]["CLAUDE_CONFIG_DIR"],
+            str(Path(workspace).parent / "claude-home" / ".claude"),
+        )
+
+    def test_claude_cli_adapter_requires_command(self) -> None:
+        with self.assertRaises(SolverAdapterError):
+            ClaudeCLIAdapter(
+                solver_id="solver-a",
+                provider_id="claude",
+                provider_config={},
+                behavior={"model": "claude-sonnet-4-6"},
+            )
