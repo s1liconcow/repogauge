@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2206,6 +2207,21 @@ def _run_command(namespace: argparse.Namespace) -> int:
             attempts_parquet_out = run_root / "attempts.parquet"
             attempt_logs_root = run_root / "attempt_logs"
             run_summary_out = run_root / "run_summary.json"
+            stale_attempt_artifacts = (
+                run_jobs_out,
+                attempts_out,
+                attempts_parquet_out,
+                run_summary_out,
+            )
+            for stale_path in stale_attempt_artifacts:
+                if stale_path.exists():
+                    stale_path.unlink()
+            for stale_dir in (
+                attempt_logs_root,
+                run_root / "attempt_workspaces",
+            ):
+                if stale_dir.exists():
+                    shutil.rmtree(stale_dir)
             write_matrix_snapshot(matrix_out, matrix)
             write_jobs(jobs, jobs_out)
             run_manifest = RunManifest.from_matrix(

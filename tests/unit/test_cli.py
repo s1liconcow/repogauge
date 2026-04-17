@@ -899,6 +899,8 @@ solvers:
             out = root / "out"
             result = main(["run", str(matrix_path), "--out", str(out)])
             self.assertEqual(result, 0)
+            rerun_result = main(["run", str(matrix_path), "--out", str(out)])
+            self.assertEqual(rerun_result, 0)
 
             run_root = out / "unit-run"
             matrix_copy = run_root / "matrix.yaml"
