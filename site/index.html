@@ -1,0 +1,2362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RepoGauge | Evaluate Coding Agents On Your Own Code</title>
+  <meta
+    name="description"
+    content="RepoGauge lets you evaluate coding agents on your own code with real pass rates, costs, latency, and regression checks."
+  >
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f2;
+      --bg-strong: #ebefe8;
+      --surface: rgba(255, 255, 255, 0.8);
+      --surface-strong: rgba(255, 255, 255, 0.94);
+      --surface-dark: rgba(10, 22, 49, 0.92);
+      --surface-dark-soft: rgba(12, 31, 69, 0.84);
+      --line: rgba(15, 35, 74, 0.12);
+      --line-strong: rgba(15, 35, 74, 0.22);
+      --text: #09162f;
+      --muted: #50617f;
+      --muted-strong: #7082a0;
+      --blue: #1f68ff;
+      --blue-deep: #0d47b8;
+      --cyan: #1fc7c9;
+      --teal: #0f9d8f;
+      --amber: #ff9d42;
+      --rose: #ff6c5b;
+      --success: #0f9d58;
+      --shadow-lg: 0 32px 80px rgba(10, 22, 49, 0.14);
+      --shadow-md: 0 18px 48px rgba(10, 22, 49, 0.11);
+      --shadow-sm: 0 10px 28px rgba(10, 22, 49, 0.08);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 14px;
+      --content: 1180px;
+      --nav-height: 78px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(31, 104, 255, 0.18), transparent 34%),
+        radial-gradient(circle at 80% 14%, rgba(31, 199, 201, 0.16), transparent 26%),
+        radial-gradient(circle at 50% 42%, rgba(255, 157, 66, 0.1), transparent 28%),
+        linear-gradient(180deg, #f7f8f3 0%, #eff3ee 42%, #f6f7f4 100%);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.36;
+      background-image:
+        linear-gradient(rgba(15, 35, 74, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(15, 35, 74, 0.035) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: radial-gradient(circle at center, black 24%, transparent 86%);
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      border: 0;
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    img,
+    svg {
+      display: block;
+      max-width: 100%;
+    }
+
+    .page-shell {
+      position: relative;
+      isolation: isolate;
+    }
+
+    .progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      z-index: 80;
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(18px);
+    }
+
+    .progress__bar {
+      width: 0;
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--blue), var(--amber));
+      box-shadow: 0 0 24px rgba(31, 104, 255, 0.45);
+      transform-origin: left center;
+    }
+
+    .container {
+      width: min(calc(100% - 40px), var(--content));
+      margin: 0 auto;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 60;
+      padding: 18px 0 0;
+    }
+
+    .site-header__inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: var(--nav-height);
+      padding: 16px 20px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.74);
+      border-radius: 999px;
+      box-shadow: var(--shadow-sm);
+      backdrop-filter: blur(24px) saturate(170%);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      font-size: 1.05rem;
+    }
+
+    .brand__mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.95), transparent 30%),
+        linear-gradient(135deg, #0c214b 0%, #2053d1 52%, #1cc0c3 100%);
+      display: grid;
+      place-items: center;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        0 14px 30px rgba(12, 33, 75, 0.24);
+    }
+
+    .brand__wordmark {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand__title {
+      font-size: 1rem;
+    }
+
+    .brand__subtitle {
+      font-size: 0.74rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.94rem;
+    }
+
+    .nav a {
+      position: relative;
+      transition: color 160ms ease;
+    }
+
+    .nav a::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: -8px;
+      width: 100%;
+      height: 2px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--blue), var(--cyan));
+      transform: scaleX(0);
+      transform-origin: left center;
+      transition: transform 180ms ease;
+    }
+
+    .nav a:hover,
+    .nav a:focus-visible {
+      color: var(--text);
+    }
+
+    .nav a:hover::after,
+    .nav a:focus-visible::after {
+      transform: scaleX(1);
+    }
+
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 18px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--blue), #4486ff);
+      color: white;
+      font-weight: 700;
+      box-shadow: 0 14px 24px rgba(31, 104, 255, 0.22);
+      transition: transform 180ms ease, box-shadow 180ms ease;
+    }
+
+    .nav-cta:hover,
+    .nav-cta:focus-visible,
+    .button:hover,
+    .button:focus-visible {
+      transform: translateY(-2px);
+      box-shadow: 0 18px 34px rgba(31, 104, 255, 0.28);
+    }
+
+    .hero {
+      padding: 42px 0 28px;
+    }
+
+    .hero__grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
+      gap: 36px;
+      align-items: stretch;
+    }
+
+    .hero__copy {
+      position: relative;
+      padding: 30px 0 24px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(255, 255, 255, 0.84);
+      box-shadow: var(--shadow-sm);
+      color: var(--blue-deep);
+      font-size: 0.84rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+    }
+
+    .eyebrow__dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+      box-shadow: 0 0 0 6px rgba(31, 199, 201, 0.12);
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    p {
+      margin: 0;
+    }
+
+    .hero h1 {
+      margin-top: 24px;
+      font-size: clamp(3.5rem, 8vw, 6.7rem);
+      line-height: 0.92;
+      letter-spacing: -0.075em;
+      max-width: 11.5ch;
+    }
+
+    .hero h1 span {
+      display: block;
+      color: var(--muted-strong);
+      font-weight: 700;
+    }
+
+    .hero__lede {
+      margin-top: 24px;
+      max-width: 60ch;
+      font-size: 1.15rem;
+      line-height: 1.75;
+      color: var(--muted);
+    }
+
+    .hero__actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 28px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 54px;
+      padding: 0 22px;
+      border-radius: 999px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    .button--primary {
+      background: linear-gradient(135deg, #0d47b8 0%, #1f68ff 54%, #3b89ff 100%);
+      color: white;
+      box-shadow: 0 18px 36px rgba(31, 104, 255, 0.22);
+    }
+
+    .button--secondary {
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--text);
+      border: 1px solid rgba(15, 35, 74, 0.08);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .hero__signals {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 34px;
+    }
+
+    .signal {
+      padding: 18px 16px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.64);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .signal strong {
+      display: block;
+      font-size: 0.95rem;
+      line-height: 1.25;
+      letter-spacing: -0.03em;
+    }
+
+    .signal span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+
+    .hero__board {
+      position: relative;
+      overflow: hidden;
+      border-radius: 34px;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(31, 199, 201, 0.22), transparent 32%),
+        radial-gradient(circle at 82% 0%, rgba(255, 157, 66, 0.18), transparent 28%),
+        linear-gradient(160deg, rgba(11, 20, 45, 0.98) 0%, rgba(15, 29, 63, 0.98) 42%, rgba(8, 19, 41, 0.96) 100%);
+      color: white;
+      box-shadow: 0 38px 90px rgba(10, 22, 49, 0.32);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 24px;
+      min-height: 100%;
+      isolation: isolate;
+    }
+
+    .hero__board::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: radial-gradient(circle at center, black 45%, transparent 95%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    .board__topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .board__topline strong {
+      font-size: 1.1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .board__topline span {
+      display: block;
+      margin-top: 6px;
+      color: rgba(223, 231, 248, 0.76);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.86);
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+    }
+
+    .board__metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 20px;
+    }
+
+    .board__metric {
+      padding: 16px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .board__metric span,
+    .metric-card span,
+    .mono-label {
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.74rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .board__metric strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 2rem;
+      letter-spacing: -0.06em;
+    }
+
+    .board__metric small {
+      display: block;
+      margin-top: 8px;
+      color: rgba(223, 231, 248, 0.72);
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+
+    .board__content {
+      display: grid;
+      grid-template-columns: minmax(0, 1.18fr) minmax(260px, 0.82fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .panel {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 26px;
+      padding: 18px;
+      min-width: 0;
+    }
+
+    .panel__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .panel__title {
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .panel__subtitle {
+      margin-top: 6px;
+      color: rgba(223, 231, 248, 0.72);
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    .solver-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .solver-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(78px, auto) minmax(88px, auto) minmax(84px, auto);
+      gap: 14px;
+      align-items: center;
+      padding: 14px 16px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .solver-row strong {
+      display: block;
+      font-size: 1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .solver-row span {
+      display: block;
+      margin-top: 5px;
+      color: rgba(223, 231, 248, 0.66);
+      font-size: 0.82rem;
+    }
+
+    .solver-row em {
+      font-style: normal;
+      font-weight: 800;
+      font-size: 0.95rem;
+    }
+
+    .solver-row__delta {
+      color: #9ce6dd;
+    }
+
+    .solver-row__cost {
+      color: #ffe0b9;
+    }
+
+    .solver-row__speed {
+      color: #c6d8ff;
+    }
+
+    .board__stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .chart-card {
+      padding: 16px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .chart-card svg text {
+      font-family: "IBM Plex Mono", monospace;
+      fill: rgba(228, 235, 251, 0.76);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+    }
+
+    .chart-note {
+      margin-top: 10px;
+      color: rgba(223, 231, 248, 0.72);
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+
+    .artifact-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .artifact {
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .artifact strong {
+      display: block;
+      font-size: 0.95rem;
+      letter-spacing: -0.03em;
+    }
+
+    .artifact p {
+      margin-top: 6px;
+      color: rgba(223, 231, 248, 0.72);
+      font-size: 0.84rem;
+      line-height: 1.55;
+    }
+
+    .section {
+      padding: 56px 0;
+    }
+
+    .section--dense {
+      padding-top: 36px;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .section-heading__copy {
+      max-width: 700px;
+    }
+
+    .section-heading span {
+      display: inline-block;
+      color: var(--blue-deep);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .section-heading h2 {
+      margin-top: 12px;
+      font-size: clamp(2.2rem, 4vw, 4rem);
+      line-height: 0.98;
+      letter-spacing: -0.065em;
+    }
+
+    .section-heading p {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 1.05rem;
+      line-height: 1.75;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .metric-card {
+      position: relative;
+      overflow: hidden;
+      padding: 22px;
+      border-radius: 26px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.72));
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      top: -48px;
+      right: -30px;
+      width: 130px;
+      height: 130px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(31, 104, 255, 0.14), transparent 70%);
+      pointer-events: none;
+    }
+
+    .metric-card strong {
+      display: block;
+      margin-top: 14px;
+      font-size: 2rem;
+      letter-spacing: -0.06em;
+    }
+
+    .metric-card p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.96rem;
+      line-height: 1.65;
+    }
+
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 18px;
+    }
+
+    .comparison-card {
+      padding: 28px;
+      border-radius: 28px;
+      background: var(--surface-strong);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow-md);
+    }
+
+    .comparison-card--dark {
+      background:
+        radial-gradient(circle at top right, rgba(31, 199, 201, 0.18), transparent 36%),
+        linear-gradient(180deg, rgba(12, 25, 53, 0.98), rgba(8, 18, 42, 0.96));
+      color: white;
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .comparison-card h3 {
+      font-size: 1.45rem;
+      letter-spacing: -0.05em;
+    }
+
+    .comparison-card p {
+      margin-top: 12px;
+      font-size: 1rem;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+
+    .comparison-card--dark p {
+      color: rgba(223, 231, 248, 0.76);
+    }
+
+    .comparison-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .comparison-list li {
+      list-style: none;
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(15, 35, 74, 0.04);
+      align-items: flex-start;
+    }
+
+    .comparison-card--dark .comparison-list li {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .comparison-list strong {
+      flex: 0 0 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      background: rgba(31, 104, 255, 0.12);
+      color: var(--blue-deep);
+      font-size: 0.86rem;
+    }
+
+    .comparison-card--dark .comparison-list strong {
+      background: rgba(31, 199, 201, 0.16);
+      color: #b8fcf2;
+    }
+
+    .pipeline-shell {
+      padding: 24px;
+      border-radius: 32px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow-md);
+    }
+
+    .pipeline-tabs {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .pipeline-tab {
+      position: relative;
+      padding: 18px 14px;
+      border-radius: 22px;
+      background: rgba(15, 35, 74, 0.04);
+      border: 1px solid transparent;
+      text-align: left;
+      transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+    }
+
+    .pipeline-tab:hover,
+    .pipeline-tab:focus-visible {
+      transform: translateY(-2px);
+      background: rgba(15, 35, 74, 0.06);
+      border-color: rgba(15, 35, 74, 0.08);
+    }
+
+    .pipeline-tab[aria-selected="true"] {
+      background: linear-gradient(180deg, rgba(31, 104, 255, 0.12), rgba(31, 199, 201, 0.07));
+      border-color: rgba(31, 104, 255, 0.18);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.64);
+    }
+
+    .pipeline-tab__step {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 12px;
+      background: white;
+      box-shadow: 0 10px 20px rgba(10, 22, 49, 0.08);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.84rem;
+      color: var(--blue-deep);
+    }
+
+    .pipeline-tab strong {
+      display: block;
+      margin-top: 14px;
+      font-size: 0.98rem;
+      letter-spacing: -0.04em;
+    }
+
+    .pipeline-tab span {
+      display: block;
+      margin-top: 8px;
+      font-size: 0.84rem;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .pipeline-panels {
+      margin-top: 18px;
+    }
+
+    .pipeline-panel {
+      display: none;
+      grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .pipeline-panel.is-active {
+      display: grid;
+    }
+
+    .feature-card,
+    .command-card,
+    .persona-card,
+    .question-card,
+    .cta-card {
+      overflow: hidden;
+      position: relative;
+      border-radius: 28px;
+      background: var(--surface-strong);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow-md);
+    }
+
+    .feature-card {
+      padding: 28px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.6rem;
+      letter-spacing: -0.05em;
+    }
+
+    .feature-card p {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.76;
+    }
+
+    .feature-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .feature-list li {
+      list-style: none;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(15, 35, 74, 0.04);
+      color: var(--text);
+    }
+
+    .feature-list b {
+      color: var(--blue-deep);
+    }
+
+    .artifact-card {
+      padding: 22px;
+      border-radius: 28px;
+      background:
+        radial-gradient(circle at top right, rgba(31, 104, 255, 0.14), transparent 36%),
+        linear-gradient(180deg, rgba(12, 25, 53, 0.98), rgba(8, 18, 42, 0.96));
+      color: white;
+      box-shadow: 0 28px 60px rgba(10, 22, 49, 0.22);
+    }
+
+    .artifact-card h4 {
+      font-size: 1.2rem;
+      letter-spacing: -0.04em;
+    }
+
+    .artifact-card p {
+      margin-top: 10px;
+      color: rgba(223, 231, 248, 0.76);
+      line-height: 1.7;
+      font-size: 0.94rem;
+    }
+
+    .file-stack {
+      display: grid;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .file-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .file-row code,
+    code,
+    pre {
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+    }
+
+    .file-row code {
+      font-size: 0.84rem;
+      word-break: break-all;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: rgba(31, 199, 201, 0.14);
+      color: #b8fcf2;
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      white-space: nowrap;
+    }
+
+    .question-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .question-card,
+    .persona-card {
+      padding: 26px;
+    }
+
+    .question-card h3,
+    .persona-card h3,
+    .command-card h3,
+    .cta-card h2 {
+      font-size: 1.35rem;
+      letter-spacing: -0.05em;
+    }
+
+    .question-card p,
+    .persona-card p,
+    .command-card p,
+    .cta-card p {
+      margin-top: 12px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .question-card ul,
+    .persona-card ul {
+      margin: 18px 0 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .question-card li,
+    .persona-card li {
+      list-style: none;
+      display: flex;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(15, 35, 74, 0.04);
+      line-height: 1.55;
+    }
+
+    .persona-toolbar {
+      display: inline-flex;
+      gap: 10px;
+      padding: 8px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .persona-tab {
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-weight: 800;
+      transition: background 180ms ease, color 180ms ease;
+    }
+
+    .persona-tab[aria-selected="true"] {
+      background: linear-gradient(135deg, rgba(31, 104, 255, 0.12), rgba(31, 199, 201, 0.08));
+      color: var(--blue-deep);
+    }
+
+    .persona-panels {
+      margin-top: 20px;
+    }
+
+    .persona-panel {
+      display: none;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      gap: 18px;
+    }
+
+    .persona-panel.is-active {
+      display: grid;
+    }
+
+    .persona-visual {
+      padding: 26px;
+      border-radius: 28px;
+      background:
+        radial-gradient(circle at top right, rgba(31, 199, 201, 0.16), transparent 30%),
+        linear-gradient(180deg, rgba(12, 25, 53, 0.98), rgba(8, 18, 42, 0.96));
+      color: white;
+      box-shadow: 0 28px 60px rgba(10, 22, 49, 0.22);
+    }
+
+    .persona-visual h4 {
+      font-size: 1.15rem;
+      letter-spacing: -0.04em;
+    }
+
+    .persona-visual p {
+      margin-top: 10px;
+      color: rgba(223, 231, 248, 0.74);
+      line-height: 1.7;
+    }
+
+    .mini-bars {
+      display: grid;
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .mini-bar__top {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 0.9rem;
+    }
+
+    .mini-bar__track {
+      margin-top: 8px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+
+    .mini-bar__fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--blue));
+    }
+
+    .command-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .command-card {
+      padding: 24px;
+    }
+
+    .code-block {
+      position: relative;
+      margin-top: 18px;
+      padding: 18px 18px 52px;
+      border-radius: 24px;
+      background: rgba(10, 22, 49, 0.98);
+      color: rgba(235, 241, 255, 0.96);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+      overflow: hidden;
+    }
+
+    .code-block::before {
+      content: "";
+      position: absolute;
+      top: 14px;
+      left: 16px;
+      width: 42px;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #ff6c5b, #ffbd59, #39d98a);
+      opacity: 0.9;
+    }
+
+    .code-block pre {
+      margin: 18px 0 0;
+      white-space: pre-wrap;
+      font-size: 0.87rem;
+      line-height: 1.75;
+      overflow-wrap: anywhere;
+    }
+
+    .copy-button {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 100px;
+      min-height: 38px;
+      padding: 0 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: rgba(235, 241, 255, 0.92);
+      font-weight: 700;
+      font-size: 0.84rem;
+      transition: background 180ms ease, transform 180ms ease;
+    }
+
+    .copy-button:hover,
+    .copy-button:focus-visible {
+      background: rgba(255, 255, 255, 0.14);
+      transform: translateY(-1px);
+    }
+
+    .cta-card {
+      padding: 34px;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(31, 199, 201, 0.14), transparent 28%),
+        radial-gradient(circle at 85% 12%, rgba(255, 157, 66, 0.18), transparent 30%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.72));
+    }
+
+    .cta-card__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 14px;
+      border-radius: 999px;
+      background: rgba(15, 35, 74, 0.06);
+      color: var(--text);
+      font-weight: 700;
+      font-size: 0.84rem;
+    }
+
+    .footer {
+      padding: 18px 0 48px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .footer__inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding-top: 22px;
+      border-top: 1px solid rgba(15, 35, 74, 0.1);
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 520ms ease, transform 520ms ease;
+    }
+
+    .reveal.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(31, 104, 255, 0.28);
+      outline-offset: 3px;
+    }
+
+    @media (max-width: 1140px) {
+      .hero__grid,
+      .comparison-grid,
+      .persona-panel,
+      .pipeline-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .hero__signals,
+      .metrics-grid,
+      .question-grid,
+      .command-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .pipeline-tabs {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .board__content {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .site-header__inner {
+        min-height: auto;
+        border-radius: 30px;
+      }
+
+      .nav {
+        display: none;
+      }
+
+      .hero h1 {
+        max-width: none;
+      }
+
+      .hero__signals,
+      .metrics-grid,
+      .question-grid,
+      .command-grid,
+      .board__metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .pipeline-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .section-heading,
+      .footer__inner {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        width: min(calc(100% - 24px), var(--content));
+      }
+
+      .site-header {
+        padding-top: 12px;
+      }
+
+      .site-header__inner {
+        padding: 14px;
+      }
+
+      .hero {
+        padding-top: 24px;
+      }
+
+      .hero__copy,
+      .section,
+      .question-card,
+      .persona-card,
+      .command-card,
+      .feature-card,
+      .cta-card {
+        padding-left: 0;
+        padding-right: 0;
+      }
+
+      .hero__board,
+      .pipeline-shell,
+      .comparison-card,
+      .question-card,
+      .persona-card,
+      .feature-card,
+      .command-card,
+      .cta-card,
+      .artifact-card,
+      .persona-visual {
+        border-radius: 24px;
+      }
+
+      .hero h1 {
+        font-size: clamp(2.85rem, 18vw, 4.3rem);
+      }
+
+      .pipeline-tabs,
+      .pipeline-panel.is-active,
+      .persona-panel.is-active {
+        display: grid;
+      }
+
+      .pipeline-tabs,
+      .comparison-grid,
+      .metrics-grid,
+      .question-grid,
+      .command-grid {
+        gap: 14px;
+      }
+
+      .persona-toolbar {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      .board__topline,
+      .panel__header,
+      .solver-row {
+        grid-template-columns: 1fr;
+        align-items: flex-start;
+      }
+
+      .solver-row {
+        gap: 8px;
+      }
+
+      .button,
+      .nav-cta {
+        width: 100%;
+      }
+
+      .hero__actions {
+        flex-direction: column;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        animation: none !important;
+        transition-duration: 0ms !important;
+      }
+
+      .reveal {
+        opacity: 1;
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <div class="progress" aria-hidden="true">
+      <div class="progress__bar" id="scroll-progress"></div>
+    </div>
+
+    <header class="site-header">
+      <div class="container">
+        <div class="site-header__inner">
+          <a class="brand" href="#top" aria-label="RepoGauge home">
+            <span class="brand__mark" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 4.5a8 8 0 1 0 8 8" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+                <path d="M12 12l5.3-3.1" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+                <circle cx="12" cy="12" r="1.8" fill="white"/>
+              </svg>
+            </span>
+            <span class="brand__wordmark">
+              <span class="brand__title">RepoGauge</span>
+              <span class="brand__subtitle">Evaluate On Your Code</span>
+            </span>
+          </a>
+
+          <nav class="nav" aria-label="Primary">
+            <a href="#why">Why</a>
+            <a href="#pipeline">Pipeline</a>
+            <a href="#questions">Questions</a>
+            <a href="#personas">Teams</a>
+            <a href="#quickstart">Quickstart</a>
+          </nav>
+
+          <a class="nav-cta" href="#quickstart">
+            Start locally
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="container hero__grid">
+          <div class="hero__copy reveal">
+            <div class="eyebrow">
+              <span class="eyebrow__dot" aria-hidden="true"></span>
+              Evaluate coding agents on your own code
+            </div>
+            <h1>
+              Evaluate
+              <span>coding agents on your own code.</span>
+            </h1>
+            <p class="hero__lede">
+              RepoGauge turns any Python repository into a reproducible evaluation suite, runs real
+              coding agents against it locally, and shows the numbers you need to compare them on your code:
+              pass rate, cost, latency, regressions, and the points where a premium model actually pays for itself.
+            </p>
+            <div class="hero__actions">
+              <a class="button button--primary" href="#quickstart">
+                Run the pipeline
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </a>
+              <a class="button button--secondary" href="#pipeline">See how it works</a>
+            </div>
+            <div class="hero__signals" aria-label="Key product strengths">
+              <article class="signal">
+                <strong>Benchmarks built from your own repo</strong>
+                <span>Mine real bugfix commits from your own history and evaluate each task against the human fix.</span>
+              </article>
+              <article class="signal">
+                <strong>Real harness semantics</strong>
+                <span>Export benchmark instances and validate them through the real judge.</span>
+              </article>
+              <article class="signal">
+                <strong>Cost telemetry built in</strong>
+                <span>Track spend, tokens, cache reads, wall-clock time, and turns per attempt.</span>
+              </article>
+              <article class="signal">
+                <strong>Deterministic and rerunnable</strong>
+                <span>Hash-keyed artifacts and local outputs keep regression checks traceable from run to run.</span>
+              </article>
+            </div>
+          </div>
+
+          <aside class="hero__board reveal" aria-label="Illustrative benchmark board">
+            <div class="board__topline">
+              <div>
+                <strong>Illustrative benchmark run</strong>
+                <span>One repo. Same dataset. Same harness. A clean comparison.</span>
+              </div>
+              <div class="pill">sample analysis</div>
+            </div>
+
+            <div class="board__metrics">
+              <article class="board__metric">
+                <span>best solver</span>
+                <strong data-countup="71">71%</strong>
+                <small>Resolved instances on the current slice.</small>
+              </article>
+              <article class="board__metric">
+                <span>cost per solve</span>
+                <strong>$2.81</strong>
+                <small>Cost means more when it sits beside pass rate.</small>
+              </article>
+              <article class="board__metric">
+                <span>regression watch</span>
+                <strong>-6.4%</strong>
+                <small>Easy to spot when a provider slips.</small>
+              </article>
+            </div>
+
+            <div class="board__content">
+              <section class="panel">
+                <div class="panel__header">
+                  <div>
+                    <div class="panel__title">Solver frontier</div>
+                    <div class="panel__subtitle">Sample run across the same task set.</div>
+                  </div>
+                  <div class="pill">real pass/fail</div>
+                </div>
+
+                <div class="solver-list">
+                  <article class="solver-row">
+                    <div>
+                      <strong>Codex CLI</strong>
+                      <span>Top blended score on this repo's bugfix history</span>
+                    </div>
+                    <em class="solver-row__delta">71% solve</em>
+                    <em class="solver-row__cost">$2.81 / solve</em>
+                    <em class="solver-row__speed">2.4m avg</em>
+                  </article>
+                  <article class="solver-row">
+                    <div>
+                      <strong>Claude CLI</strong>
+                      <span>Competitive quality, slightly higher cost tail</span>
+                    </div>
+                    <em class="solver-row__delta">68% solve</em>
+                    <em class="solver-row__cost">$3.40 / solve</em>
+                    <em class="solver-row__speed">2.1m avg</em>
+                  </article>
+                  <article class="solver-row">
+                    <div>
+                      <strong>Budget model</strong>
+                      <span>Cheapest tier wins on easy tasks when routed correctly</span>
+                    </div>
+                    <em class="solver-row__delta">49% solve</em>
+                    <em class="solver-row__cost">$0.84 / solve</em>
+                    <em class="solver-row__speed">1.0m avg</em>
+                  </article>
+                </div>
+              </section>
+
+              <div class="board__stack">
+                <section class="chart-card">
+                  <div class="panel__header">
+                    <div>
+                      <div class="panel__title">Budget frontier</div>
+                      <div class="panel__subtitle">Higher and farther left is better.</div>
+                    </div>
+                  </div>
+                  <svg viewBox="0 0 280 162" role="img" aria-label="Budget frontier sample chart">
+                    <defs>
+                      <linearGradient id="frontier-line" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#1fc7c9"/>
+                        <stop offset="100%" stop-color="#1f68ff"/>
+                      </linearGradient>
+                    </defs>
+                    <rect x="0" y="0" width="280" height="162" rx="18" fill="rgba(255,255,255,0.02)"/>
+                    <g stroke="rgba(255,255,255,0.08)" stroke-width="1">
+                      <line x1="34" y1="18" x2="34" y2="134"/>
+                      <line x1="34" y1="134" x2="260" y2="134"/>
+                      <line x1="34" y1="96" x2="260" y2="96"/>
+                      <line x1="34" y1="58" x2="260" y2="58"/>
+                    </g>
+                    <polyline
+                      points="54,112 108,92 156,74 216,46"
+                      fill="none"
+                      stroke="url(#frontier-line)"
+                      stroke-width="4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                    <g fill="#fff">
+                      <circle cx="54" cy="112" r="6"/>
+                      <circle cx="108" cy="92" r="6"/>
+                      <circle cx="156" cy="74" r="6"/>
+                      <circle cx="216" cy="46" r="7"/>
+                    </g>
+                    <text x="34" y="150">$0</text>
+                    <text x="126" y="150">$2</text>
+                    <text x="218" y="150">$4</text>
+                    <text x="4" y="136">0%</text>
+                    <text x="4" y="99">40%</text>
+                    <text x="4" y="60">70%</text>
+                  </svg>
+                  <p class="chart-note">Router training helps you send easy work to cheaper models without guessing where quality starts to fall off.</p>
+                </section>
+
+                <section class="chart-card">
+                  <div class="panel__header">
+                    <div>
+                      <div class="panel__title">Artifacts that compound</div>
+                      <div class="panel__subtitle">Each stage leaves evidence behind.</div>
+                    </div>
+                  </div>
+                  <div class="artifact-list">
+                    <article class="artifact">
+                      <strong><code>dataset.jsonl</code></strong>
+                      <p>Your repo-specific task set for comparing coding agents.</p>
+                    </article>
+                    <article class="artifact">
+                      <strong><code>attempts.jsonl</code></strong>
+                      <p>Patch, cost, tokens, duration, and exit reason per solver attempt.</p>
+                    </article>
+                    <article class="artifact">
+                      <strong><code>analysis_report.json</code></strong>
+                      <p>Judge outcomes and economic reality in one file.</p>
+                    </article>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section section--dense">
+        <div class="container">
+          <div class="metrics-grid">
+            <article class="metric-card reveal">
+              <span>Reality Check</span>
+              <strong>Human bugfixes become tasks</strong>
+              <p>RepoGauge mines actual bugfix commits, preserving the problem, the tests, and the gold patch.</p>
+            </article>
+            <article class="metric-card reveal">
+              <span>Privacy</span>
+              <strong>Everything runs locally first</strong>
+              <p>Your repository stays on your machine unless you explicitly point a solver at a remote provider.</p>
+            </article>
+            <article class="metric-card reveal">
+              <span>Judging</span>
+              <strong>Official harness checks</strong>
+              <p>Solver patches are checked with the official harness, which keeps the score tied to real judge behavior.</p>
+            </article>
+            <article class="metric-card reveal">
+              <span>Economics</span>
+              <strong>Price each answer</strong>
+              <p>Token usage, cache hits, wall-clock time, and spend sit beside pass rate so the tradeoffs stay visible.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="why">
+        <div class="container">
+          <div class="section-heading reveal">
+            <div class="section-heading__copy">
+              <span>Why this exists</span>
+              <h2>Choosing an agent gets expensive fast.</h2>
+              <p>
+                Public leaderboards rarely look like your codebase, provider behavior changes quietly, and
+                teams end up paying for overlapping assistants because nobody can prove which one actually ships better code.
+                RepoGauge gives that discussion a stable measurement loop.
+              </p>
+            </div>
+          </div>
+
+          <div class="comparison-grid">
+            <article class="comparison-card reveal">
+              <h3>How teams usually choose</h3>
+              <p>
+                A new model lands, someone tries it for an afternoon, and the decision gets made on taste:
+                feels faster, seems sharper, maybe the patch looked cleaner.
+              </p>
+              <ul class="comparison-list">
+                <li><strong>1</strong><span>No stable baseline between providers or months.</span></li>
+                <li><strong>2</strong><span>No proof the benchmark resembles your repo.</span></li>
+                <li><strong>3</strong><span>No cost-per-solved-bug metric to keep quality honest.</span></li>
+                <li><strong>4</strong><span>No reproducible canary for silent regressions.</span></li>
+              </ul>
+            </article>
+
+            <article class="comparison-card comparison-card--dark reveal">
+              <h3>What the workflow gives you</h3>
+              <p>
+                A local pipeline that mines real fixes from your history, validates them with the official harness,
+                runs the same task slice across every solver, and leaves behind analysis artifacts you can diff over time.
+              </p>
+              <ul class="comparison-list">
+                <li><strong>A</strong><span>Same dataset, same judge, same repo. The comparison stays clean.</span></li>
+                <li><strong>B</strong><span>Pass rate tied directly to the human fix and failing tests.</span></li>
+                <li><strong>C</strong><span>Cost, tokens, and latency show up beside quality.</span></li>
+                <li><strong>D</strong><span>Train a router so premium models only handle premium tasks.</span></li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="pipeline">
+        <div class="container">
+          <div class="section-heading reveal">
+            <div class="section-heading__copy">
+              <span>Pipeline</span>
+              <h2>From raw commit history to benchmark-grade evidence.</h2>
+              <p>
+                The workflow is explicit: mine, review, export, validate, run, analyze, then optionally train a router.
+                Every stage emits a defined artifact contract, so the system stays inspectable and concrete.
+              </p>
+            </div>
+          </div>
+
+          <div class="pipeline-shell reveal">
+            <div class="pipeline-tabs" role="tablist" aria-label="RepoGauge pipeline steps">
+              <button class="pipeline-tab" id="tab-mine" role="tab" aria-selected="true" aria-controls="panel-mine">
+                <span class="pipeline-tab__step">01</span>
+                <strong>Mine</strong>
+                <span>Scan the default branch for bugfix-shaped commits.</span>
+              </button>
+              <button class="pipeline-tab" id="tab-review" role="tab" aria-selected="false" aria-controls="panel-review">
+                <span class="pipeline-tab__step">02</span>
+                <strong>Review</strong>
+                <span>Accept or reject candidates with deterministic heuristics.</span>
+              </button>
+              <button class="pipeline-tab" id="tab-export" role="tab" aria-selected="false" aria-controls="panel-export">
+                <span class="pipeline-tab__step">03</span>
+                <strong>Export</strong>
+                <span>Build dataset instances, gold predictions, and adapter glue.</span>
+              </button>
+              <button class="pipeline-tab" id="tab-eval" role="tab" aria-selected="false" aria-controls="panel-eval">
+                <span class="pipeline-tab__step">04</span>
+                <strong>Eval</strong>
+                <span>Sanity-check the gold patches in the real containerized judge.</span>
+              </button>
+              <button class="pipeline-tab" id="tab-run" role="tab" aria-selected="false" aria-controls="panel-run">
+                <span class="pipeline-tab__step">05</span>
+                <strong>Run</strong>
+                <span>Execute a solver matrix against the resolved dataset slice.</span>
+              </button>
+              <button class="pipeline-tab" id="tab-analyze" role="tab" aria-selected="false" aria-controls="panel-analyze">
+                <span class="pipeline-tab__step">06</span>
+                <strong>Analyze</strong>
+                <span>Join judge outcomes with spend, tokens, and latency.</span>
+              </button>
+              <button class="pipeline-tab" id="tab-router" role="tab" aria-selected="false" aria-controls="panel-router">
+                <span class="pipeline-tab__step">07</span>
+                <strong>Train Router</strong>
+                <span>Learn when the cheap model is enough and when it is not.</span>
+              </button>
+            </div>
+
+            <div class="pipeline-panels">
+              <div class="pipeline-panel is-active" id="panel-mine" role="tabpanel" aria-labelledby="tab-mine">
+                <article class="feature-card">
+                  <span class="mono-label">Mine candidate bugfix commits</span>
+                  <h3>Start from the fixes your team already shipped.</h3>
+                  <p>
+                    RepoGauge scans the default branch for bugfix-shaped changes and emits a candidate set that can
+                    be reviewed, filtered, and later exported into a repo-specific benchmark. That keeps the benchmark grounded in actual work your team already shipped.
+                  </p>
+                  <ul class="feature-list">
+                    <li><b>Artifact:</b> <code>candidates.jsonl</code> becomes the raw source pool for the whole benchmark.</li>
+                    <li><b>Bias control:</b> deterministic heuristics reduce the temptation to overfit selection to a preferred solver.</li>
+                    <li><b>Local-first:</b> pure rules mode works without any model calls.</li>
+                  </ul>
+                </article>
+                <aside class="artifact-card">
+                  <h4>Primary outputs</h4>
+                  <p>The mining stage gives you the raw candidate list plus the context needed to understand what was found.</p>
+                  <div class="file-stack">
+                    <div class="file-row"><code>repo_profile.json</code><span class="badge">repo scan</span></div>
+                    <div class="file-row"><code>scan.jsonl</code><span class="badge">commit evidence</span></div>
+                    <div class="file-row"><code>candidates.jsonl</code><span class="badge">ready for review</span></div>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="pipeline-panel" id="panel-review" role="tabpanel" aria-labelledby="tab-review">
+                <article class="feature-card">
+                  <span class="mono-label">Review candidates</span>
+                  <h3>Turn a noisy history into a benchmark-worthy task list.</h3>
+                  <p>
+                    The review stage applies accept and reject heuristics, generates a browsable summary, and draws a clean
+                    boundary between strong bugfixes and changes that do not belong in the benchmark.
+                  </p>
+                  <ul class="feature-list">
+                    <li><b>HTML output:</b> an immediately reviewable report helps humans spot weak candidates quickly.</li>
+                    <li><b>Rules first:</b> LLMs can advise, but they do not get to define ground truth.</li>
+                    <li><b>Faster curation:</b> this is the quality gate before expensive evaluation work starts.</li>
+                  </ul>
+                </article>
+                <aside class="artifact-card">
+                  <h4>Review package</h4>
+                  <p>This is where the dataset starts to feel real.</p>
+                  <div class="file-stack">
+                    <div class="file-row"><code>reviewed.jsonl</code><span class="badge">accepted set</span></div>
+                    <div class="file-row"><code>review.md</code><span class="badge">diffable notes</span></div>
+                    <div class="file-row"><code>review.html</code><span class="badge">browsable UI</span></div>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="pipeline-panel" id="panel-export" role="tabpanel" aria-labelledby="tab-export">
+                <article class="feature-card">
+                  <span class="mono-label">Export dataset</span>
+                  <h3>Materialize a benchmark dataset for your repository.</h3>
+                  <p>
+                    Export turns accepted candidates into dataset instances, writes the gold predictions,
+                    and generates a repo-specific harness adapter so the official judge can understand a repository it has never seen before.
+                  </p>
+                  <ul class="feature-list">
+                    <li><b>Compatibility boundary:</b> the dataset plus adapter pair is what makes the judge work reliably.</li>
+                    <li><b>Gold patch preservation:</b> every task keeps the human fix for validation and comparison.</li>
+                    <li><b>Structured outputs:</b> downstream stages can resume cleanly without redoing export work.</li>
+                  </ul>
+                </article>
+                <aside class="artifact-card">
+                  <h4>Dataset bundle</h4>
+                  <p>Export is the bridge from commit history into a runnable benchmark.</p>
+                  <div class="file-stack">
+                    <div class="file-row"><code>dataset/dataset.jsonl</code><span class="badge">benchmark instances</span></div>
+                    <div class="file-row"><code>predictions.gold.jsonl</code><span class="badge">gold answers</span></div>
+                    <div class="file-row"><code>adapter_&lt;repo&gt;.py</code><span class="badge">judge glue</span></div>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="pipeline-panel" id="panel-eval" role="tabpanel" aria-labelledby="tab-eval">
+                <article class="feature-card">
+                  <span class="mono-label">Validate gold patches</span>
+                  <h3>Make sure the benchmark is actually solvable before you score anyone on it.</h3>
+                  <p>
+                    Gold validation runs the official harness against the human patches inside the container image,
+                    so broken tasks get caught before they contaminate solver comparisons.
+                  </p>
+                  <ul class="feature-list">
+                    <li><b>Sanity check:</b> confirms each benchmark instance can pass under the intended judge environment.</li>
+                    <li><b>Resolved slice:</b> emits the clean dataset subset worth spending solver time on.</li>
+                    <li><b>Infrastructure clarity:</b> separates bad tasks from bad model behavior.</li>
+                  </ul>
+                </article>
+                <aside class="artifact-card">
+                  <h4>Judge verification</h4>
+                  <p>The output of this stage defines the slice that matters for real comparisons.</p>
+                  <div class="file-stack">
+                    <div class="file-row"><code>validation.jsonl</code><span class="badge">gold verdicts</span></div>
+                    <div class="file-row"><code>instance_results.jsonl</code><span class="badge">judge output</span></div>
+                    <div class="file-row"><code>dataset.resolved.jsonl</code><span class="badge">solver-ready</span></div>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="pipeline-panel" id="panel-run" role="tabpanel" aria-labelledby="tab-run">
+                <article class="feature-card">
+                  <span class="mono-label">Run solver matrix</span>
+                  <h3>Test every solver on the same task set and record the economics of each attempt.</h3>
+                  <p>
+                    RepoGauge executes the matrix configuration against the resolved dataset and records one row per attempt:
+                    patch, tokens, cost, duration, exit reason, and workspace artifacts.
+                  </p>
+                  <ul class="feature-list">
+                    <li><b>Head-to-head fairness:</b> same tasks, same judge contract, same repo baseline.</li>
+                    <li><b>Workspace-backed CLIs:</b> local agent tools can run inside the containerized benchmark flow.</li>
+                    <li><b>Rich telemetry:</b> every attempt keeps cost, speed, and solver behavior attached to it.</li>
+                  </ul>
+                </article>
+                <aside class="artifact-card">
+                  <h4>Run evidence</h4>
+                  <p>This is the raw substrate for any serious model comparison.</p>
+                  <div class="file-stack">
+                    <div class="file-row"><code>attempts.jsonl</code><span class="badge">attempt ledger</span></div>
+                    <div class="file-row"><code>attempts.parquet</code><span class="badge">analysis-ready</span></div>
+                    <div class="file-row"><code>attempt_logs/</code><span class="badge">debuggable traces</span></div>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="pipeline-panel" id="panel-analyze" role="tabpanel" aria-labelledby="tab-analyze">
+                <article class="feature-card">
+                  <span class="mono-label">Analyze run</span>
+                  <h3>Join patch quality to the business reality of cost, latency, and failure modes.</h3>
+                  <p>
+                    Analysis turns raw attempts into actual decisions: pass rate, cost per solved task, expensive tails,
+                    timeout rate, and the spread between uniform routing and mixed strategies.
+                  </p>
+                  <ul class="feature-list">
+                    <li><b>One report, full picture:</b> solver outcomes and economics are reported together.</li>
+                    <li><b>Regression detection:</b> rerun next month and diff like any other artifact.</li>
+                    <li><b>Actionable summaries:</b> it becomes obvious where each solver breaks.</li>
+                  </ul>
+                </article>
+                <aside class="artifact-card">
+                  <h4>Decision outputs</h4>
+                  <p>These are the numbers you bring into budget reviews and platform decisions.</p>
+                  <div class="file-stack">
+                    <div class="file-row"><code>analysis_report.json</code><span class="badge">machine-readable</span></div>
+                    <div class="file-row"><code>report.html</code><span class="badge">executive-friendly</span></div>
+                    <div class="file-row"><code>summary.json</code><span class="badge">diff over time</span></div>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="pipeline-panel" id="panel-router" role="tabpanel" aria-labelledby="tab-router">
+                <article class="feature-card">
+                  <span class="mono-label">Train a cost-aware router</span>
+                  <h3>Turn benchmark results into cheaper routing decisions.</h3>
+                  <p>
+                    Router training fits a small decision tree on the analysis data so future task routing can trade off
+                    success probability against cost in a concrete, repo-specific way.
+                  </p>
+                  <ul class="feature-list">
+                    <li><b>Practical outcome:</b> premium models only get the work that justifies premium pricing.</li>
+                    <li><b>Repo-specific:</b> the boundary comes from your task distribution and repo history.</li>
+                    <li><b>Future use:</b> the benchmark can feed policy and routing decisions.</li>
+                  </ul>
+                </article>
+                <aside class="artifact-card">
+                  <h4>Routing substrate</h4>
+                  <p>The benchmark becomes operational guidance that teams can reuse.</p>
+                  <div class="file-stack">
+                    <div class="file-row"><code>router_train.parquet</code><span class="badge">training data</span></div>
+                    <div class="file-row"><code>task features</code><span class="badge">cheap vs premium</span></div>
+                    <div class="file-row"><code>routing decisions</code><span class="badge">budget control</span></div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="questions">
+        <div class="container">
+          <div class="section-heading reveal">
+            <div class="section-heading__copy">
+              <span>Questions answered</span>
+              <h2>Questions you can answer with evidence.</h2>
+              <p>
+                These are the questions teams keep debating in Slack, planning docs, and budget reviews.
+                RepoGauge gives you a stable artifact trail for answering them.
+              </p>
+            </div>
+          </div>
+
+          <div class="question-grid">
+            <article class="question-card reveal">
+              <h3>Which agent actually solves the most bugs here?</h3>
+              <p>On your repo, against your own historical bugfixes and test suites.</p>
+              <ul>
+                <li>See per-solver pass rate and resolved-instance count.</li>
+                <li>Compare attempts on the same task slice so conversations stay anchored.</li>
+                <li>Spot quality leaders without losing sight of cost.</li>
+              </ul>
+            </article>
+
+            <article class="question-card reveal">
+              <h3>Is the premium model worth the price?</h3>
+              <p>Pass rate alone hides the economic story. RepoGauge shows the real tradeoff at the margin.</p>
+              <ul>
+                <li>Track mean spend per solved task and keep raw token totals in context.</li>
+                <li>Inspect the expensive tail where “best” often stops being rational.</li>
+                <li>Quantify where the cheap model is already sufficient.</li>
+              </ul>
+            </article>
+
+            <article class="question-card reveal">
+              <h3>Did a provider quietly regress last week?</h3>
+              <p>Rerun the same matrix on the same dataset and diff the outputs against a stable baseline.</p>
+              <ul>
+                <li>Regression checks become reproducible artifacts.</li>
+                <li>Judge output and cost shifts can be diffed together.</li>
+                <li>Silent model changes turn into explicit evidence.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="personas">
+        <div class="container">
+          <div class="section-heading reveal">
+            <div class="section-heading__copy">
+              <span>Who it is for</span>
+              <h2>For teams making real platform and buying decisions.</h2>
+              <p>
+                The strongest fit is any group making high-leverage decisions about coding agents, spend,
+                or platform defaults and wanting an answer they can defend after the meeting ends.
+              </p>
+            </div>
+            <div class="persona-toolbar" role="tablist" aria-label="Audience tabs">
+              <button class="persona-tab" role="tab" id="persona-eng-tab" aria-controls="persona-eng" aria-selected="true">Eng leads</button>
+              <button class="persona-tab" role="tab" id="persona-platform-tab" aria-controls="persona-platform" aria-selected="false">Platform teams</button>
+              <button class="persona-tab" role="tab" id="persona-watchdog-tab" aria-controls="persona-watchdog" aria-selected="false">Provider watchdogs</button>
+            </div>
+          </div>
+
+          <div class="persona-panels">
+            <div class="persona-panel is-active reveal" id="persona-eng" role="tabpanel" aria-labelledby="persona-eng-tab">
+              <article class="persona-card">
+                <h3>Pick a default agent with something sturdier than demo impressions.</h3>
+                <p>
+                  Engineering leaders usually need to answer a practical question: which coding assistant should the team use,
+                  and is it actually earning its seat? RepoGauge gives a repo-specific answer with enough depth to survive scrutiny.
+                </p>
+                <ul>
+                  <li>Choose a default assistant using pass rate and cost per solved bug, then explain the choice in concrete terms.</li>
+                  <li>See where a premium model wins decisively and where the cheap tier is already good enough.</li>
+                  <li>Build a repeatable canary that catches provider regressions before the team feels them.</li>
+                </ul>
+              </article>
+              <aside class="persona-visual">
+                <h4>Decision view</h4>
+                <p>Example weighting for an engineering leadership review: quality first, economics second, speed third.</p>
+                <div class="mini-bars">
+                  <div>
+                    <div class="mini-bar__top"><span>Resolved instance rate</span><strong>55%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 55%"></div></div>
+                  </div>
+                  <div>
+                    <div class="mini-bar__top"><span>Cost per solved task</span><strong>29%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 29%"></div></div>
+                  </div>
+                  <div>
+                    <div class="mini-bar__top"><span>Average attempt latency</span><strong>16%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 16%"></div></div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+
+            <div class="persona-panel" id="persona-platform" role="tabpanel" aria-labelledby="persona-platform-tab">
+              <article class="persona-card">
+                <h3>Make access and budget decisions with a real failure map.</h3>
+                <p>
+                  Platform teams are typically mediating between user demand, cost controls, and infrastructure risk.
+                  RepoGauge helps them decide which agents to expose, which images to run, and what the guardrails should be.
+                </p>
+                <ul>
+                  <li>Compare CLIs and providers in the exact containerized workflow your org will rely on.</li>
+                  <li>Understand timeout rates, infrastructure flakes, and bad-patch patterns separately.</li>
+                  <li>Feed routing or policy decisions with repo-specific training data.</li>
+                </ul>
+              </article>
+              <aside class="persona-visual">
+                <h4>Platform view</h4>
+                <p>Example weighting for a platform review: economics and operational reliability get more influence.</p>
+                <div class="mini-bars">
+                  <div>
+                    <div class="mini-bar__top"><span>Cost efficiency</span><strong>42%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 42%"></div></div>
+                  </div>
+                  <div>
+                    <div class="mini-bar__top"><span>Operational reliability</span><strong>35%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 35%"></div></div>
+                  </div>
+                  <div>
+                    <div class="mini-bar__top"><span>Resolved instance rate</span><strong>23%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 23%"></div></div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+
+            <div class="persona-panel" id="persona-watchdog" role="tabpanel" aria-labelledby="persona-watchdog-tab">
+              <article class="persona-card">
+                <h3>Catch quiet regressions before they become organizational folklore.</h3>
+                <p>
+                  If your job is to keep an eye on provider quality, a reproducible benchmark on your own repo is a much sharper
+                  instrument than waiting for scattered developer complaints to accumulate.
+                </p>
+                <ul>
+                  <li>Keep a stable dataset and rerun it across model or provider updates.</li>
+                  <li>Diff quality and cost changes together so one metric does not hide the other.</li>
+                  <li>Build a canary suite that reflects your codebase and day-to-day work.</li>
+                </ul>
+              </article>
+              <aside class="persona-visual">
+                <h4>Watchdog view</h4>
+                <p>Example weighting for change detection: reproducibility dominates, because unstable baselines are useless.</p>
+                <div class="mini-bars">
+                  <div>
+                    <div class="mini-bar__top"><span>Baseline stability</span><strong>46%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 46%"></div></div>
+                  </div>
+                  <div>
+                    <div class="mini-bar__top"><span>Quality drift detection</span><strong>31%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 31%"></div></div>
+                  </div>
+                  <div>
+                    <div class="mini-bar__top"><span>Cost drift detection</span><strong>23%</strong></div>
+                    <div class="mini-bar__track"><div class="mini-bar__fill" style="width: 23%"></div></div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="quickstart">
+        <div class="container">
+          <div class="section-heading reveal">
+            <div class="section-heading__copy">
+              <span>Quickstart</span>
+              <h2>Five commands from repository to comparison.</h2>
+              <p>
+                RepoGauge keeps the workflow linear on purpose. You can stop after any stage,
+                inspect the artifacts, or keep going to a full solver comparison and router-training dataset.
+              </p>
+            </div>
+          </div>
+
+          <div class="command-grid">
+            <article class="command-card reveal">
+              <h3>1. Prepare the environment</h3>
+              <p>Use the project’s `uv` workflow and keep everything in the same dependency context the repo expects.</p>
+              <div class="code-block">
+                <pre><code>UV_CACHE_DIR=/tmp/codex-uv-cache uv sync --group dev</code></pre>
+                <button class="copy-button" data-copy="UV_CACHE_DIR=/tmp/codex-uv-cache uv sync --group dev">Copy</button>
+              </div>
+            </article>
+
+            <article class="command-card reveal">
+              <h3>2. Build the benchmark</h3>
+              <p>Mine the repo, review candidates, and export a benchmark dataset plus harness adapter.</p>
+              <div class="code-block">
+                <pre><code>uv run repogauge mine /path/to/repo --out ./out/mine --llm-mode off
+uv run repogauge review ./out/mine/candidates.jsonl --out ./out/review --llm-mode off
+uv run repogauge export ./out/review/reviewed.jsonl --out ./out/export --llm-mode off</code></pre>
+                <button
+                  class="copy-button"
+                  data-copy="uv run repogauge mine /path/to/repo --out ./out/mine --llm-mode off&#10;uv run repogauge review ./out/mine/candidates.jsonl --out ./out/review --llm-mode off&#10;uv run repogauge export ./out/review/reviewed.jsonl --out ./out/export --llm-mode off"
+                >
+                  Copy
+                </button>
+              </div>
+            </article>
+
+            <article class="command-card reveal">
+              <h3>3. Validate, run, analyze</h3>
+              <p>Confirm gold solvability, run the matrix, and produce a report that can survive an architecture review.</p>
+              <div class="code-block">
+                <pre><code>uv run repogauge eval ./out/export/dataset/dataset.jsonl --gold --out ./out/eval --llm-mode off
+uv run repogauge run examples/matrix.yaml --dataset ./out/eval/dataset.resolved.jsonl --out ./out/run
+uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
+                <button
+                  class="copy-button"
+                  data-copy="uv run repogauge eval ./out/export/dataset/dataset.jsonl --gold --out ./out/eval --llm-mode off&#10;uv run repogauge run examples/matrix.yaml --dataset ./out/eval/dataset.resolved.jsonl --out ./out/run&#10;uv run repogauge analyze ./out/run/&lt;run_id&gt;"
+                >
+                  Copy
+                </button>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <article class="cta-card reveal">
+            <span class="mono-label">Outcome</span>
+            <h2>A repo-specific benchmark is a cleaner way to choose coding agents.</h2>
+            <p>
+              It gives you a durable benchmark for your own repository, keeps the judging semantics honest,
+              and surfaces the cost-quality evidence needed to choose coding agents with confidence.
+            </p>
+            <div class="hero__actions">
+              <a class="button button--primary" href="#quickstart">Run the quickstart</a>
+              <a class="button button--secondary" href="#pipeline">Inspect the workflow</a>
+            </div>
+            <div class="cta-card__meta">
+              <span class="tag">Local-first</span>
+              <span class="tag">Python-first v1</span>
+              <span class="tag">Official harness</span>
+              <span class="tag">Cost-aware routing</span>
+              <span class="tag">Deterministic artifacts</span>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__inner">
+        <div>RepoGauge treats agent evaluation as an artifact pipeline with a stable paper trail.</div>
+        <div>Designed from the current README and product scope.</div>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      const progressBar = document.getElementById("scroll-progress");
+      const onScroll = () => {
+        const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+        const progress = scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
+        progressBar.style.width = progress.toFixed(2) + "%";
+      };
+      onScroll();
+      window.addEventListener("scroll", onScroll, { passive: true });
+
+      const revealItems = document.querySelectorAll(".reveal");
+      if ("IntersectionObserver" in window) {
+        const revealObserver = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("is-visible");
+                revealObserver.unobserve(entry.target);
+              }
+            });
+          },
+          { threshold: 0.16 }
+        );
+        revealItems.forEach((item) => revealObserver.observe(item));
+      } else {
+        revealItems.forEach((item) => item.classList.add("is-visible"));
+      }
+
+      const setupTabs = (tabSelector, panelSelector) => {
+        const tabs = Array.from(document.querySelectorAll(tabSelector));
+        const panels = Array.from(document.querySelectorAll(panelSelector));
+
+        const activateTab = (tab) => {
+          const targetId = tab.getAttribute("aria-controls");
+          tabs.forEach((item) => item.setAttribute("aria-selected", item === tab ? "true" : "false"));
+          panels.forEach((panel) => panel.classList.toggle("is-active", panel.id === targetId));
+        };
+
+        tabs.forEach((tab) => {
+          tab.addEventListener("click", () => activateTab(tab));
+          tab.addEventListener("keydown", (event) => {
+            const currentIndex = tabs.indexOf(tab);
+            if (currentIndex === -1) {
+              return;
+            }
+
+            let nextIndex = currentIndex;
+            if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+              nextIndex = (currentIndex + 1) % tabs.length;
+            } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+              nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+            } else if (event.key === "Home") {
+              nextIndex = 0;
+            } else if (event.key === "End") {
+              nextIndex = tabs.length - 1;
+            } else {
+              return;
+            }
+
+            event.preventDefault();
+            tabs[nextIndex].focus();
+            activateTab(tabs[nextIndex]);
+          });
+        });
+      };
+
+      setupTabs(".pipeline-tab", ".pipeline-panel");
+      setupTabs(".persona-tab", ".persona-panel");
+
+      const fallbackCopy = (text) => {
+        const helper = document.createElement("textarea");
+        helper.value = text;
+        helper.setAttribute("readonly", "");
+        helper.style.position = "fixed";
+        helper.style.top = "-9999px";
+        helper.style.opacity = "0";
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand("copy");
+        document.body.removeChild(helper);
+      };
+
+      const copyButtons = Array.from(document.querySelectorAll(".copy-button"));
+      copyButtons.forEach((button) => {
+        button.addEventListener("click", async () => {
+          const value = button.getAttribute("data-copy");
+          if (!value) {
+            return;
+          }
+
+          try {
+            const normalized = value.replace(/&#10;/g, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+            if (navigator.clipboard && window.isSecureContext) {
+              await navigator.clipboard.writeText(normalized);
+            } else {
+              fallbackCopy(normalized);
+            }
+            const original = button.textContent;
+            button.textContent = "Copied";
+            window.setTimeout(() => {
+              button.textContent = original;
+            }, 1400);
+          } catch (error) {
+            button.textContent = "Failed";
+            window.setTimeout(() => {
+              button.textContent = "Copy";
+            }, 1400);
+          }
+        });
+      });
+
+      const countups = Array.from(document.querySelectorAll("[data-countup]"));
+      const countObserver = "IntersectionObserver" in window
+        ? new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (!entry.isIntersecting) {
+                  return;
+                }
+
+                const node = entry.target;
+                const target = Number(node.getAttribute("data-countup") || "0");
+                const duration = 1200;
+                const startTime = performance.now();
+
+                const tick = (now) => {
+                  const progress = Math.min((now - startTime) / duration, 1);
+                  const eased = 1 - Math.pow(1 - progress, 3);
+                  node.textContent = Math.round(target * eased) + "%";
+                  if (progress < 1) {
+                    window.requestAnimationFrame(tick);
+                  }
+                };
+
+                window.requestAnimationFrame(tick);
+                countObserver.unobserve(node);
+              });
+            },
+            { threshold: 0.75 }
+          )
+        : null;
+
+      countups.forEach((item) => {
+        if (countObserver) {
+          countObserver.observe(item);
+        } else {
+          item.textContent = item.getAttribute("data-countup") + "%";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
