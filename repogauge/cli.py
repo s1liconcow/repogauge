@@ -8,6 +8,7 @@ changing public invocation semantics.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import asdict
 import hashlib
 import json
@@ -2256,7 +2257,6 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 _, adapter_module = _load_adapter(adapter_path)
                 _register_adapter_maps(_adapter_context(adapter_module))
 
-            resolved_container_host: str | None = None
             runtime_context = None
             if containerized_workspace_solvers:
                 from repogauge.runner.judge import _ensure_container_runtime
@@ -2266,8 +2266,9 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     container_host=getattr(namespace, "container_host", None),
                 )
 
-            if runtime_context is not None:
-                with runtime_context as resolved_container_host:
+            execution_context = runtime_context or nullcontext(None)
+            with execution_context as resolved_container_host:
+                if runtime_context is not None:
                     if default_dataset_images_required and dataset_rows:
                         from repogauge.runner.judge import _temporary_environment
                         import docker as docker_module  # type: ignore[import]
@@ -2294,34 +2295,34 @@ def _run_command(namespace: argparse.Namespace) -> int:
                         containerized_workspace_solvers=True,
                         container_host=resolved_container_host,
                     )
-            else:
-                adapters = build_solver_adapters(
-                    solvers=matrix.solvers,
-                    providers=matrix.providers,
+                else:
+                    adapters = build_solver_adapters(
+                        solvers=matrix.solvers,
+                        providers=matrix.providers,
+                    )
+                needs_workspace = any(
+                    adapter.requires_workspace() for adapter in adapters.values()
                 )
-            needs_workspace = any(
-                adapter.requires_workspace() for adapter in adapters.values()
-            )
-            repo_root = (
-                _resolve_repo_root(Path(matrix.dataset.path))
-                if needs_workspace
-                else None
-            )
-            scheduler = SolverScheduler(
-                config=SolverSchedulerConfig(
-                    persist_jobs_to=run_jobs_out,
-                    persist_attempts_to=attempts_out,
-                    persist_attempts_parquet=attempts_parquet_out,
-                    persist_attempt_logs_root=attempt_logs_root,
-                    source_repo_root=repo_root,
-                    attempt_workspaces_root=run_root / "attempt_workspaces",
+                repo_root = (
+                    _resolve_repo_root(Path(matrix.dataset.path))
+                    if needs_workspace
+                    else None
                 )
-            )
-            summary = scheduler.run(
-                jobs=jobs,
-                adapters=adapters,
-                dataset_rows=dataset_rows,
-            )
+                scheduler = SolverScheduler(
+                    config=SolverSchedulerConfig(
+                        persist_jobs_to=run_jobs_out,
+                        persist_attempts_to=attempts_out,
+                        persist_attempts_parquet=attempts_parquet_out,
+                        persist_attempt_logs_root=attempt_logs_root,
+                        source_repo_root=repo_root,
+                        attempt_workspaces_root=run_root / "attempt_workspaces",
+                    )
+                )
+                summary = scheduler.run(
+                    jobs=jobs,
+                    adapters=adapters,
+                    dataset_rows=dataset_rows,
+                )
             run_summary = {
                 "completed_at": summary.completed_at,
                 "job_count": len(summary.jobs),

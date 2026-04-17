@@ -1091,11 +1091,18 @@ solvers:
                 encoding="utf-8",
             )
 
+            runtime_active = False
+
             @contextmanager
             def fake_runtime(*, container_runtime: str, container_host: str | None):
+                nonlocal runtime_active
                 self.assertEqual(container_runtime, "docker")
                 self.assertEqual(container_host, "unix:///tmp/docker.sock")
-                yield "unix:///tmp/docker.sock"
+                runtime_active = True
+                try:
+                    yield "unix:///tmp/docker.sock"
+                finally:
+                    runtime_active = False
 
             fake_adapter = unittest.mock.Mock()
             fake_adapter.requires_workspace.return_value = False
@@ -1111,13 +1118,17 @@ solvers:
                 completed_at="2026-01-01T00:00:00Z",
             )
 
+            def fake_scheduler_run(*args, **kwargs):
+                self.assertTrue(runtime_active)
+                return fake_summary
+
             with (
                 patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
                 patch("repogauge.cli.build_solver_adapters") as mock_build_adapters,
                 patch("repogauge.cli.SolverScheduler.run") as mock_run,
             ):
                 mock_build_adapters.return_value = {"solver-a": fake_adapter}
-                mock_run.return_value = fake_summary
+                mock_run.side_effect = fake_scheduler_run
                 result = main(
                     [
                         "run",

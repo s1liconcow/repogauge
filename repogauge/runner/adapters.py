@@ -174,7 +174,9 @@ def _classify_codex_cli_timeout(
     return None
 
 
-def _extract_patch_from_text(raw_output: str) -> str:
+def _extract_patch_from_text(raw_output: str | None) -> str:
+    if not isinstance(raw_output, str):
+        return ""
     text = raw_output.strip()
     if not text:
         return ""
@@ -244,7 +246,9 @@ def _extract_patch_from_text(raw_output: str) -> str:
     return ""
 
 
-def _extract_edit_plan_text(raw_output: str) -> str:
+def _extract_edit_plan_text(raw_output: str | None) -> str:
+    if not isinstance(raw_output, str):
+        return ""
     text = raw_output.strip()
     if not text:
         return ""
@@ -365,7 +369,7 @@ def _extract_edit_plan_text(raw_output: str) -> str:
     return ""
 
 
-def _extract_structured_output_text(raw_output: str) -> str:
+def _extract_structured_output_text(raw_output: str | None) -> str:
     patch = _extract_patch_from_text(raw_output)
     if patch:
         return patch
@@ -384,13 +388,11 @@ def _required_instance_fields(instance_row: Mapping[str, Any] | None) -> dict[st
     if instance_row is None:
         raise SolverAdapterError("instance_row is required for solver execution")
     row = _coerce_mapping(instance_row, field_name="instance_row")
-    required: dict[str, str] = {}
     for key in ("instance_id", "repo", "base_commit", "problem_statement"):
         value = str(row.get(key, "")).strip()
         if not value:
             raise SolverAdapterError(f"instance_row missing required field: {key}")
-        required[key] = value
-    return required
+    return row
 
 
 def _build_prompt(

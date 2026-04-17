@@ -163,6 +163,37 @@ def _exec_in_container(
     )
 
 
+def _ensure_solver_command_available(
+    *, container, command: list[str], image: str
+) -> None:
+    if not command:
+        raise WorkspaceContainerError("solver command is empty")
+
+    executable = command[0].strip()
+    if not executable:
+        raise WorkspaceContainerError("solver command is empty")
+
+    probe = f"command -v {shlex.quote(executable)} >/dev/null"
+    try:
+        exit_code, _output = container.exec_run(
+            ["/bin/bash", "-lc", probe],
+            demux=False,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise WorkspaceContainerError(
+            f"unable to verify solver command {executable!r} in container image "
+            f"{image}: {exc}"
+        ) from exc
+
+    if exit_code == 0:
+        return
+
+    raise WorkspaceContainerError(
+        f"solver command {executable!r} was not found in container image {image}; "
+        "set providers.<id>.image to an image that includes this CLI"
+    )
+
+
 def run_solver_command_in_container(
     *,
     attempt_id: str,
@@ -222,6 +253,7 @@ def run_solver_command_in_container(
             create_kwargs["platform"] = platform
         container = client.containers.create(**create_kwargs)
         container.start()
+        _ensure_solver_command_available(container=container, command=command, image=image)
 
         shell_cmd = (
             f"cd {shlex.quote(DOCKER_WORKDIR)} && "

@@ -519,6 +519,9 @@ class TestAdapters(unittest.TestCase):
                     "repo": "repo",
                     "base_commit": "abc123",
                     "problem_statement": "fix bug",
+                    "version": "1.0",
+                    "patch": "diff --git a/x b/x\n+prod",
+                    "test_patch": "diff --git a/tests/x b/tests/x\n+test",
                 },
                 workspace_path=Path(workspace),
             )
@@ -569,6 +572,9 @@ class TestAdapters(unittest.TestCase):
                     "repo": "repo",
                     "base_commit": "abc123",
                     "problem_statement": "fix bug",
+                    "version": "1.0",
+                    "patch": "diff --git a/x b/x\n+prod",
+                    "test_patch": "diff --git a/tests/x b/tests/x\n+test",
                 },
                 workspace_path=Path(workspace),
             )
@@ -592,6 +598,8 @@ class TestAdapters(unittest.TestCase):
         assert kwargs["environment"]["HOME"] == str(
             Path(workspace).parent / "codex-home"
         )
+        assert kwargs["instance_row"]["test_patch"] == "diff --git a/tests/x b/tests/x\n+test"
+        assert kwargs["instance_row"]["version"] == "1.0"
 
     def test_codex_cli_finalize_output_prefers_model_patch(self) -> None:
         provider = _provider_for_command("codex")
@@ -626,6 +634,44 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
         self.assertEqual(result.model_patch, patch)
 
+    def test_codex_cli_finalize_output_preserves_failed_result_without_model_patch(
+        self,
+    ) -> None:
+        provider = _provider_for_command("codex")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:6"),
+            attempt_id="run-1:repo__sample-1:solver-a:6:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        result = adapter.finalize_output(
+            request,
+            SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output="",
+                stderr_output="boom",
+                exit_reason="boom",
+            ),
+        )
+
+        self.assertEqual(result.status, SolverAttemptState.FAILED)
+        self.assertIsNone(result.model_patch)
+        self.assertEqual(result.exit_reason, "boom")
+        self.assertEqual(result.stderr_output, "")
+
     def _claude_provider(self, command: str = "claude") -> MatrixProvider:
         return MatrixProvider(
             provider_id="claude",
@@ -647,6 +693,9 @@ class TestAdapters(unittest.TestCase):
                 "repo": "repo",
                 "base_commit": "abc123",
                 "problem_statement": "fix bug",
+                "version": "1.0",
+                "patch": "diff --git a/x b/x\n+prod",
+                "test_patch": "diff --git a/tests/x b/tests/x\n+test",
             },
             workspace_path=workspace,
         )
@@ -881,6 +930,11 @@ class TestAdapters(unittest.TestCase):
             kwargs["environment"]["HOME"],
             str(Path(workspace).parent / "claude-home"),
         )
+        self.assertEqual(
+            kwargs["instance_row"]["test_patch"],
+            "diff --git a/tests/x b/tests/x\n+test",
+        )
+        self.assertEqual(kwargs["instance_row"]["version"], "1.0")
 
     def test_claude_cli_adapter_inherits_env_without_local_credentials(
         self,
