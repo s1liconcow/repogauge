@@ -431,6 +431,29 @@ def _normalize_from_patch(workspace: Path, patch: str) -> None:
         raise PatchNormalizationError(f"failed to apply solver patch: {exc}") from exc
 
 
+def _restore_attempt_workspace(attempt: AttemptWorkspace) -> None:
+    reset = run_command(
+        [
+            "git",
+            "-C",
+            str(attempt.workspace_path),
+            "reset",
+            "--hard",
+            attempt.base_commit,
+        ]
+    )
+    if not reset.success:
+        raise PatchNormalizationError(
+            f"failed to reset attempt workspace: {reset.stderr or reset.stdout}"
+        )
+
+    clean = run_command(["git", "-C", str(attempt.workspace_path), "clean", "-fd"])
+    if not clean.success:
+        raise PatchNormalizationError(
+            f"failed to clean attempt workspace: {clean.stderr or clean.stdout}"
+        )
+
+
 def _collect_normalized_patch(workspace: Path) -> str:
     run_command(["git", "-C", str(workspace), "add", "-A"])
     diff = run_command(["git", "-C", str(workspace), "diff", "--cached", "--no-color"])
@@ -445,6 +468,7 @@ def normalize_solver_output(
     raw_output: str, attempt: AttemptWorkspace
 ) -> PatchNormalizationResult:
     attempt.raw_output_path.write_text(_coerce_str(raw_output), encoding="utf-8")
+    _restore_attempt_workspace(attempt)
 
     patch = _extract_unified_patch(raw_output)
     if patch:
@@ -454,9 +478,6 @@ def normalize_solver_output(
         if not edits:
             raise PatchNormalizationError("unrecognized solver output format")
         _normalize_from_file_edits(attempt.workspace_path, edits)
-
-    if attempt.benchmark_agents_path.exists():
-        attempt.benchmark_agents_path.unlink()
 
     stage_result = run_command(["git", "-C", str(attempt.workspace_path), "add", "-A"])
     if not stage_result.success:

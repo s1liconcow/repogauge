@@ -163,6 +163,92 @@ def test_normalize_solver_output_from_file_edits(tmp_path: Path) -> None:
         )
 
 
+def test_normalize_solver_output_resets_dirty_workspace_before_applying_diff(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _create_repo(tmp_path)
+    row = _attempt_row(commit)
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-dirty-diff",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        (attempt.workspace_path / "src.py").write_text("print('after')\n", encoding="utf-8")
+        (attempt.workspace_path / "noise.txt").write_text("solver scratch\n", encoding="utf-8")
+
+        raw = (
+            "diff --git a/src.py b/src.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/src.py\n"
+            "+++ b/src.py\n"
+            "@@ -1 +1 @@\n"
+            "-print('before')\n"
+            "+print('after')\n"
+        )
+        result = normalize_solver_output(raw, attempt=attempt)
+
+        assert "print('after')" in result.patch
+        assert "noise.txt" not in result.patch
+
+
+def test_normalize_solver_output_resets_dirty_workspace_before_file_edits(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _create_repo(tmp_path)
+    row = _attempt_row(commit)
+
+    edit_plan = {"files": [{"path": "src.py", "content": "print('edited')\n"}]}
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-dirty-edits",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        (attempt.workspace_path / "src.py").write_text("print('solver-side')\n", encoding="utf-8")
+        (attempt.workspace_path / "noise.txt").write_text("solver scratch\n", encoding="utf-8")
+
+        result = normalize_solver_output(json.dumps(edit_plan), attempt=attempt)
+
+        assert "print('edited')" in result.patch
+        assert "solver-side" not in result.patch
+        assert "noise.txt" not in result.patch
+
+
+def test_normalize_solver_output_preserves_tracked_agents_file(tmp_path: Path) -> None:
+    repo, commit = _create_repo(tmp_path)
+    (repo / "AGENTS.md").write_text("repo instructions\n", encoding="utf-8")
+    run_command(["git", "add", "AGENTS.md"], cwd=str(repo))
+    run_command(["git", "commit", "-m", "add agents"], cwd=str(repo))
+    commit = run_command(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip()
+    row = _attempt_row(commit)
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-agents-diff",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        raw = (
+            "diff --git a/src.py b/src.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/src.py\n"
+            "+++ b/src.py\n"
+            "@@ -1 +1 @@\n"
+            "-print('before')\n"
+            "+print('after')\n"
+        )
+
+        result = normalize_solver_output(raw, attempt=attempt)
+
+        assert "AGENTS.md" not in result.patch
+
+
 def test_normalize_rejects_escape_path(tmp_path: Path) -> None:
     repo, commit = _create_repo(tmp_path)
     row = _attempt_row(commit)
