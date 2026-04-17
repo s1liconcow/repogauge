@@ -593,6 +593,7 @@ class TestAdapters(unittest.TestCase):
         kwargs = mock_container_exec.call_args.kwargs
         command = kwargs["command"]
         assert command[command.index("--cd") + 1] == "/testbed"
+        assert "--skip-git-repo-check" in command
         assert kwargs["container_host"] == "unix:///tmp/podman.sock"
         assert kwargs["image_override"] == "ghcr.io/example/codex:latest"
         assert kwargs["environment"]["HOME"] == str(
@@ -972,7 +973,7 @@ class TestAdapters(unittest.TestCase):
 
         self.assertIsNone(mock_run_command.call_args.kwargs["env"])
 
-    def test_claude_cli_adapter_scrubs_api_key_when_local_creds_exist(
+    def test_claude_cli_adapter_prefers_api_key_when_local_creds_exist(
         self,
     ) -> None:
         provider = self._claude_provider("claude")
@@ -1010,13 +1011,11 @@ class TestAdapters(unittest.TestCase):
             ):
                 adapter.execute_attempt(request)
 
-        env = mock_run_command.call_args.kwargs["env"]
-        self.assertIsNotNone(env)
-        self.assertNotIn("ANTHROPIC_API_KEY", env)
-        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
-        self.assertEqual(env["HOME"], fake_home)
+        self.assertIsNone(mock_run_command.call_args.kwargs["env"])
 
-    def test_claude_cli_child_env_for_home_scrubs_keys_for_isolated_home(self) -> None:
+    def test_claude_cli_child_env_for_home_prefers_api_key_for_isolated_home(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as fake_home:
             claude_dir = Path(fake_home) / ".claude"
             claude_dir.mkdir()
@@ -1033,8 +1032,35 @@ class TestAdapters(unittest.TestCase):
 
         assert env is not None
         assert env["HOME"] == fake_home
-        assert "ANTHROPIC_API_KEY" not in env
-        assert "ANTHROPIC_AUTH_TOKEN" not in env
+        assert env["ANTHROPIC_API_KEY"] == "sk-env"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "tok-env"
+
+    def test_claude_cli_adapter_surfaces_terminal_error_result(self) -> None:
+        provider = self._claude_provider("claude")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        request = self._claude_request(adapter)
+        command_result = CommandResult(
+            command=[],
+            returncode=0,
+            stdout=(
+                '{"type":"result","is_error":true,"result":"Credit balance is too low"}\n'
+            ),
+            stderr="",
+        )
+
+        with mock.patch(
+            "repogauge.runner.adapters.run_command",
+            return_value=command_result,
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.FAILED)
+        self.assertEqual(result.exit_reason, "Credit balance is too low")
 
     def test_claude_cli_adapter_requires_command(self) -> None:
         with self.assertRaises(SolverAdapterError):

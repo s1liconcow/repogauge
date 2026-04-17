@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from repogauge.exec import run_command
 from repogauge.runner.normalize_patch import (
     PatchNormalizationError,
+    _run_git_workspace_command,
     normalize_solver_output,
 )
 from repogauge.runner.workspaces import prepare_attempt_workspace
@@ -262,6 +264,61 @@ def test_normalize_solver_output_resets_dirty_workspace_before_file_edits(
         assert "noise.txt" not in result.patch
 
 
+def test_normalize_solver_output_falls_back_to_workspace_state(tmp_path: Path) -> None:
+    repo, commit = _create_repo(tmp_path)
+    row = _attempt_row(commit)
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-workspace-fallback",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        (attempt.workspace_path / "src.py").write_text(
+            "print('after')\n", encoding="utf-8"
+        )
+        result = normalize_solver_output(
+            "Implemented the requested change.",
+            attempt=attempt,
+        )
+
+        assert "print('after')" in result.patch
+        assert result.patch_stats.files_touched == 1
+
+
+def test_normalize_solver_output_prefers_workspace_state_over_corrupt_patch(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _create_repo(tmp_path)
+    row = _attempt_row(commit)
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-corrupt-patch-fallback",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        (attempt.workspace_path / "src.py").write_text(
+            "print('after')\n", encoding="utf-8"
+        )
+        corrupt_patch = (
+            "diff --git a/src.py b/src.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/src.py\n"
+            "+++ b/src.py\n"
+            "@@ -1 +1 @@\n"
+            "-print('before')\n"
+            "+print('after')\n"
+            "not a valid diff line\n"
+        )
+        result = normalize_solver_output(corrupt_patch, attempt=attempt)
+
+        assert "print('after')" in result.patch
+        assert result.patch_stats.files_touched == 1
+
+
 def test_normalize_solver_output_preserves_tracked_agents_file(tmp_path: Path) -> None:
     repo, commit = _create_repo(tmp_path)
     (repo / "AGENTS.md").write_text("repo instructions\n", encoding="utf-8")
@@ -323,3 +380,23 @@ def test_normalize_rejects_binary_edit_plan(tmp_path: Path) -> None:
 
         with pytest.raises(PatchNormalizationError, match="binary"):
             normalize_solver_output(raw, attempt=attempt)
+
+
+def test_run_git_workspace_command_marks_workspace_safe(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    with mock.patch("repogauge.runner.normalize_patch.run_command") as run_command_mock:
+        _run_git_workspace_command(workspace, ["status", "--short"])
+
+    run_command_mock.assert_called_once_with(
+        [
+            "git",
+            "-c",
+            f"safe.directory={workspace}",
+            "-C",
+            str(workspace),
+            "status",
+            "--short",
+        ]
+    )

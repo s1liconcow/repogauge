@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import threading
 import time
 from contextlib import contextmanager
@@ -27,6 +28,9 @@ _CONTAINER_ATTEMPT_ROOT = "/repogauge"
 _CONTAINER_PROMPT_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/prompt.txt"
 _CONTAINER_STDOUT_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/stdout.txt"
 _CONTAINER_STDERR_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/stderr.txt"
+_CONTAINER_HOST_TOOLS_ROOT = f"{_CONTAINER_ATTEMPT_ROOT}/host-tools"
+_CONTAINER_CODEX_SEED_HOME = f"{_CONTAINER_ATTEMPT_ROOT}/codex-home"
+_CONTAINER_CODEX_RUNTIME_HOME = "/home/nonroot/.repogauge-codex-home"
 
 
 class WorkspaceContainerError(RuntimeError):
@@ -38,6 +42,12 @@ class _ExecOutcome:
     exit_code: int
     timed_out: bool
     elapsed_ms: int
+
+
+@dataclass(frozen=True)
+class _HostToolFallback:
+    command: list[str]
+    mounts: dict[str, dict[str, str]]
 
 
 def _sanitize_container_name(value: str) -> str:
@@ -194,6 +204,141 @@ def _ensure_solver_command_available(
     )
 
 
+def _codex_host_tool_fallback(command: list[str]) -> _HostToolFallback | None:
+    host_codex = shutil.which("codex")
+    host_node = shutil.which("node")
+    if host_codex is None or host_node is None:
+        return None
+
+    codex_script = Path(host_codex).resolve()
+    node_binary = Path(host_node).resolve()
+    if not codex_script.exists() or not node_binary.exists():
+        return None
+
+    node_modules_root: Path | None = None
+    for parent in codex_script.parents:
+        if parent.name == "node_modules":
+            node_modules_root = parent
+            break
+    if node_modules_root is None or not node_modules_root.exists():
+        return None
+
+    container_node = f"{_CONTAINER_HOST_TOOLS_ROOT}/node/node"
+    container_node_modules = f"{_CONTAINER_HOST_TOOLS_ROOT}/codex/node_modules"
+    relative_script = codex_script.relative_to(node_modules_root)
+    return _HostToolFallback(
+        command=[
+            container_node,
+            f"{container_node_modules}/{relative_script.as_posix()}",
+            *command[1:],
+        ],
+        mounts={
+            str(node_binary): {"bind": container_node, "mode": "ro"},
+            str(node_modules_root): {"bind": container_node_modules, "mode": "ro"},
+        },
+    )
+
+
+def _claude_host_tool_fallback(command: list[str]) -> _HostToolFallback | None:
+    host_claude = shutil.which("claude")
+    if host_claude is None:
+        return None
+
+    claude_binary = Path(host_claude).resolve()
+    if not claude_binary.exists():
+        return None
+
+    container_claude = f"{_CONTAINER_HOST_TOOLS_ROOT}/claude/claude"
+    return _HostToolFallback(
+        command=[container_claude, *command[1:]],
+        mounts={str(claude_binary): {"bind": container_claude, "mode": "ro"}},
+    )
+
+
+def _resolve_host_tool_fallback(command: list[str]) -> _HostToolFallback | None:
+    if not command:
+        return None
+
+    executable = command[0].strip()
+    if executable == "codex":
+        return _codex_host_tool_fallback(command)
+    if executable == "claude":
+        return _claude_host_tool_fallback(command)
+    return None
+
+
+def _containerize_environment(
+    *,
+    environment: Mapping[str, str] | None,
+    attempt_root: Path,
+) -> dict[str, str]:
+    command_env = dict(environment or {})
+    host_attempt_root = str(attempt_root.resolve())
+    for key, value in list(command_env.items()):
+        if value.startswith(host_attempt_root):
+            command_env[key] = (
+                f"{_CONTAINER_ATTEMPT_ROOT}{value.removeprefix(host_attempt_root)}"
+            )
+    return command_env
+
+
+def _is_codex_command(command: list[str]) -> bool:
+    return any("codex" in part.lower() for part in command[:2])
+
+
+def _solver_shell_command(command: list[str]) -> str:
+    writable_targets = (
+        DOCKER_WORKDIR,
+        _CONTAINER_PROMPT_PATH,
+        f"{_CONTAINER_ATTEMPT_ROOT}/codex-home",
+        f"{_CONTAINER_ATTEMPT_ROOT}/claude-home",
+    )
+    prep_steps = [
+        f"if [ -e {shlex.quote(target)} ]; then chmod -R a+rwX {shlex.quote(target)}; fi"
+        for target in writable_targets
+    ]
+    runtime_prep_steps: list[str] = []
+    runtime_command = list(command)
+    if _is_codex_command(command):
+        runtime_prep_steps.extend(
+            [
+                f"rm -rf {shlex.quote(_CONTAINER_CODEX_RUNTIME_HOME)}",
+                f"mkdir -p {shlex.quote(_CONTAINER_CODEX_RUNTIME_HOME)}",
+                "if [ -d "
+                + shlex.quote(_CONTAINER_CODEX_SEED_HOME)
+                + " ]; then cp -a "
+                + shlex.quote(f"{_CONTAINER_CODEX_SEED_HOME}/.")
+                + " "
+                + shlex.quote(f"{_CONTAINER_CODEX_RUNTIME_HOME}/")
+                + "; fi",
+                f"chown -R 1000:1000 {shlex.quote(_CONTAINER_CODEX_RUNTIME_HOME)}",
+                f"chmod -R u+rwX {shlex.quote(_CONTAINER_CODEX_RUNTIME_HOME)}",
+            ]
+        )
+        runtime_command = [
+            "env",
+            f"HOME={_CONTAINER_CODEX_RUNTIME_HOME}",
+            f"XDG_CONFIG_HOME={_CONTAINER_CODEX_RUNTIME_HOME}/.config",
+            f"CODEX_HOME={_CONTAINER_CODEX_RUNTIME_HOME}/.codex",
+            *runtime_command,
+        ]
+    solver_command = shlex.join(runtime_command)
+    return (
+        " && ".join(prep_steps)
+        + (" && " + " && ".join(runtime_prep_steps) if runtime_prep_steps else "")
+        + f" && cd {shlex.quote(DOCKER_WORKDIR)}"
+        + " && "
+        + "{ "
+        + f"su -m -s /bin/bash nonroot -c {shlex.quote(solver_command)}"
+        + "; status=$?; "
+        + " && ".join(prep_steps)
+        + "; exit $status; }"
+        + f" < {shlex.quote(_CONTAINER_PROMPT_PATH)}"
+        + f" > {shlex.quote(_CONTAINER_STDOUT_PATH)}"
+        + f" 2> {shlex.quote(_CONTAINER_STDERR_PATH)}"
+    )
+
+
 def run_solver_command_in_container(
     *,
     attempt_id: str,
@@ -246,24 +391,37 @@ def run_solver_command_in_container(
             "detach": True,
             "command": "tail -f /dev/null",
             "volumes": volumes,
-            "environment": dict(environment or {}),
+            "environment": _containerize_environment(
+                environment=environment,
+                attempt_root=attempt_root,
+            ),
             "cap_add": cap_add,
         }
         if platform:
             create_kwargs["platform"] = platform
         container = client.containers.create(**create_kwargs)
         container.start()
-        _ensure_solver_command_available(
-            container=container, command=command, image=image
-        )
+        resolved_command = list(command)
+        try:
+            _ensure_solver_command_available(
+                container=container, command=resolved_command, image=image
+            )
+        except WorkspaceContainerError:
+            fallback = _resolve_host_tool_fallback(command)
+            if fallback is None:
+                raise
 
-        shell_cmd = (
-            f"cd {shlex.quote(DOCKER_WORKDIR)} && "
-            f"{shlex.join(command)}"
-            f" < {shlex.quote(_CONTAINER_PROMPT_PATH)}"
-            f" > {shlex.quote(_CONTAINER_STDOUT_PATH)}"
-            f" 2> {shlex.quote(_CONTAINER_STDERR_PATH)}"
-        )
+            container.stop(timeout=1)
+            container.remove(force=True)
+            create_kwargs["volumes"] = {**volumes, **fallback.mounts}
+            container = client.containers.create(**create_kwargs)
+            container.start()
+            resolved_command = fallback.command
+            _ensure_solver_command_available(
+                container=container, command=resolved_command, image=image
+            )
+
+        shell_cmd = _solver_shell_command(resolved_command)
         outcome = _exec_in_container(
             container,
             f"/bin/bash -lc {shlex.quote(shell_cmd)}",
@@ -272,7 +430,7 @@ def run_solver_command_in_container(
         stdout = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
         stderr = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
         return CommandResult(
-            command=tuple(command),
+            command=tuple(resolved_command),
             returncode=outcome.exit_code,
             stdout=stdout,
             stderr=stderr,

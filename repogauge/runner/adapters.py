@@ -1138,6 +1138,7 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                 "--sandbox",
                 "danger-full-access",
                 "--ephemeral",
+                "--skip-git-repo-check",
             ]
         )
         if request.workspace_path is not None:
@@ -1286,9 +1287,9 @@ def _claude_cli_child_env() -> dict[str, str] | None:
     """Return the env to run ``claude`` with, or ``None`` to inherit as-is.
 
     When the user has a local ``~/.claude/.credentials.json`` (subscription
-    OAuth login), strip ``ANTHROPIC_API_KEY`` / ``ANTHROPIC_AUTH_TOKEN`` from
-    the child environment so the CLI uses that login instead of the env key.
-    Otherwise leave the env untouched so the API-key fallback still works.
+    OAuth login) and no API key is present, keep using that login. When an
+    API key or auth token is present, prefer that credential path even if local
+    Claude credentials also exist.
     """
     return _claude_cli_child_env_for_home(Path.home())
 
@@ -1297,25 +1298,23 @@ def _claude_cli_child_env_for_home(home_root: Path) -> dict[str, str] | None:
     credentials = home_root / ".claude" / ".credentials.json"
     has_key = "ANTHROPIC_API_KEY" in os.environ
     has_token = "ANTHROPIC_AUTH_TOKEN" in os.environ
+    if has_key or has_token:
+        if home_root == Path.home():
+            return None
+        command_env = dict(os.environ)
+        command_env["HOME"] = str(home_root)
+        return command_env
     if not credentials.exists():
         if home_root == Path.home():
             return None
         command_env = dict(os.environ)
         command_env["HOME"] = str(home_root)
         return command_env
-    if not (has_key or has_token):
-        if home_root == Path.home():
-            return None
-        command_env = dict(os.environ)
-        command_env["HOME"] = str(home_root)
-        return command_env
-    scrubbed = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
-    }
-    scrubbed["HOME"] = str(home_root)
-    return scrubbed
+    if home_root == Path.home():
+        return None
+    command_env = dict(os.environ)
+    command_env["HOME"] = str(home_root)
+    return command_env
 
 
 class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
@@ -1431,6 +1430,7 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
         usage_source = ""
         cost_source = ""
         result_text = ""
+        terminal_error = ""
 
         if output.strip():
             parsed = _parse_json_lines(output)
@@ -1455,6 +1455,8 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
                     event.get("result"), str
                 ):
                     result_text = event["result"]
+                    if bool(event.get("is_error")):
+                        terminal_error = event["result"].strip()
 
             text = _extract_structured_output_text(output) or result_text
         else:
@@ -1482,6 +1484,21 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
                 usage=usage,
                 cost=cost,
                 metadata={**metadata, "timeout_classification": "wall_clock"},
+            )
+
+        if terminal_error:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output=output,
+                stderr_output=command_result.stderr,
+                exit_reason=terminal_error,
+                usage_source=usage_source,
+                cost_source=cost_source,
+                usage=usage,
+                cost=cost,
+                metadata=metadata,
             )
 
         if not command_result.success:

@@ -321,10 +321,21 @@ def _is_binary_payload(content: str) -> bool:
     return "\x00" in content
 
 
-def _collect_changed_file_paths(workspace: Path) -> list[tuple[str, str]]:
-    staged = run_command(
-        ["git", "-C", str(workspace), "diff", "--cached", "--name-status"]
+def _run_git_workspace_command(workspace: Path, args: list[str]):
+    return run_command(
+        [
+            "git",
+            "-c",
+            f"safe.directory={workspace}",
+            "-C",
+            str(workspace),
+            *args,
+        ]
     )
+
+
+def _collect_changed_file_paths(workspace: Path) -> list[tuple[str, str]]:
+    staged = _run_git_workspace_command(workspace, ["diff", "--cached", "--name-status"])
     if not staged.success:
         raise PatchNormalizationError(
             f"failed to inspect staged changes: {staged.stderr or staged.stdout}"
@@ -369,7 +380,7 @@ def _assert_not_binary(workspace: Path, status: str, path: str) -> None:
 
 
 def _collect_patch_stats(workspace: Path) -> PatchStats:
-    diff = run_command(["git", "-C", str(workspace), "diff", "--cached", "--numstat"])
+    diff = _run_git_workspace_command(workspace, ["diff", "--cached", "--numstat"])
     if not diff.success:
         raise PatchNormalizationError(
             f"failed to collect diff statistics: {diff.stderr or diff.stdout}"
@@ -432,22 +443,16 @@ def _normalize_from_patch(workspace: Path, patch: str) -> None:
 
 
 def _restore_attempt_workspace(attempt: AttemptWorkspace) -> None:
-    reset = run_command(
-        [
-            "git",
-            "-C",
-            str(attempt.workspace_path),
-            "reset",
-            "--hard",
-            attempt.base_commit,
-        ]
+    reset = _run_git_workspace_command(
+        attempt.workspace_path,
+        ["reset", "--hard", attempt.base_commit],
     )
     if not reset.success:
         raise PatchNormalizationError(
             f"failed to reset attempt workspace: {reset.stderr or reset.stdout}"
         )
 
-    clean = run_command(["git", "-C", str(attempt.workspace_path), "clean", "-fd"])
+    clean = _run_git_workspace_command(attempt.workspace_path, ["clean", "-fd"])
     if not clean.success:
         raise PatchNormalizationError(
             f"failed to clean attempt workspace: {clean.stderr or clean.stdout}"
@@ -455,8 +460,8 @@ def _restore_attempt_workspace(attempt: AttemptWorkspace) -> None:
 
 
 def _collect_normalized_patch(workspace: Path) -> str:
-    run_command(["git", "-C", str(workspace), "add", "-A"])
-    diff = run_command(["git", "-C", str(workspace), "diff", "--cached", "--no-color"])
+    _run_git_workspace_command(workspace, ["add", "-A"])
+    diff = _run_git_workspace_command(workspace, ["diff", "--cached", "--no-color"])
     if not diff.success:
         raise PatchNormalizationError(
             f"failed to collect normalized patch: {diff.stderr or diff.stdout}"
@@ -464,30 +469,36 @@ def _collect_normalized_patch(workspace: Path) -> str:
     return diff.stdout
 
 
-def normalize_solver_output(
-    raw_output: str, attempt: AttemptWorkspace
-) -> PatchNormalizationResult:
-    attempt.raw_output_path.write_text(_coerce_str(raw_output), encoding="utf-8")
-    _restore_attempt_workspace(attempt)
+def _discard_benchmark_agents_override(attempt: AttemptWorkspace) -> None:
+    agents_path = attempt.benchmark_agents_path
+    if not agents_path.exists():
+        return
 
-    patch = _extract_unified_patch(raw_output)
-    if patch:
-        _normalize_from_patch(attempt.workspace_path, patch)
-    else:
-        edits = _extract_edit_plan(raw_output)
-        if not edits:
-            raise PatchNormalizationError("unrecognized solver output format")
-        _normalize_from_file_edits(attempt.workspace_path, edits)
+    tracked = _run_git_workspace_command(
+        attempt.workspace_path,
+        ["ls-files", "--error-unmatch", agents_path.name],
+    )
+    if tracked.success:
+        _run_git_workspace_command(
+            attempt.workspace_path,
+            ["checkout", "--", agents_path.name],
+        )
+        return
+    agents_path.unlink(missing_ok=True)
 
-    stage_result = run_command(["git", "-C", str(attempt.workspace_path), "add", "-A"])
+
+def _normalize_from_workspace_state(attempt: AttemptWorkspace) -> PatchNormalizationResult:
+    _discard_benchmark_agents_override(attempt)
+    stage_result = _run_git_workspace_command(attempt.workspace_path, ["add", "-A"])
     if not stage_result.success:
         raise PatchNormalizationError(
-            f"failed to stage workspace changes: {stage_result.stderr or stage_result.stdout}"
+            "failed to stage workspace changes: "
+            f"{stage_result.stderr or stage_result.stdout}"
         )
 
     staged_changes = _collect_changed_file_paths(attempt.workspace_path)
     if not staged_changes:
-        raise PatchNormalizationError("solver output produced no repository changes")
+        raise PatchNormalizationError("unrecognized solver output format")
 
     for status, raw_path in staged_changes:
         _assert_not_binary(attempt.workspace_path, status, raw_path)
@@ -509,6 +520,37 @@ def normalize_solver_output(
         patch=normalized_patch,
         patch_stats=patch_stats,
     )
+
+
+def normalize_solver_output(
+    raw_output: str, attempt: AttemptWorkspace
+) -> PatchNormalizationResult:
+    attempt.raw_output_path.write_text(_coerce_str(raw_output), encoding="utf-8")
+    workspace_fallback: PatchNormalizationResult | None = None
+    try:
+        workspace_fallback = _normalize_from_workspace_state(attempt)
+    except PatchNormalizationError:
+        workspace_fallback = None
+
+    patch = _extract_unified_patch(raw_output)
+    if patch:
+        _restore_attempt_workspace(attempt)
+        try:
+            _normalize_from_patch(attempt.workspace_path, patch)
+        except PatchNormalizationError:
+            if workspace_fallback is not None:
+                return workspace_fallback
+            raise
+    else:
+        edits = _extract_edit_plan(raw_output)
+        if not edits:
+            if workspace_fallback is not None:
+                return workspace_fallback
+            raise PatchNormalizationError("unrecognized solver output format")
+        _restore_attempt_workspace(attempt)
+        _normalize_from_file_edits(attempt.workspace_path, edits)
+
+    return _normalize_from_workspace_state(attempt)
 
 
 __all__ = [
