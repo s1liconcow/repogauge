@@ -265,6 +265,7 @@ def _materialize_candidate(
     problem_statement, statement_source, statement_ref = synthesize_problem_statement(
         row=row,
         patch=patch,
+        repo_root=repo_root,
     )
     materialized_metadata.update(
         {

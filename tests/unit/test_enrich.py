@@ -55,6 +55,22 @@ def test_enrich_commit_metadata_populates_issue_and_pr_fields(
     assert metadata["pr_body"] == "PR body"
     assert metadata["issue_ref"] == "123"
     assert metadata["pr_ref"] == "456"
+    assert metadata["issue_contexts"] == [
+        {
+            "ref": "123",
+            "title": "Issue title",
+            "body": "Issue body",
+            "url": "https://github.com/owner/repo/issues/123",
+        }
+    ]
+    assert metadata["pr_contexts"] == [
+        {
+            "ref": "456",
+            "title": "PR title",
+            "body": "PR body",
+            "url": "https://github.com/owner/repo/pull/456",
+        }
+    ]
     assert metadata["provenance"] == {
         "issue_title": "from_issue",
         "issue_body": "from_issue",
@@ -115,4 +131,12 @@ def test_enrich_commit_metadata_reuses_cached_payload_without_fetch(
 
     assert metadata["issue_title"] == "Cached issue"
     assert metadata["issue_body"] == "from cache"
+    assert metadata["issue_contexts"] == [
+        {
+            "ref": "42",
+            "title": "Cached issue",
+            "body": "from cache",
+            "url": "https://github.com/owner/repo/issues/42",
+        }
+    ]
     assert not fetch_calls

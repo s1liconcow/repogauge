@@ -238,6 +238,8 @@ def enrich_commit_metadata(
     metadata: dict[str, Any] = {
         "issue_refs": issue_refs[:],
         "pull_request_refs": pr_refs[:],
+        "issue_contexts": [],
+        "pr_contexts": [],
         "issue_title": "",
         "issue_body": "",
         "pr_title": "",
@@ -254,19 +256,26 @@ def enrich_commit_metadata(
             cache=cache,
             cache_path=cache_path,
         )
-        if not isinstance(payload, dict):
-            continue
-        title, body = _extract_title_body(payload)
-        if title and not metadata["issue_title"]:
-            metadata["issue_title"] = title
-            metadata["issue_body"] = body
-            metadata["issue_ref"] = issue_number
-            metadata["issue_url"] = _coerce_str(payload.get("html_url"))
-            provenance["issue_title"] = "from_issue"
-            provenance["issue_body"] = "from_issue"
-            provenance["issue_ref"] = "from_issue"
-            provenance["issue_url"] = "from_issue"
-        break
+        context: dict[str, str] = {"ref": issue_number}
+        if isinstance(payload, dict):
+            title, body = _extract_title_body(payload)
+            if title:
+                context["title"] = title
+            if body:
+                context["body"] = body
+            issue_url = _coerce_str(payload.get("html_url"))
+            if issue_url:
+                context["url"] = issue_url
+            if title and not metadata["issue_title"]:
+                metadata["issue_title"] = title
+                metadata["issue_body"] = body
+                metadata["issue_ref"] = issue_number
+                metadata["issue_url"] = issue_url
+                provenance["issue_title"] = "from_issue"
+                provenance["issue_body"] = "from_issue"
+                provenance["issue_ref"] = "from_issue"
+                provenance["issue_url"] = "from_issue"
+        metadata["issue_contexts"].append(context)
 
     for pr_number in pr_refs:
         payload = _fetch_reference_payload(
@@ -277,21 +286,28 @@ def enrich_commit_metadata(
             cache=cache,
             cache_path=cache_path,
         )
-        if not isinstance(payload, dict):
-            continue
-        title, body = _extract_title_body(payload)
-        if title and not metadata["pr_title"]:
-            metadata["pr_title"] = title
-            metadata["pr_body"] = body
-            metadata["pr_ref"] = pr_number
-            metadata["pr_number"] = pr_number
-            metadata["pr_url"] = _coerce_str(payload.get("html_url"))
-            provenance["pr_title"] = "from_pr"
-            provenance["pr_body"] = "from_pr"
-            provenance["pr_ref"] = "from_pr"
-            provenance["pr_number"] = "from_pr"
-            provenance["pr_url"] = "from_pr"
-        break
+        context: dict[str, str] = {"ref": pr_number}
+        if isinstance(payload, dict):
+            title, body = _extract_title_body(payload)
+            if title:
+                context["title"] = title
+            if body:
+                context["body"] = body
+            pr_url = _coerce_str(payload.get("html_url"))
+            if pr_url:
+                context["url"] = pr_url
+            if title and not metadata["pr_title"]:
+                metadata["pr_title"] = title
+                metadata["pr_body"] = body
+                metadata["pr_ref"] = pr_number
+                metadata["pr_number"] = pr_number
+                metadata["pr_url"] = pr_url
+                provenance["pr_title"] = "from_pr"
+                provenance["pr_body"] = "from_pr"
+                provenance["pr_ref"] = "from_pr"
+                provenance["pr_number"] = "from_pr"
+                provenance["pr_url"] = "from_pr"
+        metadata["pr_contexts"].append(context)
 
     if provenance:
         metadata["provenance"] = provenance

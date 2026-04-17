@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from repogauge.mining.synthesize import synthesize_problem_statement
 
@@ -69,6 +71,80 @@ class TestProblemStatementSynthesis(unittest.TestCase):
         self.assertEqual(source, "llm_advisory")
         self.assertEqual(source_ref, "model")
         self.assertEqual(statement, "Refactor to handle edge-case input safely.")
+
+    def test_commit_statement_includes_bead_and_all_issue_contexts(self) -> None:
+        with TemporaryDirectory() as workspace:
+            repo_root = Path(workspace)
+            bead_dir = repo_root / ".beads"
+            bead_dir.mkdir()
+            (bead_dir / "issues.jsonl").write_text(
+                (
+                    '{"id":"oss_repogauge-rmy","title":"Deterministic env plan",'
+                    '"description":"Keep environment planning stable across runs.",'
+                    '"acceptance_criteria":"Plans are reproducible and test commands stay deterministic."}\n'
+                ),
+                encoding="utf-8",
+            )
+
+            statement, source, _ = synthesize_problem_statement(
+                {
+                    "source_subject": "Landing changes for bead oss_repogauge-rmy - fix parser",
+                    "source_body": "Fixes #123 and gh-456",
+                    "metadata": {
+                        "file_roles": {
+                            "prod": ["src/parser.py"],
+                            "test": ["tests/test_parser.py"],
+                        },
+                        "issue_contexts": [
+                            {
+                                "ref": "123",
+                                "title": "Parser crashes on empty input",
+                                "body": "Empty input raises an unexpected exception.",
+                            },
+                            {"ref": "456", "title": "Cache path handling regressed"},
+                        ],
+                        "total_changed_lines": 18,
+                    },
+                },
+                patch="@@ -1,2 +1,2 ...",
+                repo_root=repo_root,
+            )
+
+            self.assertEqual(source, "commit")
+            self.assertIn("Bead oss_repogauge-rmy: Deterministic env plan", statement)
+            self.assertIn("Acceptance:", statement)
+            self.assertIn(
+                "Related GitHub issue #123: Parser crashes on empty input",
+                statement,
+            )
+            self.assertIn(
+                "Related GitHub issue #456: Cache path handling regressed",
+                statement,
+            )
+
+    def test_primary_issue_statement_keeps_additional_issue_refs(self) -> None:
+        statement, source, source_ref = synthesize_problem_statement(
+            {
+                "issue_title": "Primary regression",
+                "issue_body": "The main regression still needs a fix.",
+                "issue_refs": ["123", "456"],
+                "metadata": {
+                    "issue_contexts": [
+                        {
+                            "ref": "123",
+                            "title": "Primary regression",
+                            "body": "The main regression still needs a fix.",
+                        },
+                        {"ref": "456", "title": "Secondary timeout regression"},
+                    ]
+                },
+            },
+            patch="",
+        )
+        self.assertEqual(source, "linked_issue")
+        self.assertEqual(source_ref, "123")
+        self.assertIn("Primary regression", statement)
+        self.assertIn("Related GitHub issue #456: Secondary timeout regression", statement)
 
 
 if __name__ == "__main__":
