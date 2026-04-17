@@ -31,6 +31,8 @@ _CONTAINER_STDERR_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/stderr.txt"
 _CONTAINER_HOST_TOOLS_ROOT = f"{_CONTAINER_ATTEMPT_ROOT}/host-tools"
 _CONTAINER_CODEX_SEED_HOME = f"{_CONTAINER_ATTEMPT_ROOT}/codex-home"
 _CONTAINER_CODEX_RUNTIME_HOME = "/home/nonroot/.repogauge-codex-home"
+_CONTAINER_OPENCODE_SEED_HOME = f"{_CONTAINER_ATTEMPT_ROOT}/opencode-home"
+_CONTAINER_OPENCODE_RUNTIME_HOME = "/home/nonroot/.repogauge-opencode-home"
 
 
 class WorkspaceContainerError(RuntimeError):
@@ -255,6 +257,27 @@ def _claude_host_tool_fallback(command: list[str]) -> _HostToolFallback | None:
     )
 
 
+def _opencode_host_tool_fallback(command: list[str]) -> _HostToolFallback | None:
+    host_opencode = shutil.which("opencode")
+    if host_opencode is None:
+        return None
+
+    opencode_binary = Path(host_opencode).resolve()
+    if not opencode_binary.exists():
+        return None
+
+    container_opencode = f"{_CONTAINER_HOST_TOOLS_ROOT}/opencode/opencode"
+    return _HostToolFallback(
+        command=[container_opencode, *command[1:]],
+        mounts={
+            str(opencode_binary): {
+                "bind": container_opencode,
+                "mode": "ro",
+            }
+        },
+    )
+
+
 def _resolve_host_tool_fallback(command: list[str]) -> _HostToolFallback | None:
     if not command:
         return None
@@ -264,6 +287,8 @@ def _resolve_host_tool_fallback(command: list[str]) -> _HostToolFallback | None:
         return _codex_host_tool_fallback(command)
     if executable == "claude":
         return _claude_host_tool_fallback(command)
+    if executable == "opencode":
+        return _opencode_host_tool_fallback(command)
     return None
 
 
@@ -286,12 +311,17 @@ def _is_codex_command(command: list[str]) -> bool:
     return any("codex" in part.lower() for part in command[:2])
 
 
+def _is_opencode_command(command: list[str]) -> bool:
+    return any(part.lower() == "opencode" for part in command[:2])
+
+
 def _solver_shell_command(command: list[str]) -> str:
     writable_targets = (
         DOCKER_WORKDIR,
         _CONTAINER_PROMPT_PATH,
         f"{_CONTAINER_ATTEMPT_ROOT}/codex-home",
         f"{_CONTAINER_ATTEMPT_ROOT}/claude-home",
+        f"{_CONTAINER_ATTEMPT_ROOT}/opencode-home",
     )
     prep_steps = [
         f"if [ -e {shlex.quote(target)} ]; then chmod -R a+rwX {shlex.quote(target)}; fi"
@@ -320,6 +350,30 @@ def _solver_shell_command(command: list[str]) -> str:
             f"HOME={_CONTAINER_CODEX_RUNTIME_HOME}",
             f"XDG_CONFIG_HOME={_CONTAINER_CODEX_RUNTIME_HOME}/.config",
             f"CODEX_HOME={_CONTAINER_CODEX_RUNTIME_HOME}/.codex",
+            *runtime_command,
+        ]
+    elif _is_opencode_command(command):
+        runtime_prep_steps.extend(
+            [
+                f"rm -rf {shlex.quote(_CONTAINER_OPENCODE_RUNTIME_HOME)}",
+                f"mkdir -p {shlex.quote(_CONTAINER_OPENCODE_RUNTIME_HOME)}",
+                "if [ -d "
+                + shlex.quote(_CONTAINER_OPENCODE_SEED_HOME)
+                + " ]; then cp -a "
+                + shlex.quote(f"{_CONTAINER_OPENCODE_SEED_HOME}/.")
+                + " "
+                + shlex.quote(f"{_CONTAINER_OPENCODE_RUNTIME_HOME}/")
+                + "; fi",
+                f"chown -R 1000:1000 {shlex.quote(_CONTAINER_OPENCODE_RUNTIME_HOME)}",
+                f"chmod -R u+rwX {shlex.quote(_CONTAINER_OPENCODE_RUNTIME_HOME)}",
+            ]
+        )
+        runtime_command = [
+            "env",
+            f"HOME={_CONTAINER_OPENCODE_RUNTIME_HOME}",
+            f"XDG_CONFIG_HOME={_CONTAINER_OPENCODE_RUNTIME_HOME}/.config",
+            f"XDG_DATA_HOME={_CONTAINER_OPENCODE_RUNTIME_HOME}/.local/share",
+            "OPENCODE_CONFIG_CONTENT={}",
             *runtime_command,
         ]
     solver_command = shlex.join(runtime_command)

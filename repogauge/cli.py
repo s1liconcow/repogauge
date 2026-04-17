@@ -56,6 +56,7 @@ from repogauge.runner.scheduler import (
 from repogauge.runner.solvers import (
     SOLVER_ADAPTER_CLAUDE_CLI,
     SOLVER_ADAPTER_CODEX_CLI,
+    SOLVER_ADAPTER_OPENCODE_CLI,
 )
 from repogauge.runner.planner import (
     RunManifest,
@@ -2250,6 +2251,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             workspace_cli_adapters = {
                 SOLVER_ADAPTER_CODEX_CLI,
                 SOLVER_ADAPTER_CLAUDE_CLI,
+                SOLVER_ADAPTER_OPENCODE_CLI,
             }
             containerized_workspace_solvers = any(
                 solver.adapter in workspace_cli_adapters for solver in matrix.solvers

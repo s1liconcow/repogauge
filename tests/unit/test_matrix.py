@@ -322,6 +322,39 @@ solvers:
             assert "incompatible" in str(exc)
 
 
+def test_load_matrix_accepts_opencode_cli_provider_and_solver() -> None:
+    with tempfile.TemporaryDirectory() as workspace:
+        root = Path(workspace)
+        dataset_path = root / "dataset.jsonl"
+        _write_dataset(dataset_path, ["i"])
+
+        matrix_text = """
+dataset:
+  path: dataset.jsonl
+providers:
+  opencode:
+    kind: opencode_cli
+    command: opencode
+solvers:
+  - id: solver-a
+    provider: opencode
+    adapter: opencode_cli
+    model: anthropic/claude-sonnet-4-5
+    agent: build
+""".strip()
+
+        matrix_path = root / "matrix.yaml"
+        matrix_path.write_text(matrix_text + "\n", encoding="utf-8")
+
+        matrix = load_matrix_config(matrix_path)
+
+        assert matrix.providers[0].kind == "opencode_cli"
+        assert matrix.providers[0].config["command"] == "opencode"
+        assert matrix.solvers[0].adapter == "opencode_cli"
+        assert matrix.solvers[0].behavior["model"] == "anthropic/claude-sonnet-4-5"
+        assert matrix.solvers[0].behavior["agent"] == "build"
+
+
 def test_solver_timeout_seconds_is_preserved_in_behavior() -> None:
     with tempfile.TemporaryDirectory() as workspace:
         root = Path(workspace)

@@ -9,6 +9,7 @@ from repogauge.exec import CommandResult
 from repogauge.runner.adapters import (
     ClaudeCLIAdapter,
     CodexCLIAdapter,
+    OpenCodeCLIAdapter,
     OpenAICompatibleAdapter,
     OpenAIResponsesAdapter,
     MockSolverAdapter,
@@ -22,6 +23,7 @@ from repogauge.runner.scheduler import SolverAttemptState
 from repogauge.runner.scheduler import SolverAdapterResult
 from repogauge.runner.solvers import (
     SOLVER_ADAPTER_MOCK,
+    SOLVER_ADAPTER_OPENCODE_CLI,
     SOLVER_ADAPTER_OPENAI_RESPONSES,
 )
 
@@ -98,6 +100,28 @@ class TestAdapters(unittest.TestCase):
         )
         result = adapter.execute_attempt(request)
         self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
+
+    def test_build_solver_adapters_constructs_opencode_cli_adapter(self) -> None:
+        provider = MatrixProvider(
+            provider_id="opencode",
+            kind="opencode_cli",
+            config={"command": "opencode"},
+            redacted_config={},
+            raw={},
+        )
+        solver = MatrixSolver(
+            solver_id="solver-a",
+            provider_id="opencode",
+            adapter=SOLVER_ADAPTER_OPENCODE_CLI,
+            prompt_policy={},
+            tool_policy={},
+            behavior={"model": "anthropic/claude-sonnet-4-5"},
+            raw={},
+        )
+
+        adapters = build_solver_adapters(solvers=(solver,), providers=(provider,))
+
+        self.assertIsInstance(adapters["solver-a"], OpenCodeCLIAdapter)
 
     def test_mock_adapter_rejects_unsupported_status(self) -> None:
         with self.assertRaisesRegex(
@@ -675,6 +699,147 @@ class TestAdapters(unittest.TestCase):
         self.assertIsNone(result.model_patch)
         self.assertEqual(result.exit_reason, "boom")
         self.assertEqual(result.stderr_output, "")
+
+    def _opencode_provider(self, command: str = "opencode") -> MatrixProvider:
+        return MatrixProvider(
+            provider_id="opencode",
+            kind="opencode_cli",
+            config={"command": command},
+            redacted_config={},
+            raw={},
+        )
+
+    def _opencode_request(
+        self, adapter: OpenCodeCLIAdapter, *, workspace: Path | None = None
+    ):
+        return adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:7"),
+            attempt_id="run-1:repo__sample-1:solver-a:7:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+                "version": "1.0",
+                "patch": "diff --git a/x b/x\n+prod",
+                "test_patch": "diff --git a/tests/x b/tests/x\n+test",
+            },
+            workspace_path=workspace,
+        )
+
+    def test_opencode_cli_adapter_marks_usage_and_cost_source(self) -> None:
+        provider = self._opencode_provider("/bin/echo")
+        adapter = OpenCodeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="opencode",
+            provider_config=provider.config,
+            behavior={"model": "anthropic/claude-sonnet-4-5"},
+        )
+        request = self._opencode_request(adapter)
+        output = (
+            '{"type":"session.updated","usage":{"input_tokens":5}}\n'
+            '{"type":"session.updated","cost":{"total_cost":0.5}}\n'
+            '{"type":"message","message":{"content":"diff --git a/x b/x\\n+ok"}}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo", "run", "--format", "json"],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.usage_source, "opencode_cli.event.usage")
+        self.assertEqual(result.cost_source, "opencode_cli.event.cost")
+        self.assertEqual(result.usage, {"input_tokens": 5})
+        self.assertEqual(result.cost, {"total_cost": 0.5})
+
+    def test_opencode_cli_adapter_uses_default_agent_and_workspace(self) -> None:
+        provider = self._opencode_provider("opencode")
+        adapter = OpenCodeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="opencode",
+            provider_config=provider.config,
+            behavior={"model": "anthropic/claude-sonnet-4-5"},
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            request = self._opencode_request(adapter, workspace=Path(workspace))
+            command_result = CommandResult(
+                command=[],
+                returncode=0,
+                stdout='{"message":{"content":"diff --git a/x b/x\\n+ok"}}\n',
+                stderr="",
+            )
+            with mock.patch(
+                "repogauge.runner.adapters.run_command", return_value=command_result
+            ) as mock_run_command:
+                adapter.execute_attempt(request)
+
+        command = mock_run_command.call_args.args[0]
+        kwargs = mock_run_command.call_args.kwargs
+        assert command[:4] == ["opencode", "run", "--format", "json"]
+        assert "--pure" in command
+        assert command[command.index("--dir") + 1] == workspace
+        assert command[command.index("--agent") + 1] == "build"
+        assert command[command.index("--model") + 1] == "anthropic/claude-sonnet-4-5"
+        assert kwargs["cwd"] == workspace
+        assert kwargs["env"]["HOME"] == str(Path(workspace).parent / "opencode-home")
+        assert (
+            kwargs["env"]["XDG_DATA_HOME"]
+            == str(Path(workspace).parent / "opencode-home" / ".local" / "share")
+        )
+        assert kwargs["env"]["OPENCODE_CONFIG_CONTENT"] == "{}"
+
+    def test_opencode_cli_adapter_uses_container_execution_when_enabled(self) -> None:
+        provider = MatrixProvider(
+            provider_id="opencode",
+            kind="opencode_cli",
+            config={
+                "command": "opencode",
+                "image": "ghcr.io/example/opencode:latest",
+            },
+            redacted_config={},
+            raw={},
+        )
+        adapter = OpenCodeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="opencode",
+            provider_config=provider.config,
+            behavior={"model": "anthropic/claude-sonnet-4-5", "agent": "build"},
+            containerized=True,
+            container_host="unix:///tmp/podman.sock",
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            request = self._opencode_request(adapter, workspace=Path(workspace))
+            command_result = CommandResult(
+                command=("opencode",),
+                returncode=0,
+                stdout='{"message":{"content":"diff --git a/x b/x\\n+ok"}}\n',
+                stderr="",
+            )
+            with mock.patch(
+                "repogauge.runner.adapters.run_solver_command_in_container",
+                return_value=command_result,
+            ) as mock_container_exec:
+                adapter.execute_attempt(request)
+
+        kwargs = mock_container_exec.call_args.kwargs
+        command = kwargs["command"]
+        assert command[command.index("--dir") + 1] == "/testbed"
+        assert command[command.index("--agent") + 1] == "build"
+        assert kwargs["container_host"] == "unix:///tmp/podman.sock"
+        assert kwargs["image_override"] == "ghcr.io/example/opencode:latest"
+        assert kwargs["environment"]["HOME"] == str(
+            Path(workspace).parent / "opencode-home"
+        )
+        assert (
+            kwargs["environment"]["XDG_DATA_HOME"]
+            == str(Path(workspace).parent / "opencode-home" / ".local" / "share")
+        )
 
     def _claude_provider(self, command: str = "claude") -> MatrixProvider:
         return MatrixProvider(

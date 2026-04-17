@@ -116,6 +116,36 @@ def test_resolve_host_tool_fallback_for_claude(monkeypatch, tmp_path: Path) -> N
     }
 
 
+def test_resolve_host_tool_fallback_for_opencode(
+    monkeypatch, tmp_path: Path
+) -> None:
+    binary = tmp_path / "opencode"
+    binary.write_text("", encoding="utf-8")
+
+    def fake_which(name: str) -> str | None:
+        if name == "opencode":
+            return str(binary)
+        return None
+
+    monkeypatch.setattr("repogauge.runner.container_exec.shutil.which", fake_which)
+
+    fallback = _resolve_host_tool_fallback(["opencode", "run", "--format", "json"])
+
+    assert fallback is not None
+    assert fallback.command == [
+        "/repogauge/host-tools/opencode/opencode",
+        "run",
+        "--format",
+        "json",
+    ]
+    assert fallback.mounts == {
+        str(binary.resolve()): {
+            "bind": "/repogauge/host-tools/opencode/opencode",
+            "mode": "ro",
+        }
+    }
+
+
 def test_containerize_environment_rewrites_attempt_root_paths(tmp_path: Path) -> None:
     attempt_root = tmp_path / "attempt-1"
     codex_home = attempt_root / "codex-home"
@@ -158,3 +188,23 @@ def test_solver_shell_command_runs_solver_as_nonroot_with_redirection() -> None:
     assert "< /repogauge/prompt.txt" in shell_cmd
     assert "> /repogauge/stdout.txt" in shell_cmd
     assert "2> /repogauge/stderr.txt" in shell_cmd
+
+
+def test_solver_shell_command_seeds_opencode_runtime_home() -> None:
+    shell_cmd = _solver_shell_command(["opencode", "run", "--format", "json"])
+
+    assert "chmod -R a+rwX /repogauge/opencode-home" in shell_cmd
+    assert "rm -rf /home/nonroot/.repogauge-opencode-home" in shell_cmd
+    assert (
+        "cp -a /repogauge/opencode-home/. /home/nonroot/.repogauge-opencode-home/"
+        in shell_cmd
+    )
+    assert "XDG_DATA_HOME=/home/nonroot/.repogauge-opencode-home/.local/share" in shell_cmd
+    assert "OPENCODE_CONFIG_CONTENT={}" in shell_cmd
+    assert (
+        "su -m -s /bin/bash nonroot -c 'env "
+        "HOME=/home/nonroot/.repogauge-opencode-home "
+        "XDG_CONFIG_HOME=/home/nonroot/.repogauge-opencode-home/.config "
+        "XDG_DATA_HOME=/home/nonroot/.repogauge-opencode-home/.local/share "
+    ) in shell_cmd
+    assert "opencode run --format json'" in shell_cmd

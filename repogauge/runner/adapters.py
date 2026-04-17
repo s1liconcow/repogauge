@@ -37,6 +37,7 @@ from .solvers import (
     SOLVER_ADAPTER_CODEX_CLI,
     SOLVER_ADAPTER_MOCK,
     SOLVER_ADAPTER_OPENAI_COMPATIBLE,
+    SOLVER_ADAPTER_OPENCODE_CLI,
     SOLVER_ADAPTER_OPENAI_RESPONSES,
     SOLVER_ADAPTER_OPEN_CODEX_SERVER,
 )
@@ -1071,6 +1072,241 @@ def _codex_cli_env(home_root: Path) -> dict[str, str]:
     return command_env
 
 
+def _default_xdg_data_home() -> Path:
+    configured = os.environ.get("XDG_DATA_HOME")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".local" / "share"
+
+
+def _copy_file_if_present(source: Path, destination: Path) -> None:
+    if not source.exists() or not source.is_file():
+        return
+    if source.expanduser().resolve() == destination.expanduser().resolve(strict=False):
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(source.read_bytes())
+
+
+def _seed_opencode_cli_home(home_root: Path) -> None:
+    auth_source = _default_xdg_data_home() / "opencode" / "auth.json"
+    auth_destination = (
+        home_root / ".local" / "share" / "opencode" / "auth.json"
+    )
+    _copy_file_if_present(auth_source, auth_destination)
+
+
+def _opencode_cli_env(home_root: Path) -> dict[str, str]:
+    _seed_opencode_cli_home(home_root)
+    command_env = dict(os.environ)
+    command_env["HOME"] = str(home_root)
+    command_env["XDG_CONFIG_HOME"] = str(home_root / ".config")
+    command_env["XDG_DATA_HOME"] = str(home_root / ".local" / "share")
+    command_env["OPENCODE_CONFIG_CONTENT"] = "{}"
+    return command_env
+
+
+class OpenCodeCLIAdapter(_BaseConcreteSolverAdapter):
+    """OpenCode CLI adapter driven via non-interactive JSON event output."""
+
+    def __init__(
+        self,
+        *,
+        solver_id: str,
+        provider_id: str,
+        provider_config: Mapping[str, Any] | None,
+        behavior: Mapping[str, Any] | None = None,
+        containerized: bool = False,
+        container_host: str | None = None,
+    ) -> None:
+        super().__init__(
+            solver_id=solver_id,
+            provider_id=provider_id,
+            provider_config=provider_config,
+            behavior=behavior,
+            model=None,
+        )
+        self.model = _coerce_text(
+            self.behavior.get("model"),
+            field_name="solver.model",
+        )
+        self.agent = _coerce_text(
+            self.behavior.get("agent"),
+            field_name="solver.agent",
+            default="build",
+        )
+        config = _coerce_mapping(provider_config, field_name="provider_config")
+        resolved = _coerce_cli_command(config)
+        self.command = [resolved.command, *resolved.cli_args]
+        self.containerized = bool(containerized)
+        self.container_host = container_host
+        self.image_override = _coerce_text(
+            config.get("image"),
+            field_name="provider.image",
+            default="",
+        )
+        if not self.image_override:
+            self.image_override = None
+
+    def requires_workspace(self) -> bool:
+        return True
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        instance_row = _required_instance_fields(request.instance_row)
+        prompt = _build_prompt(
+            solver_id=self.solver_id,
+            model=self.model,
+            attempt_index=request.attempt_index,
+            instance_row=instance_row,
+        )
+        if self.containerized:
+            workspace_dir = "/testbed"
+        elif request.workspace_path is not None:
+            workspace_dir = str(request.workspace_path)
+        else:
+            workspace_dir = os.getcwd()
+        command = [
+            *self.command,
+            "run",
+            "--format",
+            "json",
+            "--pure",
+            "--dir",
+            workspace_dir,
+            "--agent",
+            self.agent,
+            "--model",
+            self.model,
+        ]
+        opencode_home_root = (
+            request.workspace_path.parent / "opencode-home"
+            if request.workspace_path is not None
+            else Path.home()
+        )
+        command_env = _opencode_cli_env(opencode_home_root)
+        try:
+            if self.containerized and request.workspace_path is not None:
+                command_result = run_solver_command_in_container(
+                    attempt_id=request.attempt_id,
+                    workspace_path=request.workspace_path,
+                    instance_row=instance_row,
+                    command=command,
+                    prompt=prompt,
+                    timeout_seconds=self.timeout_seconds,
+                    container_host=self.container_host,
+                    image_override=self.image_override,
+                    environment=command_env,
+                )
+            else:
+                command_result = run_command(
+                    command,
+                    cwd=str(request.workspace_path) if request.workspace_path else None,
+                    env=command_env,
+                    input_text=prompt,
+                    timeout_seconds=self.timeout_seconds,
+                )
+        except WorkspaceContainerError as exc:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output="",
+                stderr_output=str(exc),
+                exit_reason=str(exc),
+                usage_source="",
+                cost_source="",
+                usage={},
+                cost={},
+                metadata={"containerized": True},
+            )
+
+        output = command_result.stdout
+        telemetry_events: list[dict[str, Any]] = []
+        usage: dict[str, Any] = {}
+        cost: dict[str, Any] = {}
+        usage_source = ""
+        cost_source = ""
+
+        if output.strip():
+            for event in _parse_json_lines(output):
+                telemetry_events.append(event)
+                for candidate in (
+                    event,
+                    event.get("message"),
+                    event.get("result"),
+                    event.get("data"),
+                ):
+                    if not isinstance(candidate, Mapping):
+                        continue
+                    if "usage" in candidate and isinstance(candidate["usage"], Mapping):
+                        usage = dict(candidate["usage"])
+                        usage_source = "opencode_cli.event.usage"
+                    if "cost" in candidate and isinstance(candidate["cost"], Mapping):
+                        cost = dict(candidate["cost"])
+                        cost_source = "opencode_cli.event.cost"
+
+        text = _extract_structured_output_text(output)
+        cost, cost_source = _ensure_public_api_estimated_cost(
+            model=self.model,
+            usage=usage,
+            usage_source=usage_source,
+            cost=cost,
+            cost_source=cost_source,
+        )
+
+        metadata = {
+            "telemetry": telemetry_events,
+            "agent": self.agent,
+        }
+        if command_result.timed_out:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.TIMED_OUT,
+                model_patch=None,
+                raw_output=output,
+                stderr_output=command_result.stderr,
+                exit_reason=f"command timeout: {command_result.stderr or 'timed out'}",
+                usage_source=usage_source,
+                cost_source=cost_source,
+                usage=usage,
+                cost=cost,
+                metadata={**metadata, "timeout_classification": "wall_clock"},
+            )
+
+        if not command_result.success:
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output=output,
+                stderr_output=command_result.stderr,
+                exit_reason=(
+                    command_result.stderr
+                    or command_result.stdout
+                    or "command execution failed"
+                ),
+                usage_source=usage_source,
+                cost_source=cost_source,
+                usage=usage,
+                cost=cost,
+                metadata=metadata,
+            )
+
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=SolverAttemptState.SUCCEEDED,
+            model_patch=text,
+            raw_output=output,
+            stderr_output=command_result.stderr,
+            exit_reason="",
+            usage_source=usage_source,
+            cost_source=cost_source,
+            usage=usage,
+            cost=cost,
+            metadata=metadata,
+        )
+
+
 class CodexCLIAdapter(_BaseConcreteSolverAdapter):
     """Codex CLI adapter driven via non-interactive JSON output."""
 
@@ -1706,6 +1942,15 @@ def build_solver_adapters(
                 containerized=containerized_workspace_solvers,
                 container_host=container_host,
             )
+        elif adapter_name == SOLVER_ADAPTER_OPENCODE_CLI:
+            adapter = OpenCodeCLIAdapter(
+                solver_id=solver.solver_id,
+                provider_id=solver.provider_id,
+                provider_config=provider_config,
+                behavior=behavior,
+                containerized=containerized_workspace_solvers,
+                container_host=container_host,
+            )
         elif adapter_name == SOLVER_ADAPTER_CLAUDE_CLI:
             adapter = ClaudeCLIAdapter(
                 solver_id=solver.solver_id,
@@ -1742,6 +1987,7 @@ __all__ = [
     "AnthropicAgentSDKAdapter",
     "ClaudeCLIAdapter",
     "CodexCLIAdapter",
+    "OpenCodeCLIAdapter",
     "OpenAIResponsesAdapter",
     "OpenCodeServerAdapter",
     "OpenAICompatibleAdapter",
