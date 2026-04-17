@@ -23,7 +23,9 @@ def test_ensure_solver_command_available_accepts_present_binary() -> None:
         image="ghcr.io/example/codex:latest",
     )
 
-    assert container.calls == [(["/bin/bash", "-lc", "command -v codex >/dev/null"], False)]
+    assert container.calls == [
+        (["/bin/bash", "-lc", "command -v codex >/dev/null"], False)
+    ]
 
 
 def test_ensure_solver_command_available_reports_missing_binary() -> None:

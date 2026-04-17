@@ -253,7 +253,9 @@ def run_solver_command_in_container(
             create_kwargs["platform"] = platform
         container = client.containers.create(**create_kwargs)
         container.start()
-        _ensure_solver_command_available(container=container, command=command, image=image)
+        _ensure_solver_command_available(
+            container=container, command=command, image=image
+        )
 
         shell_cmd = (
             f"cd {shlex.quote(DOCKER_WORKDIR)} && "

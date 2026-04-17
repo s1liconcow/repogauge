@@ -598,7 +598,10 @@ class TestAdapters(unittest.TestCase):
         assert kwargs["environment"]["HOME"] == str(
             Path(workspace).parent / "codex-home"
         )
-        assert kwargs["instance_row"]["test_patch"] == "diff --git a/tests/x b/tests/x\n+test"
+        assert (
+            kwargs["instance_row"]["test_patch"]
+            == "diff --git a/tests/x b/tests/x\n+test"
+        )
         assert kwargs["instance_row"]["version"] == "1.0"
 
     def test_codex_cli_finalize_output_prefers_model_patch(self) -> None:
