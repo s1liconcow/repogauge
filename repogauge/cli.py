@@ -2331,6 +2331,11 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     for item in summary.jobs
                     if item.final_status == SolverAttemptState.SUCCEEDED
                 ),
+                "skipped": sum(
+                    1
+                    for item in summary.jobs
+                    if item.final_status == SolverAttemptState.SKIPPED
+                ),
                 "jobs": [asdict(item) for item in summary.jobs],
             }
             run_summary_out.write_text(
@@ -2380,6 +2385,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "run_id": matrix.run_id,
                     "jobs": len(jobs),
                     "solved": run_summary["solved"],
+                    "skipped": run_summary["skipped"],
                 },
                 events_path,
             )

@@ -1286,35 +1286,108 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
 def _claude_cli_child_env() -> dict[str, str] | None:
     """Return the env to run ``claude`` with, or ``None`` to inherit as-is.
 
-    When the user has a local ``~/.claude/.credentials.json`` (subscription
-    OAuth login) and no API key is present, keep using that login. When an
-    API key or auth token is present, prefer that credential path even if local
-    Claude credentials also exist.
+    Prefer local Claude subscription credentials when they exist. Fall back to
+    API-key auth when subscription credentials are unavailable.
     """
     return _claude_cli_child_env_for_home(Path.home())
 
 
 def _claude_cli_child_env_for_home(home_root: Path) -> dict[str, str] | None:
     credentials = home_root / ".claude" / ".credentials.json"
-    has_key = "ANTHROPIC_API_KEY" in os.environ
-    has_token = "ANTHROPIC_AUTH_TOKEN" in os.environ
-    if has_key or has_token:
-        if home_root == Path.home():
-            return None
-        command_env = dict(os.environ)
-        command_env["HOME"] = str(home_root)
-        return command_env
-    if not credentials.exists():
-        if home_root == Path.home():
-            return None
-        command_env = dict(os.environ)
-        command_env["HOME"] = str(home_root)
-        return command_env
-    if home_root == Path.home():
-        return None
     command_env = dict(os.environ)
+    if credentials.exists():
+        command_env.pop("ANTHROPIC_API_KEY", None)
+        command_env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    elif home_root == Path.home():
+        return None
+    if home_root == Path.home():
+        return command_env if command_env != dict(os.environ) else None
     command_env["HOME"] = str(home_root)
     return command_env
+
+
+@dataclass(frozen=True)
+class _ClaudeCLIAuthCandidate:
+    mode: str
+    env: dict[str, str] | None
+    label: str
+
+
+def _claude_cli_auth_candidates_for_home(
+    home_root: Path,
+) -> tuple[_ClaudeCLIAuthCandidate, ...]:
+    credentials = home_root / ".claude" / ".credentials.json"
+    has_key = "ANTHROPIC_API_KEY" in os.environ
+    has_token = "ANTHROPIC_AUTH_TOKEN" in os.environ
+    candidates: list[_ClaudeCLIAuthCandidate] = []
+
+    if credentials.exists():
+        candidates.append(
+            _ClaudeCLIAuthCandidate(
+                mode="subscription",
+                env=_claude_cli_child_env_for_home(home_root),
+                label="subscription auth",
+            )
+        )
+
+    if has_key or has_token:
+        api_env = dict(os.environ)
+        if home_root != Path.home():
+            api_env["HOME"] = str(home_root)
+        candidates.append(
+            _ClaudeCLIAuthCandidate(
+                mode="api_key",
+                env=None if home_root == Path.home() else api_env,
+                label="API key auth",
+            )
+        )
+
+    if not candidates:
+        ambient_env = dict(os.environ)
+        if home_root != Path.home():
+            ambient_env["HOME"] = str(home_root)
+        candidates.append(
+            _ClaudeCLIAuthCandidate(
+                mode="ambient",
+                env=None if home_root == Path.home() else ambient_env,
+                label="ambient auth",
+            )
+        )
+
+    return tuple(candidates)
+
+
+def _probe_claude_cli_command(
+    *,
+    command: list[str],
+    model: str,
+    env: dict[str, str] | None,
+) -> str | None:
+    probe_result = run_command(
+        [
+            *command,
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--model",
+            model,
+            "--dangerously-skip-permissions",
+        ],
+        env=env,
+        input_text="Reply with OK.\n",
+        timeout_seconds=30,
+    )
+    output = probe_result.stdout or ""
+    terminal_error = ""
+    for event in _parse_json_lines(output):
+        if event.get("type") == "result" and isinstance(event.get("result"), str):
+            if bool(event.get("is_error")):
+                terminal_error = event["result"].strip()
+
+    if probe_result.success and not terminal_error:
+        return None
+    return terminal_error or probe_result.stderr or output or "claude CLI unavailable"
 
 
 class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
@@ -1358,9 +1431,52 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
         )
         if not self.image_override:
             self.image_override = None
+        self._resolved_auth_mode: str | None = None
+        self._preflight_reason: str | None = None
 
     def requires_workspace(self) -> bool:
         return True
+
+    def _resolve_auth_mode(self) -> tuple[str, str | None]:
+        if self._resolved_auth_mode is not None or self._preflight_reason is not None:
+            return self._resolved_auth_mode or "ambient", self._preflight_reason
+
+        failures: list[str] = []
+        for candidate in _claude_cli_auth_candidates_for_home(Path.home()):
+            reason = _probe_claude_cli_command(
+                command=list(self.command),
+                model=self.model,
+                env=candidate.env,
+            )
+            if reason is None:
+                self._resolved_auth_mode = candidate.mode
+                self._preflight_reason = None
+                return candidate.mode, None
+            failures.append(f"{candidate.label} failed: {reason}")
+
+        self._resolved_auth_mode = "ambient"
+        self._preflight_reason = "claude CLI unavailable: " + "; ".join(failures)
+        return self._resolved_auth_mode, self._preflight_reason
+
+    def preflight(self) -> str | None:
+        _, reason = self._resolve_auth_mode()
+        return reason
+
+    def _command_env_for_home(self, home_root: Path) -> dict[str, str] | None:
+        mode, _ = self._resolve_auth_mode()
+        if mode == "subscription":
+            return _claude_cli_child_env_for_home(home_root)
+        if mode == "api_key":
+            if home_root == Path.home():
+                return None
+            command_env = dict(os.environ)
+            command_env["HOME"] = str(home_root)
+            return command_env
+        if home_root == Path.home():
+            return None
+        command_env = dict(os.environ)
+        command_env["HOME"] = str(home_root)
+        return command_env
 
     def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
         instance_row = _required_instance_fields(request.instance_row)
@@ -1387,7 +1503,7 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
             if request.workspace_path is not None
             else Path.home()
         )
-        command_env = _claude_cli_child_env_for_home(claude_home_root)
+        command_env = self._command_env_for_home(claude_home_root)
         try:
             if self.containerized and request.workspace_path is not None:
                 command_result = run_solver_command_in_container(

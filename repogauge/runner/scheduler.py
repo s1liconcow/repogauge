@@ -32,6 +32,7 @@ class SolverAttemptState:
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
+    SKIPPED = "skipped"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
     BUDGET_EXCEEDED = "budget_exceeded"
@@ -136,6 +137,10 @@ class SolverAdapter(ABC):
         """Collect telemetry for a completed attempt."""
         return tuple(self.stream_telemetry(attempt_id))
 
+    def preflight(self) -> str | None:
+        """Return a skip reason when the solver is unavailable in this environment."""
+        return None
+
     @abstractmethod
     def finalize_output(
         self, request: SolverAdapterRequest, result: SolverAdapterResult
@@ -192,6 +197,7 @@ def _coerce_attempt_status(status: str) -> str:
         SolverAttemptState.QUEUED,
         SolverAttemptState.RUNNING,
         SolverAttemptState.SUCCEEDED,
+        SolverAttemptState.SKIPPED,
         SolverAttemptState.FAILED,
         SolverAttemptState.TIMED_OUT,
         SolverAttemptState.BUDGET_EXCEEDED,
@@ -217,6 +223,7 @@ class _TqdmProgressReporter(_ProgressReporter):
     def __init__(self, total: int) -> None:
         self._counts: dict[str, int] = {
             SolverAttemptState.SUCCEEDED: 0,
+            SolverAttemptState.SKIPPED: 0,
             SolverAttemptState.INVALID_PATCH: 0,
             SolverAttemptState.FAILED: 0,
             SolverAttemptState.TIMED_OUT: 0,
@@ -236,6 +243,7 @@ class _TqdmProgressReporter(_ProgressReporter):
         self._bar.set_postfix(
             {
                 "ok": self._counts[SolverAttemptState.SUCCEEDED],
+                "skipped": self._counts[SolverAttemptState.SKIPPED],
                 "invalid": self._counts[SolverAttemptState.INVALID_PATCH],
                 "failed": self._counts[SolverAttemptState.FAILED],
                 "timed_out": self._counts[SolverAttemptState.TIMED_OUT],
@@ -742,6 +750,48 @@ class SolverScheduler:
             started_at=started_at,
             ended_at=ended_at,
         )
+
+        skip_reason = adapter.preflight()
+        if skip_reason:
+            started_at = _now_ts()
+            ended_at = _now_ts()
+            attempts = 1
+            attempt_id = f"{job.job_id}:attempt-1"
+            attempt_ids.append(attempt_id)
+            result = SolverAdapterResult(
+                attempt_id=attempt_id,
+                status=SolverAttemptState.SKIPPED,
+                stderr_output=skip_reason,
+                usage_source="",
+                cost_source="",
+                exit_reason=skip_reason,
+                raw_output="",
+                metadata={"preflight_skipped": True},
+            )
+            self._persist_attempt(
+                attempt_id=attempt_id,
+                job=job,
+                attempt_state=SolverAttemptState.SKIPPED,
+                elapsed_ms=0,
+                result=result,
+                raw_output=result.raw_output,
+                dataset_row=dataset_row,
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            self._persist_job(
+                job=job,
+                status=SolverAttemptState.SKIPPED,
+                attempts=attempts,
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            return SolverJobProgress(
+                job_id=job.job_id,
+                final_status=SolverAttemptState.SKIPPED,
+                attempts=attempts,
+                attempt_ids=tuple(attempt_ids),
+            )
 
         while attempts < budget:
             attempts += 1

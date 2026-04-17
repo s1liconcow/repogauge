@@ -973,7 +973,7 @@ class TestAdapters(unittest.TestCase):
 
         self.assertIsNone(mock_run_command.call_args.kwargs["env"])
 
-    def test_claude_cli_adapter_prefers_api_key_when_local_creds_exist(
+    def test_claude_cli_adapter_prefers_subscription_when_local_creds_exist(
         self,
     ) -> None:
         provider = self._claude_provider("claude")
@@ -1008,12 +1008,20 @@ class TestAdapters(unittest.TestCase):
                     "repogauge.runner.adapters.run_command",
                     return_value=command_result,
                 ) as mock_run_command,
+                mock.patch(
+                    "repogauge.runner.adapters._probe_claude_cli_command",
+                    side_effect=[None],
+                ),
             ):
                 adapter.execute_attempt(request)
 
-        self.assertIsNone(mock_run_command.call_args.kwargs["env"])
+        env = mock_run_command.call_args.kwargs["env"]
+        self.assertIsNotNone(env)
+        self.assertEqual(env["HOME"], fake_home)
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
 
-    def test_claude_cli_child_env_for_home_prefers_api_key_for_isolated_home(
+    def test_claude_cli_child_env_for_home_prefers_subscription_for_isolated_home(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as fake_home:
@@ -1032,8 +1040,80 @@ class TestAdapters(unittest.TestCase):
 
         assert env is not None
         assert env["HOME"] == fake_home
-        assert env["ANTHROPIC_API_KEY"] == "sk-env"
-        assert env["ANTHROPIC_AUTH_TOKEN"] == "tok-env"
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+    def test_claude_cli_preflight_falls_back_to_api_key_when_subscription_fails(
+        self,
+    ) -> None:
+        provider = self._claude_provider("claude")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+
+        with tempfile.TemporaryDirectory() as fake_home:
+            claude_dir = Path(fake_home) / ".claude"
+            claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}", encoding="utf-8")
+            with (
+                mock.patch.dict(
+                    "os.environ",
+                    {
+                        "HOME": fake_home,
+                        "ANTHROPIC_API_KEY": "sk-env",
+                    },
+                    clear=False,
+                ),
+                mock.patch(
+                    "repogauge.runner.adapters._probe_claude_cli_command",
+                    side_effect=["rate limited", None],
+                ),
+            ):
+                reason = adapter.preflight()
+
+        self.assertIsNone(reason)
+
+    def test_claude_cli_preflight_returns_skip_reason_when_all_auth_fails(
+        self,
+    ) -> None:
+        provider = self._claude_provider("claude")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+
+        with tempfile.TemporaryDirectory() as fake_home:
+            claude_dir = Path(fake_home) / ".claude"
+            claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}", encoding="utf-8")
+            with (
+                mock.patch.dict(
+                    "os.environ",
+                    {
+                        "HOME": fake_home,
+                        "ANTHROPIC_API_KEY": "sk-env",
+                    },
+                    clear=False,
+                ),
+                mock.patch(
+                    "repogauge.runner.adapters._probe_claude_cli_command",
+                    side_effect=[
+                        "You've hit your limit · resets 12pm (America/Los_Angeles)",
+                        "Credit balance is too low",
+                    ],
+                ),
+            ):
+                reason = adapter.preflight()
+
+        self.assertIsNotNone(reason)
+        assert reason is not None
+        self.assertIn("subscription auth failed", reason)
+        self.assertIn("API key auth failed", reason)
 
     def test_claude_cli_adapter_surfaces_terminal_error_result(self) -> None:
         provider = self._claude_provider("claude")

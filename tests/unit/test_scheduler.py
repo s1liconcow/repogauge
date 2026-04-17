@@ -141,6 +141,41 @@ class CaptureAdapter(SolverAdapter):
         return result
 
 
+class PreflightSkipAdapter(SolverAdapter):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        self.prepare_called = False
+
+    def preflight(self) -> str | None:
+        return self.reason
+
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+        workspace_path=None,
+    ) -> SolverAdapterRequest:
+        self.prepare_called = True
+        return SolverAdapterRequest(
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            job=job,
+            instance_row=instance_row,
+            workspace_path=workspace_path,
+        )
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        raise AssertionError("execute_attempt should not run when preflight skips")
+
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
+        return result
+
+
 class CanonicalPatchAdapter(SolverAdapter):
     """Adapter that returns a valid model patch with non-diff raw output."""
 
@@ -835,6 +870,33 @@ def test_scheduler_finalize_error_marks_attempt_as_failed(tmp_path: Path) -> Non
     assert len(attempt_rows) == 1
     assert attempt_rows[0]["attempt_state"] == SolverAttemptState.FAILED
     assert attempt_rows[0]["exit_reason"] == "adapter_finalize_error: finalize failed"
+
+
+def test_scheduler_marks_preflight_unavailable_jobs_skipped(tmp_path: Path) -> None:
+    job = _job(job_id="run-1:i-1:solver-a:0", solver_id="solver-a")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            persist_jobs_to=tmp_path / "jobs.jsonl",
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    adapter = PreflightSkipAdapter("claude CLI unavailable: rate limited")
+
+    summary = scheduler.run([job], adapters={"solver-a": adapter})
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SKIPPED
+    assert summary.jobs[0].attempts == 1
+    assert adapter.prepare_called is False
+
+    job_rows = _read_jsonl(tmp_path / "jobs.jsonl")
+    assert job_rows[-1]["status"] == SolverAttemptState.SKIPPED
+
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0]["attempt_state"] == SolverAttemptState.SKIPPED
+    assert attempt_rows[0]["exit_reason"] == "claude CLI unavailable: rate limited"
+    assert attempt_rows[0]["metadata"]["preflight_skipped"] is True
 
 
 def test_scheduler_applies_solver_budget_and_marks_terminal_state(

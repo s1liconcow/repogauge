@@ -335,7 +335,9 @@ def _run_git_workspace_command(workspace: Path, args: list[str]):
 
 
 def _collect_changed_file_paths(workspace: Path) -> list[tuple[str, str]]:
-    staged = _run_git_workspace_command(workspace, ["diff", "--cached", "--name-status"])
+    staged = _run_git_workspace_command(
+        workspace, ["diff", "--cached", "--name-status"]
+    )
     if not staged.success:
         raise PatchNormalizationError(
             f"failed to inspect staged changes: {staged.stderr or staged.stdout}"
@@ -487,7 +489,9 @@ def _discard_benchmark_agents_override(attempt: AttemptWorkspace) -> None:
     agents_path.unlink(missing_ok=True)
 
 
-def _normalize_from_workspace_state(attempt: AttemptWorkspace) -> PatchNormalizationResult:
+def _normalize_from_workspace_state(
+    attempt: AttemptWorkspace,
+) -> PatchNormalizationResult:
     _discard_benchmark_agents_override(attempt)
     stage_result = _run_git_workspace_command(attempt.workspace_path, ["add", "-A"])
     if not stage_result.success:

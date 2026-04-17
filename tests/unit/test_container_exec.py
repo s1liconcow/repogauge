@@ -56,10 +56,7 @@ def test_resolve_host_tool_fallback_for_codex(monkeypatch, tmp_path: Path) -> No
     node = tmp_path / "usr/bin/node"
     node.parent.mkdir(parents=True)
     node.write_text("", encoding="utf-8")
-    script = (
-        tmp_path
-        / "bun/install/global/node_modules/@openai/codex/bin/codex.js"
-    )
+    script = tmp_path / "bun/install/global/node_modules/@openai/codex/bin/codex.js"
     script.parent.mkdir(parents=True)
     script.write_text("", encoding="utf-8")
 
@@ -145,7 +142,10 @@ def test_solver_shell_command_runs_solver_as_nonroot_with_redirection() -> None:
     assert "chmod -R a+rwX /repogauge/prompt.txt" in shell_cmd
     assert "chmod -R a+rwX /repogauge/codex-home" in shell_cmd
     assert "rm -rf /home/nonroot/.repogauge-codex-home" in shell_cmd
-    assert "cp -a /repogauge/codex-home/. /home/nonroot/.repogauge-codex-home/" in shell_cmd
+    assert (
+        "cp -a /repogauge/codex-home/. /home/nonroot/.repogauge-codex-home/"
+        in shell_cmd
+    )
     assert "CODEX_HOME=/home/nonroot/.repogauge-codex-home/.codex" in shell_cmd
     assert (
         "su -m -s /bin/bash nonroot -c 'env "
