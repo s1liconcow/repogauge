@@ -1845,7 +1845,7 @@
             </span>
             <span class="brand__wordmark">
               <span class="brand__title">RepoGauge</span>
-              <span class="brand__subtitle">Evaluate On Your Code</span>
+              <span class="brand__subtitle">Evaluate your coding agents.</span>
             </span>
           </a>
 
@@ -1887,6 +1887,8 @@
               <span>coding agents on your own repositories.</span>
             </h1>
             <p class="hero__lede">
+	      You evaluate your employees, why not your coding agents?
+
               RepoGauge turns your repositories into a reproducible evaluation suite, runs real
               coding agents against the same task set, and shows the numbers you need to compare them:
               pass rate, cost, latency, regressions, and the points where a premium model actually pays for itself.
@@ -2709,7 +2711,7 @@ uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
                 <input id="hostedEmail" name="email" type="email" placeholder="jane@acme.com" autocomplete="work email" required>
               </div>
               <div class="hosted-field">
-                <label for="hostedRepo">Repo URL</label>
+                <label for="hostedRepo">Repo URL (optional) </label>
                 <input id="hostedRepo" name="repo_url" type="url" placeholder="https://github.com/acme/app" autocomplete="url">
               </div>
             </div>
@@ -2727,11 +2729,11 @@ uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
             </div>
 
             <div class="hosted-field">
-              <label for="hostedNeeds">What would a hosted version need to solve?</label>
+              <label for="hostedNeeds">What would be important features for a hosted version? (optional) </label>
               <textarea
                 id="hostedNeeds"
                 name="message"
-                placeholder="Examples: recurring benchmark runs, shared dashboards, regression alerts, hosted worker execution, or budget reporting for multiple repos."
+                placeholder="Examples: recurring benchmark reports, self-hosting, trusted execution environments, regression alerts, or budget reporting for multiple repos."
               ></textarea>
             </div>
 
@@ -2743,12 +2745,6 @@ uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
               class="hosted-hidden"
               aria-hidden="true"
             >
-
-            <div class="hosted-meta">
-              <span>One short form</span>
-              <span>Built for teams evaluating multiple repositories</span>
-              <span>Sent through Web3Forms for now</span>
-            </div>
 
             <div class="hosted-error hosted-hidden" id="hostedContactError" role="alert"></div>
             <button class="button button--primary" type="submit" id="hostedSubmitButton">Submit interest</button>
