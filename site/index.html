@@ -244,6 +244,20 @@
       transition: transform 180ms ease, box-shadow 180ms ease;
     }
 
+    .site-header__actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .nav-cta--secondary {
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--text);
+      box-shadow: var(--shadow-sm);
+      border: 1px solid rgba(15, 35, 74, 0.08);
+    }
+
     .nav-cta:hover,
     .nav-cta:focus-visible,
     .button:hover,
@@ -533,13 +547,18 @@
 
     .solver-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(78px, auto) minmax(88px, auto) minmax(84px, auto);
-      gap: 14px;
-      align-items: center;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      align-items: start;
       padding: 14px 16px;
       border-radius: 20px;
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .solver-row > div {
+      grid-column: 1 / -1;
+      min-width: 0;
     }
 
     .solver-row strong {
@@ -556,9 +575,11 @@
     }
 
     .solver-row em {
+      display: block;
       font-style: normal;
       font-weight: 800;
       font-size: 0.95rem;
+      white-space: nowrap;
     }
 
     .solver-row__delta {
@@ -1209,6 +1230,389 @@
       font-size: 0.84rem;
     }
 
+    .hosted-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 18px;
+      padding: 28px;
+      border-radius: 32px;
+      background:
+        radial-gradient(circle at top right, rgba(31, 104, 255, 0.14), transparent 34%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.76));
+      border: 1px solid rgba(255, 255, 255, 0.92);
+      box-shadow: var(--shadow-md);
+    }
+
+    .hosted-card__copy h3,
+    .hosted-modal h3 {
+      font-size: 1.7rem;
+      letter-spacing: -0.05em;
+      line-height: 1.05;
+    }
+
+    .hosted-card__copy p,
+    .hosted-modal p {
+      margin-top: 14px;
+      color: var(--muted);
+      line-height: 1.75;
+    }
+
+    .hosted-list {
+      margin: 22px 0 0;
+      padding: 0;
+      display: grid;
+      gap: 12px;
+    }
+
+    .hosted-list li {
+      list-style: none;
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(15, 35, 74, 0.04);
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    .hosted-list strong {
+      flex: 0 0 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: rgba(31, 104, 255, 0.12);
+      color: var(--blue-deep);
+      font-size: 0.82rem;
+    }
+
+    .hosted-card__aside {
+      padding: 24px;
+      border-radius: 28px;
+      background:
+        radial-gradient(circle at top right, rgba(31, 199, 201, 0.16), transparent 30%),
+        linear-gradient(180deg, rgba(12, 25, 53, 0.98), rgba(8, 18, 42, 0.96));
+      color: white;
+      box-shadow: 0 28px 60px rgba(10, 22, 49, 0.22);
+    }
+
+    .hosted-card__aside p {
+      color: rgba(223, 231, 248, 0.76);
+    }
+
+    .hosted-card__aside .hero__actions {
+      margin-top: 24px;
+    }
+
+    .hosted-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.86);
+    }
+
+    .hosted-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(7, 16, 34, 0.56);
+      backdrop-filter: blur(18px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 220ms ease;
+    }
+
+    .hosted-modal-backdrop.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .hosted-hidden {
+      display: none !important;
+    }
+
+    .hosted-modal {
+      position: relative;
+      width: min(100%, 720px);
+      max-height: min(90vh, 840px);
+      overflow: auto;
+      padding: 28px;
+      border-radius: 32px;
+      background:
+        radial-gradient(circle at top right, rgba(31, 104, 255, 0.12), transparent 28%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 250, 246, 0.94));
+      border: 1px solid rgba(255, 255, 255, 0.96);
+      box-shadow: 0 42px 90px rgba(10, 22, 49, 0.3);
+    }
+
+    .hosted-modal-close {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 35, 74, 0.06);
+      color: var(--text);
+    }
+
+    .hosted-modal-progress {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding-right: 44px;
+    }
+
+    .hosted-modal-progress span {
+      flex: 1;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(15, 35, 74, 0.08);
+    }
+
+    .hosted-modal-progress span.active {
+      background: linear-gradient(90deg, var(--cyan), var(--blue));
+    }
+
+    .hosted-modal-intro {
+      max-width: 54ch;
+      margin-top: 12px;
+    }
+
+    .hosted-form {
+      margin-top: 22px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .hosted-field {
+      display: grid;
+      gap: 8px;
+    }
+
+    .hosted-field label,
+    .hosted-field__label {
+      font-size: 0.92rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+
+    .hosted-field input,
+    .hosted-field textarea {
+      width: 100%;
+      border: 1px solid rgba(15, 35, 74, 0.12);
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .hosted-field textarea {
+      min-height: 128px;
+      resize: vertical;
+    }
+
+    .hosted-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .hosted-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .hosted-meta span {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: rgba(15, 35, 74, 0.05);
+    }
+
+    .hosted-error {
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255, 108, 91, 0.1);
+      color: #8f2a1f;
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    .hosted-divider {
+      display: grid;
+      place-items: center;
+      margin: 22px 0 18px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .hosted-divider span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 48px;
+      min-height: 32px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: rgba(15, 35, 74, 0.06);
+    }
+
+    .hosted-calendar {
+      display: flex;
+      justify-content: flex-start;
+    }
+
+    .hosted-qualification-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .hosted-pill {
+      position: relative;
+      display: block;
+      cursor: pointer;
+    }
+
+    .hosted-pill input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .hosted-pill span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 46px;
+      padding: 0 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(15, 35, 74, 0.12);
+      background: rgba(255, 255, 255, 0.82);
+      font-weight: 700;
+      color: var(--text);
+      transition: border-color 180ms ease, background 180ms ease, color 180ms ease;
+    }
+
+    .hosted-pill input:checked + span {
+      border-color: rgba(31, 104, 255, 0.28);
+      background: linear-gradient(180deg, rgba(31, 104, 255, 0.12), rgba(31, 199, 201, 0.08));
+      color: var(--blue-deep);
+    }
+
+    .hosted-tool-chips,
+    .hosted-selected-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .hosted-tool-chip,
+    .hosted-selected-tool {
+      min-height: 40px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(15, 35, 74, 0.12);
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--text);
+      font-weight: 700;
+      transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+    }
+
+    .hosted-tool-chip:hover,
+    .hosted-tool-chip:focus-visible {
+      transform: translateY(-1px);
+      border-color: rgba(31, 104, 255, 0.24);
+    }
+
+    .hosted-tool-chip.selected {
+      background: linear-gradient(180deg, rgba(31, 104, 255, 0.12), rgba(31, 199, 201, 0.08));
+      border-color: rgba(31, 104, 255, 0.28);
+      color: var(--blue-deep);
+    }
+
+    .hosted-selected-tool {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(15, 35, 74, 0.05);
+    }
+
+    .hosted-selected-tool button {
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 35, 74, 0.08);
+      font-size: 0.9rem;
+      line-height: 1;
+    }
+
+    .hosted-actions-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .hosted-success {
+      padding: 24px 0 6px;
+      text-align: left;
+    }
+
+    .hosted-success__check {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 60px;
+      height: 60px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(15, 157, 88, 0.16), rgba(31, 199, 201, 0.18));
+      color: var(--success);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .hosted-success h3 {
+      margin-top: 18px;
+    }
+
+    .hosted-note {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
     .footer {
       padding: 18px 0 48px;
       color: var(--muted);
@@ -1256,14 +1660,16 @@
       .hero__grid,
       .comparison-grid,
       .persona-panel,
-      .pipeline-panel {
+      .pipeline-panel,
+      .hosted-card {
         grid-template-columns: 1fr;
       }
 
       .hero__signals,
       .metrics-grid,
       .question-grid,
-      .command-grid {
+      .command-grid,
+      .hosted-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
@@ -1294,7 +1700,9 @@
       .metrics-grid,
       .question-grid,
       .command-grid,
-      .board__metrics {
+      .board__metrics,
+      .hosted-grid,
+      .hosted-qualification-grid {
         grid-template-columns: 1fr;
       }
 
@@ -1346,7 +1754,10 @@
       .command-card,
       .cta-card,
       .artifact-card,
-      .persona-visual {
+      .persona-visual,
+      .hosted-card,
+      .hosted-card__aside,
+      .hosted-modal {
         border-radius: 24px;
       }
 
@@ -1385,11 +1796,13 @@
       }
 
       .button,
-      .nav-cta {
+      .nav-cta,
+      .hosted-actions-row .button {
         width: 100%;
       }
 
-      .hero__actions {
+      .hero__actions,
+      .hosted-actions-row {
         flex-direction: column;
       }
     }
@@ -1440,16 +1853,23 @@
             <a href="#why">Why</a>
             <a href="#pipeline">Pipeline</a>
             <a href="#questions">Questions</a>
-            <a href="#personas">Teams</a>
             <a href="#quickstart">Quickstart</a>
           </nav>
 
-          <a class="nav-cta" href="#quickstart">
-            Start locally
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </a>
+          <div class="site-header__actions">
+            <a
+              class="nav-cta nav-cta--secondary"
+              href="https://github.com/s1liconcow/repogauge"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Start locally
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </a>
+            <button class="nav-cta" type="button" data-open-hosted-modal>Hosted platform</button>
+          </div>
         </div>
       </div>
     </header>
@@ -1460,15 +1880,15 @@
           <div class="hero__copy reveal">
             <div class="eyebrow">
               <span class="eyebrow__dot" aria-hidden="true"></span>
-              Evaluate coding agents on your own code
+              Token costs exploding? Silent regressions in model performance?
             </div>
             <h1>
               Evaluate
-              <span>coding agents on your own code.</span>
+              <span>coding agents on your own repositories.</span>
             </h1>
             <p class="hero__lede">
-              RepoGauge turns any Python repository into a reproducible evaluation suite, runs real
-              coding agents against it locally, and shows the numbers you need to compare them on your code:
+              RepoGauge turns your repositories into a reproducible evaluation suite, runs real
+              coding agents against the same task set, and shows the numbers you need to compare them:
               pass rate, cost, latency, regressions, and the points where a premium model actually pays for itself.
             </p>
             <div class="hero__actions">
@@ -1478,16 +1898,16 @@
                   <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </a>
-              <a class="button button--secondary" href="#pipeline">See how it works</a>
+              <button class="button button--secondary" type="button" data-open-hosted-modal>Request hosted access</button>
             </div>
             <div class="hero__signals" aria-label="Key product strengths">
               <article class="signal">
-                <strong>Benchmarks built from your own repo</strong>
+                <strong>Benchmarks built from your own repositories</strong>
                 <span>Mine real bugfix commits from your own history and evaluate each task against the human fix.</span>
               </article>
               <article class="signal">
-                <strong>Real harness semantics</strong>
-                <span>Export benchmark instances and validate them through the real judge.</span>
+                <strong>Consistent scoring checks</strong>
+                <span>Export benchmark instances and validate them with the same scoring flow used during evaluation.</span>
               </article>
               <article class="signal">
                 <strong>Cost telemetry built in</strong>
@@ -1504,7 +1924,7 @@
             <div class="board__topline">
               <div>
                 <strong>Illustrative benchmark run</strong>
-                <span>One repo. Same dataset. Same harness. A clean comparison.</span>
+                <span>One codebase slice. Same dataset. Same scoring rules. A clean comparison.</span>
               </div>
               <div class="pill">sample analysis</div>
             </div>
@@ -1653,12 +2073,12 @@
             <article class="metric-card reveal">
               <span>Privacy</span>
               <strong>Everything runs locally first</strong>
-              <p>Your repository stays on your machine unless you explicitly point a solver at a remote provider.</p>
+              <p>Your repositories stay on your machine unless you explicitly point a solver at a remote provider.</p>
             </article>
             <article class="metric-card reveal">
               <span>Judging</span>
-              <strong>Official harness checks</strong>
-              <p>Solver patches are checked with the official harness, which keeps the score tied to real judge behavior.</p>
+              <strong>Reliable pass and fail signals</strong>
+              <p>Solver patches go through the same validation flow, which keeps the score tied to real task behavior.</p>
             </article>
             <article class="metric-card reveal">
               <span>Economics</span>
@@ -1701,11 +2121,11 @@
             <article class="comparison-card comparison-card--dark reveal">
               <h3>What the workflow gives you</h3>
               <p>
-                A local pipeline that mines real fixes from your history, validates them with the official harness,
+                A repeatable pipeline that mines real fixes from your history, validates each task before scoring,
                 runs the same task slice across every solver, and leaves behind analysis artifacts you can diff over time.
               </p>
               <ul class="comparison-list">
-                <li><strong>A</strong><span>Same dataset, same judge, same repo. The comparison stays clean.</span></li>
+                <li><strong>A</strong><span>Same dataset, same scoring rules, same codebase slice. The comparison stays clean.</span></li>
                 <li><strong>B</strong><span>Pass rate tied directly to the human fix and failing tests.</span></li>
                 <li><strong>C</strong><span>Cost, tokens, and latency show up beside quality.</span></li>
                 <li><strong>D</strong><span>Train a router so premium models only handle premium tasks.</span></li>
@@ -1748,7 +2168,7 @@
               <button class="pipeline-tab" id="tab-eval" role="tab" aria-selected="false" aria-controls="panel-eval">
                 <span class="pipeline-tab__step">04</span>
                 <strong>Eval</strong>
-                <span>Sanity-check the gold patches in the real containerized judge.</span>
+                <span>Sanity-check the gold patches in the containerized validation run.</span>
               </button>
               <button class="pipeline-tab" id="tab-run" role="tab" aria-selected="false" aria-controls="panel-run">
                 <span class="pipeline-tab__step">05</span>
@@ -1758,7 +2178,7 @@
               <button class="pipeline-tab" id="tab-analyze" role="tab" aria-selected="false" aria-controls="panel-analyze">
                 <span class="pipeline-tab__step">06</span>
                 <strong>Analyze</strong>
-                <span>Join judge outcomes with spend, tokens, and latency.</span>
+                <span>Join pass and fail outcomes with spend, tokens, and latency.</span>
               </button>
               <button class="pipeline-tab" id="tab-router" role="tab" aria-selected="false" aria-controls="panel-router">
                 <span class="pipeline-tab__step">07</span>
@@ -1774,12 +2194,12 @@
                   <h3>Start from the fixes your team already shipped.</h3>
                   <p>
                     RepoGauge scans the default branch for bugfix-shaped changes and emits a candidate set that can
-                    be reviewed, filtered, and later exported into a repo-specific benchmark. That keeps the benchmark grounded in actual work your team already shipped.
+                    be reviewed, filtered, and later exported into a benchmark built from your repositories. That keeps the benchmark grounded in actual work your team already shipped.
                   </p>
                   <ul class="feature-list">
                     <li><b>Artifact:</b> <code>candidates.jsonl</code> becomes the raw source pool for the whole benchmark.</li>
                     <li><b>Bias control:</b> deterministic heuristics reduce the temptation to overfit selection to a preferred solver.</li>
-                    <li><b>Local-first:</b> pure rules mode works without any model calls.</li>
+                    <li><b>Low setup cost:</b> pure rules mode works without any model calls.</li>
                   </ul>
                 </article>
                 <aside class="artifact-card">
@@ -1821,13 +2241,13 @@
               <div class="pipeline-panel" id="panel-export" role="tabpanel" aria-labelledby="tab-export">
                 <article class="feature-card">
                   <span class="mono-label">Export dataset</span>
-                  <h3>Materialize a benchmark dataset for your repository.</h3>
+                  <h3>Materialize benchmark datasets for your repositories.</h3>
                   <p>
                     Export turns accepted candidates into dataset instances, writes the gold predictions,
-                    and generates a repo-specific harness adapter so the official judge can understand a repository it has never seen before.
+                    and generates a repo-specific evaluation adapter so the scoring flow can understand repositories it has never seen before.
                   </p>
                   <ul class="feature-list">
-                    <li><b>Compatibility boundary:</b> the dataset plus adapter pair is what makes the judge work reliably.</li>
+                    <li><b>Compatibility boundary:</b> the dataset plus adapter pair is what keeps scoring reliable.</li>
                     <li><b>Gold patch preservation:</b> every task keeps the human fix for validation and comparison.</li>
                     <li><b>Structured outputs:</b> downstream stages can resume cleanly without redoing export work.</li>
                   </ul>
@@ -1838,7 +2258,7 @@
                   <div class="file-stack">
                     <div class="file-row"><code>dataset/dataset.jsonl</code><span class="badge">benchmark instances</span></div>
                     <div class="file-row"><code>predictions.gold.jsonl</code><span class="badge">gold answers</span></div>
-                    <div class="file-row"><code>adapter_&lt;repo&gt;.py</code><span class="badge">judge glue</span></div>
+                    <div class="file-row"><code>adapter_&lt;repo&gt;.py</code><span class="badge">evaluation adapter</span></div>
                   </div>
                 </aside>
               </div>
@@ -1848,21 +2268,21 @@
                   <span class="mono-label">Validate gold patches</span>
                   <h3>Make sure the benchmark is actually solvable before you score anyone on it.</h3>
                   <p>
-                    Gold validation runs the official harness against the human patches inside the container image,
+                    Gold validation runs the scoring flow against the human patches inside the container image,
                     so broken tasks get caught before they contaminate solver comparisons.
                   </p>
                   <ul class="feature-list">
-                    <li><b>Sanity check:</b> confirms each benchmark instance can pass under the intended judge environment.</li>
+                    <li><b>Sanity check:</b> confirms each benchmark instance can pass under the intended validation environment.</li>
                     <li><b>Resolved slice:</b> emits the clean dataset subset worth spending solver time on.</li>
                     <li><b>Infrastructure clarity:</b> separates bad tasks from bad model behavior.</li>
                   </ul>
                 </article>
                 <aside class="artifact-card">
-                  <h4>Judge verification</h4>
+                  <h4>Validation check</h4>
                   <p>The output of this stage defines the slice that matters for real comparisons.</p>
                   <div class="file-stack">
                     <div class="file-row"><code>validation.jsonl</code><span class="badge">gold verdicts</span></div>
-                    <div class="file-row"><code>instance_results.jsonl</code><span class="badge">judge output</span></div>
+                    <div class="file-row"><code>instance_results.jsonl</code><span class="badge">validation output</span></div>
                     <div class="file-row"><code>dataset.resolved.jsonl</code><span class="badge">solver-ready</span></div>
                   </div>
                 </aside>
@@ -1877,7 +2297,7 @@
                     patch, tokens, cost, duration, exit reason, and workspace artifacts.
                   </p>
                   <ul class="feature-list">
-                    <li><b>Head-to-head fairness:</b> same tasks, same judge contract, same repo baseline.</li>
+                    <li><b>Head-to-head fairness:</b> same tasks, same scoring rules, same codebase baseline.</li>
                     <li><b>Workspace-backed CLIs:</b> local agent tools can run inside the containerized benchmark flow.</li>
                     <li><b>Rich telemetry:</b> every attempt keeps cost, speed, and solver behavior attached to it.</li>
                   </ul>
@@ -1921,7 +2341,7 @@
               <div class="pipeline-panel" id="panel-router" role="tabpanel" aria-labelledby="tab-router">
                 <article class="feature-card">
                   <span class="mono-label">Train a cost-aware router</span>
-                  <h3>Turn benchmark results into cheaper routing decisions.</h3>
+                  <h3>Use benchmark results to control model spend.</h3>
                   <p>
                     Router training fits a small decision tree on the analysis data so future task routing can trade off
                     success probability against cost in a concrete, repo-specific way.
@@ -2083,7 +2503,7 @@
               <article class="persona-card">
                 <h3>Catch quiet regressions before they become organizational folklore.</h3>
                 <p>
-                  If your job is to keep an eye on provider quality, a reproducible benchmark on your own repo is a much sharper
+                  If your job is to keep an eye on provider quality, a reproducible benchmark on your own repositories is a much sharper
                   instrument than waiting for scattered developer complaints to accumulate.
                 </p>
                 <ul>
@@ -2120,7 +2540,7 @@
           <div class="section-heading reveal">
             <div class="section-heading__copy">
               <span>Quickstart</span>
-              <h2>Five commands from repository to comparison.</h2>
+              <h2>Five commands from repositories to comparison.</h2>
               <p>
                 RepoGauge keeps the workflow linear on purpose. You can stop after any stage,
                 inspect the artifacts, or keep going to a full solver comparison and router-training dataset.
@@ -2131,23 +2551,23 @@
           <div class="command-grid">
             <article class="command-card reveal">
               <h3>1. Prepare the environment</h3>
-              <p>Use the project’s `uv` workflow and keep everything in the same dependency context the repo expects.</p>
+              <p>Use the project’s `uv` workflow and keep everything in the same dependency context the project expects.</p>
               <div class="code-block">
-                <pre><code>UV_CACHE_DIR=/tmp/codex-uv-cache uv sync --group dev</code></pre>
-                <button class="copy-button" data-copy="UV_CACHE_DIR=/tmp/codex-uv-cache uv sync --group dev">Copy</button>
+                <pre><code>uv sync --group dev</code></pre>
+                <button class="copy-button" data-copy="uv sync --group dev">Copy</button>
               </div>
             </article>
 
             <article class="command-card reveal">
               <h3>2. Build the benchmark</h3>
-              <p>Mine the repo, review candidates, and export a benchmark dataset plus harness adapter.</p>
+              <p>Mine your repositories, review candidates, and export a benchmark dataset.</p>
               <div class="code-block">
-                <pre><code>uv run repogauge mine /path/to/repo --out ./out/mine --llm-mode off
-uv run repogauge review ./out/mine/candidates.jsonl --out ./out/review --llm-mode off
-uv run repogauge export ./out/review/reviewed.jsonl --out ./out/export --llm-mode off</code></pre>
+                <pre><code>uv run repogauge mine /path/to/repo
+uv run repogauge review candidates.jsonl
+uv run repogauge export reviewed.jsonl</code></pre>
                 <button
                   class="copy-button"
-                  data-copy="uv run repogauge mine /path/to/repo --out ./out/mine --llm-mode off&#10;uv run repogauge review ./out/mine/candidates.jsonl --out ./out/review --llm-mode off&#10;uv run repogauge export ./out/review/reviewed.jsonl --out ./out/export --llm-mode off"
+                  data-copy="uv run repogauge mine /path/to/repo&#10;uv run repogauge review candidates.jsonl&#10;uv run repogauge export reviewed.jsonl"
                 >
                   Copy
                 </button>
@@ -2158,12 +2578,12 @@ uv run repogauge export ./out/review/reviewed.jsonl --out ./out/export --llm-mod
               <h3>3. Validate, run, analyze</h3>
               <p>Confirm gold solvability, run the matrix, and produce a report that can survive an architecture review.</p>
               <div class="code-block">
-                <pre><code>uv run repogauge eval ./out/export/dataset/dataset.jsonl --gold --out ./out/eval --llm-mode off
-uv run repogauge run examples/matrix.yaml --dataset ./out/eval/dataset.resolved.jsonl --out ./out/run
+                <pre><code>uv run repogauge eval dataset.jsonl --gold
+uv run repogauge run examples/matrix.yaml
 uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
                 <button
                   class="copy-button"
-                  data-copy="uv run repogauge eval ./out/export/dataset/dataset.jsonl --gold --out ./out/eval --llm-mode off&#10;uv run repogauge run examples/matrix.yaml --dataset ./out/eval/dataset.resolved.jsonl --out ./out/run&#10;uv run repogauge analyze ./out/run/&lt;run_id&gt;"
+                  data-copy="uv run repogauge eval dataset.jsonl --gold&#10;uv run repogauge run examples/matrix.yaml&#10;uv run repogauge analyze ./out/run/&lt;run_id&gt;"
                 >
                   Copy
                 </button>
@@ -2173,25 +2593,77 @@ uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
         </div>
       </section>
 
+      <section class="section" id="hosted">
+        <div class="container">
+          <div class="section-heading reveal">
+            <div class="section-heading__copy">
+              <span>Hosted Option</span>
+              <h2>Interested in a hosted platform?</h2>
+              <p>
+                If a managed version would save your team time across multiple repositories,
+                leave your details and what you would need from it. That helps shape the hosted roadmap around real usage.
+              </p>
+            </div>
+          </div>
+
+          <article class="hosted-card reveal">
+            <div class="hosted-card__copy">
+              <h3>Tell us what a managed version would need to do.</h3>
+              <p>
+                Share how you want to run evaluations across your repositories, where spend needs tighter control,
+                and what would make the results easier to act on across the organization.
+              </p>
+              <ul class="hosted-list">
+                <li><strong>1</strong><span>Share the repositories, team shape, and agent stack you care about.</span></li>
+                <li><strong>2</strong><span>Tell us whether you care most about lower spend, regression alerts, or clearer reporting.</span></li>
+                <li><strong>3</strong><span>We can prioritize the hosted roadmap around the jobs teams actually need done.</span></li>
+              </ul>
+            </div>
+
+            <div class="hosted-card__aside">
+              <span class="hosted-kicker">Hosted Interest</span>
+              <h3>Leave your details or book a short intro.</h3>
+              <p>
+                If you already know you would use a hosted version, open the form.
+                If you want a quick conversation first, use the calendar link.
+              </p>
+              <div class="hero__actions">
+                <button class="button button--primary" type="button" data-open-hosted-modal>
+                  Request hosted access
+                </button>
+                <a
+                  class="button button--secondary"
+                  href="https://calendar.app.google/DisJ6wUzn1dKsPrE7"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Book a short intro
+                </a>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section class="section">
         <div class="container">
           <article class="cta-card reveal">
             <span class="mono-label">Outcome</span>
-            <h2>A repo-specific benchmark is a cleaner way to choose coding agents.</h2>
+            <h2>A benchmark built from your repositories is a cleaner way to choose coding agents.</h2>
             <p>
-              It gives you a durable benchmark for your own repository, keeps the judging semantics honest,
-              and surfaces the cost-quality evidence needed to choose coding agents with confidence.
+              It gives you a durable benchmark for your own repositories, keeps comparisons honest,
+              and surfaces the cost and quality evidence needed to choose coding agents with confidence.
             </p>
             <div class="hero__actions">
               <a class="button button--primary" href="#quickstart">Run the quickstart</a>
               <a class="button button--secondary" href="#pipeline">Inspect the workflow</a>
             </div>
             <div class="cta-card__meta">
-              <span class="tag">Local-first</span>
-              <span class="tag">Python-first v1</span>
-              <span class="tag">Official harness</span>
-              <span class="tag">Cost-aware routing</span>
-              <span class="tag">Deterministic artifacts</span>
+              <span class="tag">Lower model spend</span>
+              <span class="tag">Confidence in cheaper models</span>
+              <span class="tag">Cleaner provider decisions</span>
+              <span class="tag">Regression visibility</span>
+              <span class="tag">Shareable benchmark reports</span>
             </div>
           </article>
         </div>
@@ -2204,6 +2676,99 @@ uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
         <div>Designed from the current README and product scope.</div>
       </div>
     </footer>
+
+    <div class="hosted-modal-backdrop" id="hostedModal" aria-hidden="true">
+      <div class="hosted-modal" role="dialog" aria-modal="true" aria-labelledby="hostedModalTitle">
+        <button class="hosted-modal-close" type="button" id="hostedModalClose" aria-label="Close hosted interest form">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </button>
+
+        <div class="hosted-modal-panel" id="hostedStepContact">
+          <h3 id="hostedModalTitle">Tell us what you would want from a hosted RepoGauge.</h3>
+          <p class="hosted-modal-intro">
+            Leave your details and the main thing you would want a hosted version to handle.
+          </p>
+
+          <form class="hosted-form" id="hostedContactForm">
+            <div class="hosted-grid">
+              <div class="hosted-field">
+                <label for="hostedName">Full name</label>
+                <input id="hostedName" name="name" type="text" placeholder="Jane Doe" autocomplete="name" required>
+              </div>
+              <div class="hosted-field">
+                <label for="hostedCompany">Company</label>
+                <input id="hostedCompany" name="company" type="text" placeholder="Acme Inc." autocomplete="organization" required>
+              </div>
+            </div>
+
+            <div class="hosted-grid">
+              <div class="hosted-field">
+                <label for="hostedEmail">Work email</label>
+                <input id="hostedEmail" name="email" type="email" placeholder="jane@acme.com" autocomplete="work email" required>
+              </div>
+              <div class="hosted-field">
+                <label for="hostedRepo">Repo URL</label>
+                <input id="hostedRepo" name="repo_url" type="url" placeholder="https://github.com/acme/app" autocomplete="url">
+              </div>
+            </div>
+
+            <div class="hosted-field">
+              <span class="hosted-field__label">Team size</span>
+              <div class="hosted-qualification-grid">
+                <label class="hosted-pill"><input type="radio" name="team_size" value="1-5"><span>1-5</span></label>
+                <label class="hosted-pill"><input type="radio" name="team_size" value="6-20"><span>6-20</span></label>
+                <label class="hosted-pill"><input type="radio" name="team_size" value="21-50"><span>21-50</span></label>
+                <label class="hosted-pill"><input type="radio" name="team_size" value="51-200"><span>51-200</span></label>
+                <label class="hosted-pill"><input type="radio" name="team_size" value="201-1000"><span>201-1000</span></label>
+                <label class="hosted-pill"><input type="radio" name="team_size" value="1000+"><span>1000+</span></label>
+              </div>
+            </div>
+
+            <div class="hosted-field">
+              <label for="hostedNeeds">What would a hosted version need to solve?</label>
+              <textarea
+                id="hostedNeeds"
+                name="message"
+                placeholder="Examples: recurring benchmark runs, shared dashboards, regression alerts, hosted worker execution, or budget reporting for multiple repos."
+              ></textarea>
+            </div>
+
+            <input
+              type="text"
+              name="website"
+              tabindex="-1"
+              autocomplete="off"
+              class="hosted-hidden"
+              aria-hidden="true"
+            >
+
+            <div class="hosted-meta">
+              <span>One short form</span>
+              <span>Built for teams evaluating multiple repositories</span>
+              <span>Sent through Web3Forms for now</span>
+            </div>
+
+            <div class="hosted-error hosted-hidden" id="hostedContactError" role="alert"></div>
+            <button class="button button--primary" type="submit" id="hostedSubmitButton">Submit interest</button>
+          </form>
+        </div>
+
+        <div class="hosted-success hosted-hidden" id="hostedStepSuccess">
+          <div class="hosted-success__check" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4">
+              <path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </div>
+          <h3>Thanks. We have your interest on file.</h3>
+          <p class="hosted-modal-intro">
+            We will use this to shape the hosted roadmap and follow up with the teams that look like the best fit.
+          </p>
+          <p class="hosted-note">You can close this modal or book a short intro if you want to talk through the hosted use case in more detail.</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -2356,6 +2921,161 @@ uv run repogauge analyze ./out/run/&lt;run_id&gt;</code></pre>
           item.textContent = item.getAttribute("data-countup") + "%";
         }
       });
+
+      const hostedModal = document.getElementById("hostedModal");
+      if (hostedModal) {
+        const WEB3FORMS_ENDPOINT = "https://api.web3forms.com/submit";
+        const WEB3FORMS_ACCESS_KEY = "36680c00-05af-4038-bea0-fb7855eaa38c";
+        const openHostedButtons = Array.from(document.querySelectorAll("[data-open-hosted-modal]"));
+        const hostedModalClose = document.getElementById("hostedModalClose");
+        const hostedStepContact = document.getElementById("hostedStepContact");
+        const hostedStepSuccess = document.getElementById("hostedStepSuccess");
+        const hostedContactForm = document.getElementById("hostedContactForm");
+        const hostedContactError = document.getElementById("hostedContactError");
+        const hostedSubmitButton = document.getElementById("hostedSubmitButton");
+        const hostedName = document.getElementById("hostedName");
+        const hostedCompany = document.getElementById("hostedCompany");
+        const hostedEmail = document.getElementById("hostedEmail");
+        const hostedRepo = document.getElementById("hostedRepo");
+        const hostedNeeds = document.getElementById("hostedNeeds");
+        let lastFocusedElement = null;
+        let previousBodyOverflow = "";
+
+        const setHostedError = (node, message) => {
+          if (!node) {
+            return;
+          }
+
+          if (message) {
+            node.textContent = message;
+            node.classList.remove("hosted-hidden");
+          } else {
+            node.textContent = "";
+            node.classList.add("hosted-hidden");
+          }
+        };
+
+        const showHostedStep = (step) => {
+          const showContact = step === "contact";
+          hostedStepContact.classList.toggle("hosted-hidden", !showContact);
+          hostedStepSuccess.classList.toggle("hosted-hidden", showContact);
+        };
+
+        const resetHostedFlow = () => {
+          hostedContactForm.reset();
+          setHostedError(hostedContactError, "");
+          hostedSubmitButton.disabled = false;
+          hostedSubmitButton.textContent = "Submit interest";
+          showHostedStep("contact");
+        };
+
+        const openHostedModal = () => {
+          lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          previousBodyOverflow = document.body.style.overflow;
+          document.body.style.overflow = "hidden";
+          hostedModal.classList.add("visible");
+          hostedModal.setAttribute("aria-hidden", "false");
+          resetHostedFlow();
+          window.setTimeout(() => {
+            hostedName.focus();
+          }, 40);
+        };
+
+        const closeHostedModal = () => {
+          hostedModal.classList.remove("visible");
+          hostedModal.setAttribute("aria-hidden", "true");
+          document.body.style.overflow = previousBodyOverflow;
+          if (lastFocusedElement) {
+            lastFocusedElement.focus();
+          }
+        };
+
+        const submitHostedInterest = async () => {
+          const contactData = new FormData(hostedContactForm);
+          if ((contactData.get("website") || "").toString().trim()) {
+            showHostedStep("success");
+            return;
+          }
+
+          if (!hostedContactForm.reportValidity()) {
+            return;
+          }
+
+          hostedSubmitButton.disabled = true;
+          hostedSubmitButton.textContent = "Submitting...";
+
+          const payload = new FormData();
+          payload.append("access_key", WEB3FORMS_ACCESS_KEY);
+          payload.append("subject", "RepoGauge hosted interest");
+          payload.append("from_name", (contactData.get("name") || "").toString().trim());
+          payload.append("email", (contactData.get("email") || "").toString().trim());
+          payload.append("name", (contactData.get("name") || "").toString().trim());
+          payload.append("company", (contactData.get("company") || "").toString().trim());
+          payload.append("repo_url", (contactData.get("repo_url") || "").toString().trim());
+          payload.append("message", (contactData.get("message") || "").toString().trim() || "No additional hosted requirements provided.");
+          payload.append("team_size", (contactData.get("team_size") || "Not provided").toString());
+          payload.append("source", "RepoGauge landing page");
+          payload.append("page_url", window.location.href);
+
+          try {
+            const response = await fetch(WEB3FORMS_ENDPOINT, {
+              method: "POST",
+              headers: {
+                Accept: "application/json"
+              },
+              body: payload
+            });
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+              throw new Error(result.message || "Submission failed");
+            }
+
+            hostedSubmitButton.disabled = false;
+            hostedSubmitButton.textContent = "Submit interest";
+            showHostedStep("success");
+          } catch (error) {
+            hostedSubmitButton.disabled = false;
+            hostedSubmitButton.textContent = "Submit interest";
+            setHostedError(
+              hostedContactError,
+              "We could not submit the form just now. Use the calendar link or try again in a minute."
+            );
+          }
+        };
+
+        openHostedButtons.forEach((button) => {
+          button.addEventListener("click", openHostedModal);
+        });
+
+        hostedModalClose.addEventListener("click", closeHostedModal);
+        hostedModal.addEventListener("click", (event) => {
+          if (event.target === hostedModal) {
+            closeHostedModal();
+          }
+        });
+
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && hostedModal.classList.contains("visible")) {
+            closeHostedModal();
+          }
+        });
+
+        hostedContactForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          setHostedError(hostedContactError, "");
+          await submitHostedInterest();
+        });
+
+        [hostedName, hostedCompany, hostedEmail, hostedRepo, hostedNeeds].forEach((input) => {
+          if (!input) {
+            return;
+          }
+          input.addEventListener("input", () => {
+            setHostedError(hostedContactError, "");
+          });
+        });
+      }
     })();
   </script>
 </body>
