@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .features import build_task_feature_bundle
+from .pricing import estimate_public_api_cost_usd, normalize_model_name, read_cost_usd
 
 
 @dataclass(frozen=True)
@@ -45,17 +46,6 @@ class ResolutionMetrics:
     tool_calls_per_resolved_issue: float | None
 
 
-MODEL_TOKEN_PRICING_USD_PER_MILLION: dict[str, dict[str, float]] = {
-    # OpenAI standard pricing, captured from the public pricing pages on 2026-04-16.
-    "gpt-5.4": {"input": 2.50, "cached_input": 0.25, "output": 15.00},
-    "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.50},
-    "gpt-5.4-nano": {"input": 0.20, "cached_input": 0.02, "output": 1.25},
-    "gpt-5": {"input": 1.25, "cached_input": 0.125, "output": 10.00},
-    "gpt-5-mini": {"input": 0.25, "cached_input": 0.025, "output": 2.00},
-    "gpt-5-nano": {"input": 0.05, "cached_input": 0.005, "output": 0.40},
-}
-
-
 def _coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -87,23 +77,11 @@ def _coerce_non_negative_float(value: Any) -> float:
 
 
 def _read_row_cost(row: Mapping[str, Any]) -> float | None:
-    cost = row.get("cost", {})
-    if not isinstance(cost, Mapping):
-        return None
-    for key in ("total_cost", "usd", "value", "amount", "total_usd"):
-        if key in cost:
-            cost_value = cost.get(key)
-            if cost_value is None:
-                continue
-            try:
-                return float(cost_value)
-            except (TypeError, ValueError):
-                continue
-    return None
+    return read_cost_usd(row.get("cost"))
 
 
 def _normalize_model_name(value: Any) -> str:
-    return _coerce_str(value).strip().lower().replace("_", "-")
+    return normalize_model_name(_coerce_str(value))
 
 
 def _read_model_name(row: Mapping[str, Any]) -> str:
@@ -125,22 +103,10 @@ def _read_model_name(row: Mapping[str, Any]) -> str:
 
 
 def _estimate_row_cost_from_tokens(row: Mapping[str, Any]) -> float | None:
-    model_name = _read_model_name(row)
-    pricing = MODEL_TOKEN_PRICING_USD_PER_MILLION.get(model_name)
-    if pricing is None:
-        return None
-
-    input_tokens, output_tokens, _ = _read_usage_tokens(row)
-    cached_input_tokens = min(input_tokens, _read_cached_input_tokens(row))
-    uncached_input_tokens = max(0, input_tokens - cached_input_tokens)
-    if input_tokens <= 0 and output_tokens <= 0:
-        return None
-
-    return (
-        (uncached_input_tokens * pricing["input"])
-        + (cached_input_tokens * pricing["cached_input"])
-        + (output_tokens * pricing["output"])
-    ) / 1_000_000
+    return estimate_public_api_cost_usd(
+        model_name=_read_model_name(row),
+        usage=_usage_mapping(row),
+    )
 
 
 def _read_group_value(row: Mapping[str, Any], field: str) -> str:
@@ -266,10 +232,10 @@ def _read_tool_call_count_from_mapping(mapping: Mapping[str, Any]) -> int | None
     return None
 
 
-def _event_is_tool_call(payload: Mapping[str, Any]) -> bool:
+def _tool_call_count_in_event(payload: Mapping[str, Any]) -> int:
     payload_type = _coerce_str(payload.get("type"))
     if payload_type in {"tool_call", "function_call"}:
-        return True
+        return 1
 
     item = payload.get("item")
     if isinstance(item, Mapping):
@@ -279,13 +245,25 @@ def _event_is_tool_call(payload: Mapping[str, Any]) -> bool:
             "function_call",
             "tool_call",
         }:
-            return True
+            return 1
         if payload_type == "response.output_item.added" and item_type in {
             "function_call",
             "tool_call",
         }:
-            return True
-    return False
+            return 1
+
+    message = payload.get("message")
+    if isinstance(message, Mapping):
+        content = message.get("content")
+        if isinstance(content, list):
+            return sum(
+                1
+                for block in content
+                if isinstance(block, Mapping)
+                and _coerce_str(block.get("type"))
+                in {"tool_use", "server_tool_use", "tool_call", "function_call"}
+            )
+    return 0
 
 
 def _read_tool_call_count(row: Mapping[str, Any]) -> int:
@@ -301,9 +279,9 @@ def _read_tool_call_count(row: Mapping[str, Any]) -> int:
         telemetry = metadata.get("telemetry")
         if isinstance(telemetry, list):
             telemetry_count = sum(
-                1
+                _tool_call_count_in_event(event)
                 for event in telemetry
-                if isinstance(event, Mapping) and _event_is_tool_call(event)
+                if isinstance(event, Mapping)
             )
             if telemetry_count:
                 return telemetry_count
@@ -314,8 +292,8 @@ def _read_tool_call_count(row: Mapping[str, Any]) -> int:
     count = 0
     for line in raw_output.splitlines():
         payload = _safe_json_parse(line.strip())
-        if isinstance(payload, Mapping) and _event_is_tool_call(payload):
-            count += 1
+        if isinstance(payload, Mapping):
+            count += _tool_call_count_in_event(payload)
     return count
 
 
@@ -940,6 +918,40 @@ def load_attempt_rows(path: Path) -> list[dict[str, Any]]:
 def load_instance_result_rows(path: Path) -> list[dict[str, Any]]:
     """Load judge instance results from JSONL."""
     return load_jsonl_rows(path)
+
+
+def build_predictions_from_attempts(
+    attempts_path: Path,
+    predictions_path: Path,
+) -> int:
+    """Convert a run's ``attempts.jsonl`` into SWE-bench ``predictions.jsonl``.
+
+    Skips attempts without a ``model_patch`` (failed/timed-out attempts produce
+    no patch to evaluate). Returns the number of prediction rows written.
+    """
+    attempts = load_attempt_rows(attempts_path)
+    predictions_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    with predictions_path.open("w", encoding="utf-8") as out:
+        for row in attempts:
+            patch = row.get("model_patch")
+            instance_id = row.get("instance_id")
+            solver_id = row.get("solver_id")
+            if not patch or not instance_id or not solver_id:
+                continue
+            out.write(
+                json.dumps(
+                    {
+                        "instance_id": instance_id,
+                        "model_patch": patch,
+                        "model_name_or_path": solver_id,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            written += 1
+    return written
 
 
 def _resolution_summary_to_dict(

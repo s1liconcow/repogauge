@@ -390,9 +390,7 @@ def _dataset_repo_hint(dataset_path: Path) -> str | None:
 def _adapter_repo_hint(adapter_path: Path) -> str | None:
     """Read a generated adapter and return its declared repo slug."""
     try:
-        match = _ADAPTER_REPO_PATTERN.search(
-            adapter_path.read_text(encoding="utf-8")
-        )
+        match = _ADAPTER_REPO_PATTERN.search(adapter_path.read_text(encoding="utf-8"))
     except OSError:
         return None
     if match is None:
@@ -1721,9 +1719,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 manifest.mark_step(
                     "inspect",
                     ManifestStepStatus.FAILED,
-                    ended_at=datetime.now(timezone.utc)
-                    .replace(tzinfo=None)
-                    .isoformat()
+                    ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     + "Z",
                 )
                 manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
@@ -1738,9 +1734,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 manifest.mark_step(
                     "finish",
                     ManifestStepStatus.FAILED,
-                    ended_at=datetime.now(timezone.utc)
-                    .replace(tzinfo=None)
-                    .isoformat()
+                    ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     + "Z",
                 )
                 manifest.write(manifest_path)
@@ -1791,8 +1785,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     "status": manifest.status,
                     "timestamp": manifest.ended_at,
                     "error": (
-                        f"instance_results artifact not found in {analyze_root};"
-                        f" {hint}"
+                        f"instance_results artifact not found in {analyze_root}; {hint}"
                     ),
                 },
                 events_path,

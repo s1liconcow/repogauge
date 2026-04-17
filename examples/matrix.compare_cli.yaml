@@ -2,9 +2,6 @@ run_id: repogauge-cli-compare
 dataset:
   path: ../out/eval/dataset.resolved.jsonl
 providers:
-  codex:
-    kind: codex_cli
-    command: codex
   claude:
     kind: claude_cli
     command: claude
@@ -12,15 +9,6 @@ execution:
   repeats: 1
   seed: 13
 solvers:
-  - id: codex-cli-mini
-    provider: codex
-    adapter: codex_cli
-    model: gpt-5.4-mini
-    timeout_seconds: 300
-    prompt_policy:
-      template: concise
-    tool_policy:
-      safe: true
   - id: claude-cli-sonnet
     provider: claude
     adapter: claude_cli

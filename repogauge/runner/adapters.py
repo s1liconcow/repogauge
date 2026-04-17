@@ -18,10 +18,12 @@ import urllib.parse
 import urllib.request
 from abc import ABC
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 from repogauge.exec import run_command
 
+from .pricing import estimate_public_api_cost_usd
 from .scheduler import (
     SolverAdapter,
     SolverAdapterRequest,
@@ -441,6 +443,24 @@ def _parse_usage_cost_with_source(
         cost_source = "response.cost"
 
     return dict(usage), usage_source, dict(cost), cost_source
+
+
+def _ensure_public_api_estimated_cost(
+    *,
+    model: str,
+    usage: Mapping[str, Any],
+    usage_source: str,
+    cost: Mapping[str, Any],
+    cost_source: str,
+) -> tuple[dict[str, Any], str]:
+    if cost:
+        return dict(cost), cost_source
+    if not usage or not usage_source:
+        return {}, cost_source
+    estimated = estimate_public_api_cost_usd(model_name=model, usage=usage)
+    if estimated is None:
+        return {}, cost_source
+    return {"total_cost_usd": estimated}, "public_api_pricing"
 
 
 def _post_json(
@@ -1135,6 +1155,14 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
                     cost_source = "codex_cli.event.cost"
             text = _extract_structured_output_text(output)
 
+        cost, cost_source = _ensure_public_api_estimated_cost(
+            model=self.model,
+            usage=usage,
+            usage_source=usage_source,
+            cost=cost,
+            cost_source=cost_source,
+        )
+
         metadata = {"telemetry": telemetry_events}
         if command_result.timed_out:
             failure_code = _classify_codex_cli_timeout(
@@ -1198,6 +1226,29 @@ class CodexCLIAdapter(_BaseConcreteSolverAdapter):
         )
 
 
+def _claude_cli_child_env() -> dict[str, str] | None:
+    """Return the env to run ``claude`` with, or ``None`` to inherit as-is.
+
+    When the user has a local ``~/.claude/.credentials.json`` (subscription
+    OAuth login), strip ``ANTHROPIC_API_KEY`` / ``ANTHROPIC_AUTH_TOKEN`` from
+    the child environment so the CLI uses that login instead of the env key.
+    Otherwise leave the env untouched so the API-key fallback still works.
+    """
+    credentials = Path.home() / ".claude" / ".credentials.json"
+    if not credentials.exists():
+        return None
+    has_key = "ANTHROPIC_API_KEY" in os.environ
+    has_token = "ANTHROPIC_AUTH_TOKEN" in os.environ
+    if not (has_key or has_token):
+        return None
+    scrubbed = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+    }
+    return scrubbed
+
+
 class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
     """Claude CLI adapter driven via non-interactive stream-json output.
 
@@ -1252,13 +1303,7 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
                 "--dangerously-skip-permissions",
             ]
         )
-        command_env = None
-        if request.workspace_path is not None:
-            claude_home_root = request.workspace_path.parent / "claude-home"
-            command_env = dict(os.environ)
-            command_env["HOME"] = str(claude_home_root)
-            command_env["XDG_CONFIG_HOME"] = str(claude_home_root / ".config")
-            command_env["CLAUDE_CONFIG_DIR"] = str(claude_home_root / ".claude")
+        command_env = _claude_cli_child_env()
         command_result = run_command(
             command,
             cwd=str(request.workspace_path) if request.workspace_path else None,
@@ -1290,6 +1335,9 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
                 if "cost_usd" in event and event["cost_usd"] is not None:
                     cost = {"total_cost_usd": event["cost_usd"]}
                     cost_source = "claude_cli.event.cost_usd"
+                elif "total_cost_usd" in event and event["total_cost_usd"] is not None:
+                    cost = {"total_cost_usd": event["total_cost_usd"]}
+                    cost_source = "claude_cli.event.total_cost_usd"
                 if event.get("type") == "result" and isinstance(
                     event.get("result"), str
                 ):
@@ -1298,6 +1346,14 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
             text = _extract_structured_output_text(output) or result_text
         else:
             text = ""
+
+        cost, cost_source = _ensure_public_api_estimated_cost(
+            model=self.model,
+            usage=usage,
+            usage_source=usage_source,
+            cost=cost,
+            cost_source=cost_source,
+        )
 
         metadata = {"telemetry": telemetry_events}
         if command_result.timed_out:

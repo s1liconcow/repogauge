@@ -2,9 +2,52 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from repogauge.runner.analyze import join_attempt_rows, summarize_attempt_metrics
+from repogauge.runner.analyze import (
+    build_predictions_from_attempts,
+    join_attempt_rows,
+    summarize_attempt_metrics,
+)
+
+
+def test_build_predictions_from_attempts_skips_empty_patches(tmp_path):
+    attempts = [
+        {
+            "instance_id": "inst-1",
+            "solver_id": "solver-a",
+            "model_patch": "diff --git a/x b/x\n+ok\n",
+        },
+        {"instance_id": "inst-2", "solver_id": "solver-a", "model_patch": None},
+        {"instance_id": "inst-3", "solver_id": "solver-a", "model_patch": ""},
+        {
+            "instance_id": "inst-4",
+            "solver_id": "solver-b",
+            "model_patch": "diff --git a/y b/y\n+ok\n",
+        },
+    ]
+    attempts_path = tmp_path / "attempts.jsonl"
+    attempts_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in attempts), encoding="utf-8"
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+
+    written = build_predictions_from_attempts(attempts_path, predictions_path)
+
+    assert written == 2
+    rows = [
+        json.loads(line)
+        for line in predictions_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [row["instance_id"] for row in rows] == ["inst-1", "inst-4"]
+    assert all(
+        set(row.keys()) == {"instance_id", "model_patch", "model_name_or_path"}
+        for row in rows
+    )
+    assert rows[0]["model_name_or_path"] == "solver-a"
 
 
 def _attempt_row(
@@ -289,3 +332,87 @@ def test_join_attempt_rows_estimates_cost_from_tokens_when_explicit_cost_missing
     )
     assert summaries[0].total_cost_usd == pytest.approx(0.084, rel=1e-9)
     assert summaries[0].cost_per_resolved_issue == pytest.approx(0.084, rel=1e-9)
+
+
+def test_join_attempt_rows_reads_total_cost_usd_field() -> None:
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "duration_ms": 100,
+            "cost": {"total_cost_usd": 0.41},
+        }
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True)
+    ]
+
+    joined = join_attempt_rows(attempts, instance_results)
+
+    assert joined[0]["attempt_cost_source"] == "explicit"
+    assert joined[0]["attempt_cost_usd"] == pytest.approx(0.41, rel=1e-9)
+
+
+def test_join_attempt_rows_estimates_claude_cost_from_tokens_when_missing() -> None:
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "duration_ms": 100,
+            "usage": {
+                "input_tokens": 15,
+                "output_tokens": 11153,
+                "cache_read_input_tokens": 424394,
+                "cache_creation_input_tokens": 30589,
+                "cache_creation": {
+                    "ephemeral_1h_input_tokens": 30589,
+                    "ephemeral_5m_input_tokens": 0,
+                },
+            },
+            "metadata": {"model": "claude-sonnet-4-6"},
+        }
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True)
+    ]
+
+    joined = join_attempt_rows(attempts, instance_results)
+
+    assert joined[0]["attempt_cost_source"] == "estimated_from_tokens"
+    assert joined[0]["attempt_cost_usd"] == pytest.approx(0.4781922, rel=1e-9)
+
+
+def test_summarize_attempt_metrics_counts_claude_tool_use_blocks() -> None:
+    attempts = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "duration_ms": 100,
+            "cost": {"total_cost": 1.0},
+            "metadata": {
+                "telemetry": [
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [
+                                {"type": "text", "text": "working"},
+                                {"type": "tool_use", "name": "Read"},
+                                {"type": "tool_use", "name": "Bash"},
+                            ]
+                        },
+                    }
+                ]
+            },
+        }
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="resolved", resolved=True)
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+    )
+
+    assert summaries[0].total_tool_calls == 2
+    assert summaries[0].avg_tool_calls_per_attempt == 2.0

@@ -1226,6 +1226,7 @@ solvers:
             instance_results_path = eval_out / "instance_results.jsonl"
 
             with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+
                 def _fake_eval(**kwargs):
                     eval_out.mkdir(parents=True, exist_ok=True)
                     instance_results_path.write_text(

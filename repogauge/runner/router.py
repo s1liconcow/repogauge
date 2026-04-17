@@ -9,6 +9,8 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
+from .pricing import read_cost_usd
+
 from repogauge.runner.features import build_task_feature_bundle
 
 ROUTER_MODEL_VERSION = "router-model-v1"
@@ -97,11 +99,9 @@ def _coerce_mapping(value: Any) -> dict[str, Any]:
 
 
 def _read_row_cost(row: Mapping[str, Any]) -> float:
-    cost = row.get("cost", {})
-    if isinstance(cost, Mapping):
-        for key in ("total_cost", "usd", "value", "amount", "total_usd"):
-            if key in cost:
-                return _coerce_float(cost.get(key))
+    explicit = read_cost_usd(row.get("cost"))
+    if explicit is not None:
+        return explicit
     return _coerce_float(row.get("attempt_cost_usd"))
 
 

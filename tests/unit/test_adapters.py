@@ -307,6 +307,44 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.raw_output, output)
         self.assertEqual(result.stderr_output, "boom")
 
+    def test_codex_cli_adapter_estimates_cost_from_public_pricing(self) -> None:
+        provider = _provider_for_command("/bin/echo")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        request = adapter.prepare_request(
+            job=_job(job_id="run-1:repo__sample-1:solver-a:4"),
+            attempt_id="run-1:repo__sample-1:solver-a:4:attempt-1",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+            },
+        )
+        output = (
+            '{"usage":{"input_tokens":1000,"output_tokens":100,'
+            '"cached_input_tokens":200}}\n'
+            '{"message":{"content":"diff --git a/x b/x\\n+ok"}}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo", "exec", "--json", "--model", "gpt-5.4"],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.cost_source, "public_api_pricing")
+        self.assertEqual(result.cost, {"total_cost_usd": 0.00355})
+
     def test_codex_cli_adapter_reclassifies_infra_timeouts_as_failed(self) -> None:
         provider = _provider_for_command("/bin/echo")
         adapter = CodexCLIAdapter(
@@ -600,17 +638,11 @@ class TestAdapters(unittest.TestCase):
             result = adapter.execute_attempt(request)
 
         self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
-        self.assertEqual(
-            result.usage_source, "claude_cli.event.message.usage"
-        )
+        self.assertEqual(result.usage_source, "claude_cli.event.message.usage")
         self.assertEqual(result.cost_source, "claude_cli.event.cost_usd")
-        self.assertEqual(
-            result.usage, {"input_tokens": 10, "output_tokens": 3}
-        )
+        self.assertEqual(result.usage, {"input_tokens": 10, "output_tokens": 3})
         self.assertEqual(result.cost, {"total_cost_usd": 0.12})
-        self.assertEqual(
-            (result.model_patch or "").strip(), "diff --git a/x b/x\n+ok"
-        )
+        self.assertEqual((result.model_patch or "").strip(), "diff --git a/x b/x\n+ok")
 
     def test_claude_cli_adapter_preserves_usage_and_cost_on_failure(
         self,
@@ -647,6 +679,65 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.raw_output, output)
         self.assertEqual(result.stderr_output, "boom")
 
+    def test_claude_cli_adapter_reads_total_cost_usd_from_result_event(self) -> None:
+        provider = self._claude_provider("/bin/echo")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        request = self._claude_request(adapter)
+        output = (
+            '{"type":"assistant","message":{"usage":{"input_tokens":10,"output_tokens":3}}}\n'
+            '{"type":"result","subtype":"success","total_cost_usd":0.41018495,'
+            '"result":"diff --git a/x b/x\\n+ok"}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo"],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.cost_source, "claude_cli.event.total_cost_usd")
+        self.assertEqual(result.cost, {"total_cost_usd": 0.41018495})
+
+    def test_claude_cli_adapter_estimates_cost_from_public_pricing(self) -> None:
+        provider = self._claude_provider("/bin/echo")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        request = self._claude_request(adapter)
+        output = (
+            '{"type":"assistant","message":{"usage":{"input_tokens":15,'
+            '"output_tokens":11153,"cache_read_input_tokens":424394,'
+            '"cache_creation_input_tokens":30589,'
+            '"cache_creation":{"ephemeral_1h_input_tokens":30589,'
+            '"ephemeral_5m_input_tokens":0}}}}\n'
+            '{"type":"result","subtype":"success","result":"diff --git a/x b/x\\n+ok"}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo"],
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.cost_source, "public_api_pricing")
+        self.assertAlmostEqual(result.cost["total_cost_usd"], 0.4781922)
+
     def test_claude_cli_adapter_classifies_wall_clock_timeout(self) -> None:
         provider = self._claude_provider("/bin/echo")
         adapter = ClaudeCLIAdapter(
@@ -669,9 +760,7 @@ class TestAdapters(unittest.TestCase):
             result = adapter.execute_attempt(request)
 
         self.assertEqual(result.status, SolverAttemptState.TIMED_OUT)
-        self.assertEqual(
-            result.metadata["timeout_classification"], "wall_clock"
-        )
+        self.assertEqual(result.metadata["timeout_classification"], "wall_clock")
 
     def test_claude_cli_adapter_targets_attempt_workspace(self) -> None:
         provider = self._claude_provider("claude")
@@ -701,17 +790,85 @@ class TestAdapters(unittest.TestCase):
         self.assertIn("--output-format", command)
         self.assertIn("stream-json", command)
         self.assertIn("--dangerously-skip-permissions", command)
-        self.assertEqual(
-            command[command.index("--model") + 1], "claude-sonnet-4-6"
-        )
+        self.assertEqual(command[command.index("--model") + 1], "claude-sonnet-4-6")
         self.assertEqual(kwargs["cwd"], workspace)
-        self.assertEqual(
-            kwargs["env"]["HOME"], str(Path(workspace).parent / "claude-home")
+
+    def test_claude_cli_adapter_inherits_env_without_local_credentials(
+        self,
+    ) -> None:
+        provider = self._claude_provider("claude")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
         )
-        self.assertEqual(
-            kwargs["env"]["CLAUDE_CONFIG_DIR"],
-            str(Path(workspace).parent / "claude-home" / ".claude"),
+        request = self._claude_request(adapter)
+        command_result = CommandResult(
+            command=[],
+            returncode=0,
+            stdout='{"type":"result","result":"ok"}\n',
+            stderr="",
         )
+        with tempfile.TemporaryDirectory() as fake_home:
+            with (
+                mock.patch.dict(
+                    "os.environ",
+                    {"HOME": fake_home, "ANTHROPIC_API_KEY": "sk-env"},
+                    clear=False,
+                ),
+                mock.patch(
+                    "repogauge.runner.adapters.run_command",
+                    return_value=command_result,
+                ) as mock_run_command,
+            ):
+                adapter.execute_attempt(request)
+
+        self.assertIsNone(mock_run_command.call_args.kwargs["env"])
+
+    def test_claude_cli_adapter_scrubs_api_key_when_local_creds_exist(
+        self,
+    ) -> None:
+        provider = self._claude_provider("claude")
+        adapter = ClaudeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="claude",
+            provider_config=provider.config,
+            behavior={"model": "claude-sonnet-4-6"},
+        )
+        request = self._claude_request(adapter)
+        command_result = CommandResult(
+            command=[],
+            returncode=0,
+            stdout='{"type":"result","result":"ok"}\n',
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as fake_home:
+            claude_dir = Path(fake_home) / ".claude"
+            claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
+            with (
+                mock.patch.dict(
+                    "os.environ",
+                    {
+                        "HOME": fake_home,
+                        "ANTHROPIC_API_KEY": "sk-env",
+                        "ANTHROPIC_AUTH_TOKEN": "tok-env",
+                    },
+                    clear=False,
+                ),
+                mock.patch(
+                    "repogauge.runner.adapters.run_command",
+                    return_value=command_result,
+                ) as mock_run_command,
+            ):
+                adapter.execute_attempt(request)
+
+        env = mock_run_command.call_args.kwargs["env"]
+        self.assertIsNotNone(env)
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
+        self.assertEqual(env["HOME"], fake_home)
 
     def test_claude_cli_adapter_requires_command(self) -> None:
         with self.assertRaises(SolverAdapterError):
