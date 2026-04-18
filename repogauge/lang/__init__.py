@@ -90,13 +90,17 @@ def _store_adapter(adapter: LanguageAdapter) -> None:
 def _register_builtin_adapters() -> None:
     """Register built-in adapters once.
 
-    Concrete adapters are added in later migration beads. Keeping the hook
-    explicit avoids import-time discovery and the circular imports it causes.
+    Keeping the hook explicit avoids import-time discovery and the circular
+    imports it causes.
     """
 
     global _BUILTINS_REGISTERED
     if _BUILTINS_REGISTERED:
         return
+    from .python import PythonAdapter
+
+    if not any(_adapter_name(existing) == "python" for existing in _REGISTERED_ADAPTERS):
+        _store_adapter(PythonAdapter())
     _BUILTINS_REGISTERED = True
 
 
@@ -112,7 +116,7 @@ def iter_adapters() -> Iterable[LanguageAdapter]:
 
 def find_adapter(name: str) -> LanguageAdapter:
     _register_builtin_adapters()
-    normalized = name.strip()
+    normalized = name.strip().lower()
     for adapter in _sorted_adapters():
         if _adapter_name(adapter) == normalized:
             return adapter

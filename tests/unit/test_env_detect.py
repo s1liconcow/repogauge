@@ -1,4 +1,5 @@
 from repogauge.validation.env_detect import build_environment_plan
+from repogauge.lang.python import _choose_python_version
 
 
 def test_build_environment_plan_prefers_poetry_and_pytest() -> None:
@@ -15,6 +16,8 @@ def test_build_environment_plan_prefers_poetry_and_pytest() -> None:
     plan = build_environment_plan(profile)
 
     assert plan.python_version == "3.11"
+    assert plan.language == "python"
+    assert plan.runtime_version == "3.11"
     assert plan.install == ["poetry install"]
     assert plan.pre_install == []
     assert plan.build == []
@@ -39,6 +42,8 @@ def test_build_environment_plan_selects_setuptools_without_pytest_dependency() -
     plan = build_environment_plan(profile)
 
     assert plan.python_version == "3.10"
+    assert plan.language == "python"
+    assert plan.runtime_version == "3.10"
     assert plan.install == ["pip install -e ."]
     assert plan.test_cmd_base == "python -m unittest"
     assert plan.strategy_name == "setuptools:unittest"
@@ -60,6 +65,8 @@ def test_build_environment_plan_selects_first_sorted_requirements_file() -> None
     plan = build_environment_plan(profile)
 
     assert plan.python_version == "3.12"
+    assert plan.language == "python"
+    assert plan.runtime_version == "3.12"
     assert plan.install == ["pip install -r requirements-dev.txt", "pip install pytest"]
     assert plan.strategy_name == "requirements:pytest-default"
     assert plan.test_cmd_base == "python -m pytest"
@@ -80,6 +87,15 @@ def test_build_environment_plan_chooses_minimum_python_version_on_conflict() -> 
     assert "python_version:conflict" in plan.provenance
     assert "python_version:chose-minimum" in plan.provenance
     assert plan.confidence < 1.0
+
+
+def test_choose_python_version_is_available_from_lang_module() -> None:
+    provenance: list[str] = []
+    version, confidence = _choose_python_version(["3.11", "3.10"], provenance)
+
+    assert version == "3.10"
+    assert confidence == 0.6
+    assert "python_version:conflict" in provenance
 
 
 def test_build_environment_plan_augments_uv_sync_for_pytest_groups() -> None:
