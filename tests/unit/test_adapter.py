@@ -1,10 +1,12 @@
 """Tests for adapter/spec generation (bead q5b)."""
 
 import json
+import importlib
 import importlib.util
 from pathlib import Path
 from inspect import isfunction
 
+from repogauge.lang import DetectionResult, FileRoleRules, register_adapter
 from repogauge.export.adapter import build_adapter_spec, generate_adapter
 from repogauge.parsers.junit import parse_repogauge_junit
 
@@ -135,6 +137,103 @@ class TestGenerateAdapter:
         assert mod.MAP_REPO_TO_PARSER["org/my-repo.v2"] is parse_repogauge_junit
         assert (
             mod.MAP_REPO_VERSION_TO_SPECS["org/my-repo.v2"]["v1"]["parser"] == "junit"
+        )
+
+    def test_generate_adapter_uses_language_adapter_template_vars(
+        self, tmp_path, monkeypatch
+    ):
+        parser_module = tmp_path / "custom_parser.py"
+        parser_module.write_text(
+            "def parse_custom(report, test_spec=None):\n"
+            "    return {'parsed': True}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+
+        class CustomAdapter:
+            def name(self) -> str:
+                return "custom"
+
+            def detect(self, repo_root: Path) -> DetectionResult:
+                return DetectionResult(language="custom", confidence=1.0, signals=[])
+
+            def inspect(self, repo_root: Path) -> dict[str, object]:
+                return {"language": "custom"}
+
+            def build_env_plan(self, profile: dict[str, object]) -> object:
+                return {"language": "custom"}
+
+            def parse_test_output(
+                self, report: object, test_spec: object | None
+            ) -> dict[str, str]:
+                return {}
+
+            def file_role_rules(self):
+                return FileRoleRules(set(), [], set(), set(), set())
+
+            def harness_template_vars(self, spec: dict[str, object]) -> dict[str, object]:
+                return {
+                    "parser_import_module": "custom_parser",
+                    "parser_import_name": "parse_custom",
+                    "parser_name": "custom",
+                    "ext": "go",
+                    "install_str_join": " && ",
+                }
+
+            def signature_labels(self, profile: dict[str, object]) -> dict[str, str]:
+                return {
+                    "runtime_label": "custom",
+                    "test_label": "custom",
+                    "package_label": "custom",
+                }
+
+            def dependency_signature_inputs(
+                self, repo_root: Path, profile: dict[str, object]
+            ) -> list[str]:
+                return ["custom"]
+
+            def env_overrides(self, worktree: Path) -> dict[str, str]:
+                return {}
+
+            def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+                return [[test_cmd_base]]
+
+            def test_report_filename(self) -> str | None:
+                return None
+
+            def test_report_glob(self) -> str | None:
+                return None
+
+        register_adapter(CustomAdapter())
+
+        plan = {
+            "language": "custom",
+            "python_version": "3.11",
+            "runtime_version": "1.0",
+            "install": ["uv sync", "go test"],
+            "test_cmd_base": "go test ./...",
+            "version": "v9",
+        }
+        result = generate_adapter("org/custom-repo", plan, out_root=tmp_path)
+
+        spec = json.loads(Path(result["specs_path"]).read_text())
+        assert spec["parser"] == "custom"
+        assert spec["ext"] == "go"
+        assert spec["install_str_join"] == " && "
+
+        mod_spec = importlib.util.spec_from_file_location(
+            "custom_adapter_test", Path(result["adapter_path"])
+        )
+        mod = importlib.util.module_from_spec(mod_spec)
+        mod_spec.loader.exec_module(mod)
+
+        custom_parser = importlib.import_module("custom_parser")
+        assert mod.PARSER == "custom"
+        assert mod.MAP_REPO_TO_EXT["org/custom-repo"] == "go"
+        assert mod.MAP_REPO_TO_PARSER["org/custom-repo"] is custom_parser.parse_custom
+        assert (
+            mod.MAP_REPO_VERSION_TO_SPECS["org/custom-repo"]["v9"]["install"]
+            == "uv sync && go test"
         )
 
     def test_generation_is_deterministic(self, tmp_path):

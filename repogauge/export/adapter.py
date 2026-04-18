@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
+
+from repogauge.lang import find_adapter
 
 
 # ---------------------------------------------------------------------------
@@ -47,8 +49,7 @@ def build_adapter_spec(
     build = environment_plan.get("build", [])
     test_cmd_base = environment_plan.get("test_cmd_base", "python -m pytest")
     strategy_name = environment_plan.get("strategy_name", "")
-
-    return {
+    spec = {
         "repo": repo_name,
         "version": str(environment_plan.get("version", "0.0.0")),
         "language": language,
@@ -64,6 +65,38 @@ def build_adapter_spec(
         "module_name": _safe_module_name(repo_name),
     }
 
+    adapter = find_adapter(language)
+    template_vars = adapter.harness_template_vars(spec)
+    if not isinstance(template_vars, Mapping):
+        raise TypeError("language adapter harness_template_vars() must return a mapping")
+
+    parser_name = str(template_vars.get("parser_name", spec["parser"]) or spec["parser"])
+    parser_import = str(template_vars.get("parser_import", "") or "")
+    parser_import_module = str(template_vars.get("parser_import_module", "") or "")
+    parser_import_name = str(template_vars.get("parser_import_name", "") or "")
+    if parser_import and (not parser_import_module or not parser_import_name):
+        if "." in parser_import:
+            parser_import_module, parser_import_name = parser_import.rsplit(".", 1)
+        else:
+            parser_import_name = parser_import
+    if not parser_import and parser_import_module and parser_import_name:
+        parser_import = f"{parser_import_module}.{parser_import_name}"
+    ext = str(template_vars.get("ext", "py") or "py")
+    install_str_join = str(template_vars.get("install_str_join", " && ") or " && ")
+
+    spec.update(
+        {
+            "parser": parser_name,
+            "parser_import": parser_import,
+            "parser_import_module": parser_import_module,
+            "parser_import_name": parser_import_name,
+            "ext": ext,
+            "install_str_join": install_str_join,
+        }
+    )
+
+    return spec
+
 
 # ---------------------------------------------------------------------------
 # Code generation
@@ -77,7 +110,7 @@ _ADAPTER_TEMPLATE = '''\
 
 from __future__ import annotations
 
-from repogauge.parsers.junit import parse_repogauge_junit
+from {parser_import_module} import {parser_import_name}
 
 REPO = {repo_repr}
 VERSION = {version_repr}
@@ -89,13 +122,13 @@ PRE_INSTALL = {pre_install_repr}
 INSTALL = {install_repr}
 BUILD = {build_repr}
 TEST_CMD_BASE = {test_cmd_base_repr}
-PARSER = "junit"
+PARSER = {parser_name_json}
 STRATEGY_NAME = {strategy_name_repr}
 DOCKER_SPECS = {docker_specs_repr}
 
 MAP_REPO_TO_EXT = {map_repo_to_ext_repr}
 MAP_REPO_VERSION_TO_SPECS = {map_repo_version_specs_repr}
-MAP_REPO_TO_PARSER = {{REPO: parse_repogauge_junit}}
+MAP_REPO_TO_PARSER = {{REPO: {parser_import_name}}}
 
 
 def get_spec() -> dict:
@@ -135,8 +168,11 @@ def registration_context() -> dict:
 def _swebench_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
     """Convert our internal spec to the key names swebench 4.x expects."""
     install_cmds = spec.get("install", [])
+    install_str_join = spec.get("install_str_join", " && ")
     if isinstance(install_cmds, list):
-        install_str = " && ".join(install_cmds) if install_cmds else "pip install -e ."
+        install_str = (
+            install_str_join.join(install_cmds) if install_cmds else "pip install -e ."
+        )
     else:
         install_str = install_cmds or "pip install -e ."
 
@@ -162,6 +198,17 @@ def _swebench_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _render_adapter(spec: Dict[str, Any]) -> str:
+    parser_import = str(spec.get("parser_import", "") or "")
+    if not parser_import:
+        parser_import = "repogauge.parsers.junit.parse_repogauge_junit"
+    parser_import_module = str(spec.get("parser_import_module", "") or "")
+    parser_import_name = str(spec.get("parser_import_name", "") or "")
+    if not parser_import_module or not parser_import_name:
+        if "." in parser_import:
+            parser_import_module, parser_import_name = parser_import.rsplit(".", 1)
+        else:
+            parser_import_module = "repogauge.parsers.junit"
+            parser_import_name = parser_import or "parse_repogauge_junit"
     return _ADAPTER_TEMPLATE.format(
         repo=spec["repo"],
         repo_repr=repr(spec["repo"]),
@@ -174,9 +221,12 @@ def _render_adapter(spec: Dict[str, Any]) -> str:
         install_repr=repr(spec["install"]),
         build_repr=repr(spec["build"]),
         test_cmd_base_repr=repr(spec["test_cmd_base"]),
+        parser_import_module=parser_import_module,
+        parser_import_name=parser_import_name,
+        parser_name_json=json.dumps(spec["parser"]),
         strategy_name_repr=repr(spec["strategy_name"]),
         docker_specs_repr=repr(spec["docker_specs"]),
-        map_repo_to_ext_repr=repr({spec["repo"]: "py"}),
+        map_repo_to_ext_repr=repr({spec["repo"]: spec["ext"]}),
         map_repo_version_specs_repr=repr(
             {
                 spec["repo"]: {
