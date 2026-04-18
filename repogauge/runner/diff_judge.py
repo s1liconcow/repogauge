@@ -462,9 +462,7 @@ def _invoke_model(
             )
         if not command_result.success:
             raise SolverAdapterError(
-                command_result.stderr
-                or command_result.stdout
-                or "codex exec failed"
+                command_result.stderr or command_result.stdout or "codex exec failed"
             )
         raw_output = command_result.stdout or ""
         response_payload = {
