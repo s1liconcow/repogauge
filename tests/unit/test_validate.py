@@ -698,10 +698,15 @@ def test_run_eval_includes_missing_prediction_reason(tmp_path: Path) -> None:
         .splitlines()
         if line.strip()
     ]
-    assert summary["skipped"] == 1
+    assert summary.skipped == 1
     assert len(output_rows) == 1
     assert output_rows[0]["reason"] == "missing_prediction"
     assert output_rows[0]["status"] == "skipped"
+    assert (out_root / "instance_results.jsonl").read_text(encoding="utf-8") == (
+        out_root / "validation.jsonl"
+    ).read_text(encoding="utf-8")
+    assert (out_root / "dataset.resolved.jsonl").read_text(encoding="utf-8") == ""
+    assert (out_root / "predictions.resolved.jsonl").read_text(encoding="utf-8") == ""
 
 
 def test_run_eval_includes_reason_from_eval_instance(
@@ -776,7 +781,7 @@ def test_run_eval_includes_reason_from_eval_instance(
         "repogauge.validation.validate._eval_instance", fake_eval_instance
     )
 
-    run_eval(
+    summary = run_eval(
         dataset_path=dataset_path,
         predictions_path=predictions_path,
         out_root=out_root,
@@ -793,3 +798,105 @@ def test_run_eval_includes_reason_from_eval_instance(
     assert output_rows[0]["status"] == "not_resolved"
     assert output_rows[0]["reason"] == "no_fail_to_pass"
     assert output_rows[0]["metadata"]["run_a"] == {}
+    assert summary.instance_results_path == str(out_root / "instance_results.jsonl")
+    assert summary.dataset_path == str(out_root / "dataset.resolved.jsonl")
+    assert summary.predictions_path == str(out_root / "predictions.resolved.jsonl")
+
+
+def test_run_eval_writes_resolved_dataset_and_prediction_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dataset_path = tmp_path / "dataset.jsonl"
+    predictions_path = tmp_path / "predictions.jsonl"
+    out_root = tmp_path / "out"
+
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "instance_id": "i-1",
+                "base_commit": "deadbeef",
+                "problem_statement": "broken",
+                "FAIL_TO_PASS": [],
+                "PASS_TO_PASS": [],
+                "test_patch": "",
+                "patch": "",
+                "version": "v1",
+                "repo": "r",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    predictions_path.write_text(
+        json.dumps(
+            {
+                "instance_id": "i-1",
+                "model_name_or_path": "gold",
+                "model_patch": "diff --git a.py b.py\n+ok",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_eval_instance(**kwargs: object) -> dict[str, object]:
+        return {
+            "status": "resolved",
+            "reason": None,
+            "error": None,
+            "failure_code": None,
+            "environment_strategy": "default",
+            "test_strategy": "full_pytest",
+            "targeted_test_cmd": "python -m pytest",
+            "targeted_test_inputs": [],
+            "log_a": "",
+            "log_b": "",
+            "log_c": "",
+            "log_b_rerun": "",
+            "log_c_rerun": "",
+            "run_a": {},
+            "run_b": {},
+            "run_c": {},
+            "run_b_rerun": {},
+            "run_c_rerun": {},
+            "run_a_attempts": [],
+            "run_b_attempts": [],
+            "run_c_attempts": [],
+            "run_b_rerun_attempts": [],
+            "run_c_rerun_attempts": [],
+            "flake_runs": 0,
+            "FAIL_TO_PASS": [],
+            "PASS_TO_PASS": [],
+            "resolved": True,
+        }
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate._eval_instance", fake_eval_instance
+    )
+
+    summary = run_eval(
+        dataset_path=dataset_path,
+        predictions_path=predictions_path,
+        out_root=out_root,
+        repo_root=tmp_path,
+    )
+
+    resolved_datasets = [
+        json.loads(line)
+        for line in (out_root / "dataset.resolved.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    resolved_predictions = [
+        json.loads(line)
+        for line in (out_root / "predictions.resolved.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+
+    assert summary.resolved == 1
+    assert resolved_datasets[0]["instance_id"] == "i-1"
+    assert resolved_predictions[0]["instance_id"] == "i-1"
+    assert resolved_predictions[0]["model_name_or_path"] == "gold"

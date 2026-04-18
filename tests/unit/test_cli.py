@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 from repogauge.runner.judge import HarnessRunSummary
 from repogauge.runner.scheduler import SolverJobProgress, SolverScheduleResult
+from repogauge.validation.validate import EvalRunSummary
 
 from repogauge.cli import _build_parser
 from repogauge.cli import main
@@ -390,6 +391,60 @@ class TestCliSurface(unittest.TestCase):
                 Path(mock_eval.call_args.kwargs["predictions_path"]),
                 predictions_path,
             )
+
+    def test_eval_local_engine_uses_in_tree_validator(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            repo = Path(workspace) / "repo"
+            repo.mkdir()
+            run_command(["git", "init", "-b", "main"], cwd=str(repo))
+            run_command(["git", "config", "user.name", "ci"], cwd=str(repo))
+            run_command(
+                ["git", "config", "user.email", "ci@example.com"], cwd=str(repo)
+            )
+
+            out_root = repo / "out"
+            dataset_path = out_root / "dataset.jsonl"
+            dataset_path.parent.mkdir(parents=True)
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "repo__sample-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("repogauge.validation.validate.run_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
+                    validation_path=str(out_root / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    instance_results_path=str(out_root / "instance_results.jsonl"),
+                    dataset_path=str(out_root / "dataset.resolved.jsonl"),
+                    predictions_path=str(out_root / "predictions.resolved.jsonl"),
+                )
+                result = main(
+                    [
+                        "eval",
+                        str(dataset_path),
+                        "--gold",
+                        "--engine",
+                        "local",
+                        "--out",
+                        str(out_root),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            mock_eval.assert_called_once()
 
     def test_eval_records_resolved_dataset_artifacts_in_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

@@ -32,6 +32,44 @@ def _safe_module_name(repo: str) -> str:
     return sanitized
 
 
+_GO_PATCH_DEFAULTS = {
+    "1.18": "1.18.10",
+    "1.19": "1.19.13",
+    "1.20": "1.20.14",
+    "1.21": "1.21.13",
+    "1.22": "1.22.12",
+    "1.23": "1.23.8",
+}
+
+
+def _normalize_go_version(raw: str) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return _GO_PATCH_DEFAULTS["1.22"]
+    if value.count(".") >= 2:
+        return value
+    return _GO_PATCH_DEFAULTS.get(value, value)
+
+
+def _default_docker_specs(
+    *, language: str, runtime_version: str, python_version: str
+) -> Dict[str, Any]:
+    if language == "python":
+        return {"python_version": python_version}
+    if language == "go":
+        return {"go_version": _normalize_go_version(runtime_version)}
+    if language == "javascript":
+        return {
+            "node_version": runtime_version or "20",
+            "python_version": python_version,
+        }
+    if language == "java":
+        return {"java_version": runtime_version or "17"}
+    if language == "rust":
+        return {"rust_version": runtime_version or "stable"}
+    return {"python_version": python_version}
+
+
 def build_adapter_spec(
     repo_name: str, environment_plan: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -44,6 +82,14 @@ def build_adapter_spec(
         if runtime_version_value not in (None, "")
         else (python_version if language == "python" else "")
     )
+    docker_specs = _default_docker_specs(
+        language=language,
+        runtime_version=runtime_version,
+        python_version=python_version,
+    )
+    explicit_docker_specs = environment_plan.get("docker_specs")
+    if isinstance(explicit_docker_specs, Mapping):
+        docker_specs.update(dict(explicit_docker_specs))
     pre_install = environment_plan.get("pre_install", [])
     install = environment_plan.get("install", ["pip install -e ."])
     build = environment_plan.get("build", [])
@@ -61,7 +107,7 @@ def build_adapter_spec(
         "test_cmd_base": test_cmd_base,
         "strategy_name": strategy_name,
         "parser": "junit",
-        "docker_specs": {"python_version": python_version},
+        "docker_specs": docker_specs,
         "module_name": _safe_module_name(repo_name),
     }
     adapter = find_adapter(language)
@@ -172,18 +218,29 @@ def registration_context() -> dict:
 
 def _swebench_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
     """Convert our internal spec to the key names swebench 4.x expects."""
+    language = str(spec.get("language", "python") or "python").lower()
     install_cmds = spec.get("install", [])
+    build_cmds = spec.get("build", [])
     install_str_join = spec.get("install_str_join", " && ")
+    install_value: str | list[str]
     if isinstance(install_cmds, list):
-        install_str = (
-            install_str_join.join(install_cmds) if install_cmds else "pip install -e ."
-        )
+        if language == "python":
+            install_value = (
+                install_str_join.join(install_cmds) if install_cmds else "pip install -e ."
+            )
+        else:
+            install_value = list(install_cmds)
     else:
-        install_str = install_cmds or "pip install -e ."
+        install_value = install_cmds or "pip install -e ."
 
     pre_install = list(spec.get("pre_install", []))
     # Ensure uv is available in the conda environment when the install uses it.
-    if "uv" in install_str and "pip install uv" not in pre_install:
+    install_text = (
+        install_value
+        if isinstance(install_value, str)
+        else "\n".join(str(item) for item in install_value)
+    )
+    if "uv" in install_text and "pip install uv" not in pre_install:
         pre_install = ["pip install uv"] + pre_install
 
     return {
@@ -192,10 +249,10 @@ def _swebench_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
         "language": spec["language"],
         "runtime_version": spec["runtime_version"],
         "pre_install": pre_install,
-        "install": install_str,
+        "install": install_value,
         "test_cmd": spec["test_cmd_base"],
         "test_cmd_base": spec["test_cmd_base"],
-        "build": spec["build"],
+        "build": list(build_cmds) if isinstance(build_cmds, list) else build_cmds,
         "parser": spec["parser"],
         "strategy_name": spec["strategy_name"],
         "docker_specs": spec["docker_specs"],

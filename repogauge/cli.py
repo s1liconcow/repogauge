@@ -146,6 +146,17 @@ def _build_parser() -> argparse.ArgumentParser:
             )
         if name == "eval":
             cmd.add_argument(
+                "--engine",
+                choices=["harness", "local", "auto"],
+                default="harness",
+                help=(
+                    "Evaluation backend. `harness` uses the official SWE-bench"
+                    " harness, `local` uses RepoGauge's in-tree validator, and"
+                    " `auto` uses local evaluation when the dataset lives under"
+                    " a local git worktree."
+                ),
+            )
+            cmd.add_argument(
                 "--gold",
                 action="store_true",
                 help="Evaluate gold predictions (predictions.gold.jsonl).",
@@ -222,6 +233,12 @@ def _build_parser() -> argparse.ArgumentParser:
                 help="Docker-compatible socket/host override, for example unix:///tmp/podman.sock.",
             )
         if name == "analyze":
+            cmd.add_argument(
+                "--eval-engine",
+                choices=["harness", "local", "auto"],
+                default="harness",
+                help="Evaluation backend for analyze's automatic eval pass.",
+            )
             cmd.add_argument(
                 "--group-by",
                 default="solver_id",
@@ -427,6 +444,20 @@ def _resolve_eval_paths(source: Path) -> tuple[Path, Path]:
         dataset = source
         predictions = source.parent / "predictions.gold.jsonl"
     return dataset, predictions
+
+
+def _prefer_local_eval(dataset_path: Path, requested_engine: str) -> bool:
+    if requested_engine == "local":
+        return True
+    if requested_engine != "auto":
+        return False
+    try:
+        from repogauge.export.materialize import _normalize_repo_root
+
+        _normalize_repo_root(dataset_path)
+        return True
+    except Exception:
+        return False
 
 
 def _discover_harness_adapter(search_roots: list[Path]) -> Path | None:
@@ -1675,27 +1706,47 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
 
         try:
-            from repogauge.runner.judge import (
-                JudgeSchedulerConfig,
-                run_harness_evaluation,
-            )
+            requested_engine = getattr(namespace, "engine", "harness")
+            if _prefer_local_eval(dataset_path, requested_engine):
+                from repogauge.validation.validate import run_eval
 
-            eval_summary = run_harness_evaluation(
-                dataset_path=dataset_path,
-                predictions_path=predictions_path,
-                out_root=out_root,
-                adapter_path=adapter_path,
-                workers=getattr(namespace, "workers", 4),
-                timeout_seconds=getattr(namespace, "timeout", 120),
-                gold_if_missing=gold_if_missing,
-                judge_config=JudgeSchedulerConfig(
-                    batch_size=getattr(namespace, "batch_size", 32),
-                    max_parallel_batches=getattr(namespace, "max_parallel_batches", 1),
-                    workers_per_batch=getattr(namespace, "workers_per_batch", 1),
-                ),
-                container_runtime=getattr(namespace, "container_runtime", "podman"),
-                container_host=getattr(namespace, "container_host", None),
-            )
+                adapter_spec = None
+                if adapter_path is not None:
+                    specs_path = adapter_path.parent / "specs.json"
+                    if specs_path.exists():
+                        adapter_spec = json.loads(
+                            specs_path.read_text(encoding="utf-8")
+                        )
+                print("repogauge eval: using local evaluator", file=sys.stderr)
+                eval_summary = run_eval(
+                    dataset_path=dataset_path,
+                    predictions_path=predictions_path,
+                    out_root=out_root,
+                    timeout_seconds=getattr(namespace, "timeout", 120),
+                    adapter_spec=adapter_spec,
+                )
+            else:
+                from repogauge.runner.judge import (
+                    JudgeSchedulerConfig,
+                    run_harness_evaluation,
+                )
+
+                eval_summary = run_harness_evaluation(
+                    dataset_path=dataset_path,
+                    predictions_path=predictions_path,
+                    out_root=out_root,
+                    adapter_path=adapter_path,
+                    workers=getattr(namespace, "workers", 4),
+                    timeout_seconds=getattr(namespace, "timeout", 120),
+                    gold_if_missing=gold_if_missing,
+                    judge_config=JudgeSchedulerConfig(
+                        batch_size=getattr(namespace, "batch_size", 32),
+                        max_parallel_batches=getattr(namespace, "max_parallel_batches", 1),
+                        workers_per_batch=getattr(namespace, "workers_per_batch", 1),
+                    ),
+                    container_runtime=getattr(namespace, "container_runtime", "podman"),
+                    container_host=getattr(namespace, "container_host", None),
+                )
             manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
             manifest.mark_step(
                 "execute",
@@ -2013,39 +2064,58 @@ def _run_command(namespace: argparse.Namespace) -> int:
                             " attempting built-in SWE-bench behavior",
                             file=sys.stderr,
                         )
+                    eval_engine = getattr(namespace, "eval_engine", "harness")
                     print(
-                        f"repogauge analyze: running harness"
+                        f"repogauge analyze: running {eval_engine} eval"
                         f" dataset={dataset_path} out={eval_out_root}",
                         file=sys.stderr,
                     )
                     try:
-                        from repogauge.runner.judge import (
-                            JudgeSchedulerConfig,
-                            run_harness_evaluation,
-                        )
+                        if _prefer_local_eval(dataset_path, eval_engine):
+                            from repogauge.validation.validate import run_eval
 
-                        eval_summary = run_harness_evaluation(
-                            dataset_path=dataset_path,
-                            predictions_path=predictions_path,
-                            out_root=eval_out_root,
-                            adapter_path=adapter_path,
-                            workers=getattr(namespace, "workers", 4),
-                            timeout_seconds=getattr(namespace, "timeout", 120),
-                            gold_if_missing=False,
-                            judge_config=JudgeSchedulerConfig(
-                                batch_size=getattr(namespace, "batch_size", 32),
-                                max_parallel_batches=getattr(
-                                    namespace, "max_parallel_batches", 1
+                            adapter_spec = None
+                            if adapter_path is not None:
+                                specs_path = adapter_path.parent / "specs.json"
+                                if specs_path.exists():
+                                    adapter_spec = json.loads(
+                                        specs_path.read_text(encoding="utf-8")
+                                    )
+                            eval_summary = run_eval(
+                                dataset_path=dataset_path,
+                                predictions_path=predictions_path,
+                                out_root=eval_out_root,
+                                timeout_seconds=getattr(namespace, "timeout", 120),
+                                adapter_spec=adapter_spec,
+                            )
+                        else:
+                            from repogauge.runner.judge import (
+                                JudgeSchedulerConfig,
+                                run_harness_evaluation,
+                            )
+
+                            eval_summary = run_harness_evaluation(
+                                dataset_path=dataset_path,
+                                predictions_path=predictions_path,
+                                out_root=eval_out_root,
+                                adapter_path=adapter_path,
+                                workers=getattr(namespace, "workers", 4),
+                                timeout_seconds=getattr(namespace, "timeout", 120),
+                                gold_if_missing=False,
+                                judge_config=JudgeSchedulerConfig(
+                                    batch_size=getattr(namespace, "batch_size", 32),
+                                    max_parallel_batches=getattr(
+                                        namespace, "max_parallel_batches", 1
+                                    ),
+                                    workers_per_batch=getattr(
+                                        namespace, "workers_per_batch", 1
+                                    ),
                                 ),
-                                workers_per_batch=getattr(
-                                    namespace, "workers_per_batch", 1
+                                container_runtime=getattr(
+                                    namespace, "container_runtime", "podman"
                                 ),
-                            ),
-                            container_runtime=getattr(
-                                namespace, "container_runtime", "podman"
-                            ),
-                            container_host=getattr(namespace, "container_host", None),
-                        )
+                                container_host=getattr(namespace, "container_host", None),
+                            )
                         print(
                             f"repogauge analyze: eval resolved"
                             f" {eval_summary.resolved}/{eval_summary.total}"

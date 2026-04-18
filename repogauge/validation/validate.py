@@ -26,6 +26,7 @@ import json
 import os
 import shlex
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -51,6 +52,22 @@ _JUNIT_XML_FLAGS = ("--junit-xml", "--junitxml")
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class EvalRunSummary:
+    validation_path: str
+    total: int
+    resolved: int
+    not_resolved: int
+    error: int
+    skipped: int
+    resolve_rate: float
+    results_path: str | None = None
+    instance_results_path: str | None = None
+    dataset_path: str | None = None
+    predictions_path: str | None = None
+    harness_output: str | None = None
+
+
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -73,6 +90,68 @@ def _resolve_dataset(path: Path) -> Tuple[Path, Path]:
         dataset = path
         predictions = path.parent / "predictions.gold.jsonl"
     return dataset, predictions
+
+
+def _prediction_key(row: Dict[str, Any]) -> tuple[str, str]:
+    instance_id = str(row.get("instance_id", "")).strip()
+    solver_id = str(
+        row.get("solver_id") or row.get("model_name_or_path") or "unknown"
+    ).strip()
+    return solver_id, instance_id
+
+
+def _write_resolved_eval_artifacts(
+    *,
+    out_root: Path,
+    dataset_rows: List[Dict[str, Any]],
+    prediction_rows: List[Dict[str, Any]],
+    instance_rows: List[Dict[str, Any]],
+) -> tuple[Path, Path]:
+    dataset_path = out_root / "dataset.resolved.jsonl"
+    predictions_path = out_root / "predictions.resolved.jsonl"
+    dataset_by_id = {
+        str(row.get("instance_id", "")).strip(): row
+        for row in dataset_rows
+        if str(row.get("instance_id", "")).strip()
+    }
+    prediction_by_key = {
+        _prediction_key(row): row
+        for row in prediction_rows
+        if str(row.get("instance_id", "")).strip()
+    }
+    resolved_datasets: List[Dict[str, Any]] = []
+    resolved_predictions: List[Dict[str, Any]] = []
+    seen_prediction_keys: set[tuple[str, str]] = set()
+
+    for row in instance_rows:
+        if not row.get("resolved"):
+            continue
+        instance_id = str(row.get("instance_id", "")).strip()
+        if not instance_id:
+            continue
+        solver_id = str(
+            row.get("solver_id") or row.get("model_name_or_path") or "unknown"
+        ).strip()
+        key = (solver_id, instance_id)
+        if key in seen_prediction_keys:
+            continue
+        prediction_row = prediction_by_key.get(key)
+        dataset_row = dataset_by_id.get(instance_id)
+        if prediction_row is None or dataset_row is None:
+            continue
+        resolved_predictions.append(dict(prediction_row))
+        resolved_datasets.append(dict(dataset_row))
+        seen_prediction_keys.add(key)
+
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in resolved_datasets),
+        encoding="utf-8",
+    )
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in resolved_predictions),
+        encoding="utf-8",
+    )
+    return dataset_path, predictions_path
 
 
 def _resolve_adapter(
@@ -913,7 +992,7 @@ def run_eval(
     repo_root: Optional[Path] = None,
     timeout_seconds: int = 120,
     adapter_spec: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> EvalRunSummary:
     """Evaluate predictions against a dataset and write ``validation.jsonl``.
 
     Args:
@@ -948,6 +1027,7 @@ def run_eval(
 
     out_root.mkdir(parents=True, exist_ok=True)
     validation_path = out_root / "validation.jsonl"
+    instance_results_path = out_root / "instance_results.jsonl"
 
     results: List[Dict[str, Any]] = []
     resolved_count = error_count = skipped_count = 0
@@ -960,6 +1040,7 @@ def run_eval(
             results.append(
                 {
                     "instance_id": iid,
+                    "solver_id": "",
                     "status": "skipped",
                     "error": "no matching prediction",
                     "reason": "missing_prediction",
@@ -998,6 +1079,9 @@ def run_eval(
         results.append(
             {
                 "instance_id": iid,
+                "solver_id": str(
+                    pred.get("solver_id") or pred.get("model_name_or_path") or ""
+                ).strip(),
                 "status": outcome["status"],
                 "reason": outcome["reason"],
                 "failure_code": outcome["failure_code"],
@@ -1036,19 +1120,26 @@ def run_eval(
             }
         )
 
-    validation_path.write_text(
-        "".join(json.dumps(r, sort_keys=True) + "\n" for r in results),
-        encoding="utf-8",
+    payload = "".join(json.dumps(r, sort_keys=True) + "\n" for r in results)
+    validation_path.write_text(payload, encoding="utf-8")
+    instance_results_path.write_text(payload, encoding="utf-8")
+    resolved_dataset_path, resolved_predictions_path = _write_resolved_eval_artifacts(
+        out_root=out_root,
+        dataset_rows=dataset_rows,
+        prediction_rows=pred_rows,
+        instance_rows=results,
     )
 
     total = len(dataset_rows)
-    summary = {
-        "validation_path": str(validation_path),
-        "total": total,
-        "resolved": resolved_count,
-        "not_resolved": total - resolved_count - error_count - skipped_count,
-        "error": error_count,
-        "skipped": skipped_count,
-        "resolve_rate": round(resolved_count / total, 3) if total else 0.0,
-    }
-    return summary
+    return EvalRunSummary(
+        validation_path=str(validation_path),
+        total=total,
+        resolved=resolved_count,
+        not_resolved=total - resolved_count - error_count - skipped_count,
+        error=error_count,
+        skipped=skipped_count,
+        resolve_rate=round(resolved_count / total, 3) if total else 0.0,
+        instance_results_path=str(instance_results_path),
+        dataset_path=str(resolved_dataset_path),
+        predictions_path=str(resolved_predictions_path),
+    )

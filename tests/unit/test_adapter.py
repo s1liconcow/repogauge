@@ -45,6 +45,82 @@ class TestBuildAdapterSpec:
         assert spec["test_cmd_base"] == "python -m pytest"
         assert spec["parser"] == "junit"
 
+    def test_populates_language_specific_docker_specs(self):
+        go_spec = build_adapter_spec(
+            "owner/go-repo",
+            {
+                "language": "go",
+                "runtime_version": "1.22",
+                "python_version": "3.11",
+            },
+        )
+        js_spec = build_adapter_spec(
+            "owner/js-repo",
+            {
+                "language": "javascript",
+                "runtime_version": "20",
+                "python_version": "3.11",
+            },
+        )
+        java_spec = build_adapter_spec(
+            "owner/java-repo",
+            {
+                "language": "java",
+                "runtime_version": "21",
+                "python_version": "3.11",
+            },
+        )
+        rust_spec = build_adapter_spec(
+            "owner/rust-repo",
+            {
+                "language": "rust",
+                "runtime_version": "1.74",
+                "python_version": "3.11",
+            },
+        )
+
+        assert go_spec["docker_specs"] == {"go_version": "1.22.12"}
+        assert js_spec["docker_specs"] == {
+            "node_version": "20",
+            "python_version": "3.11",
+        }
+        assert java_spec["docker_specs"] == {"java_version": "21"}
+        assert rust_spec["docker_specs"] == {"rust_version": "1.74"}
+
+    def test_explicit_docker_specs_override_defaults(self):
+        spec = build_adapter_spec(
+            "owner/go-repo",
+            {
+                "language": "go",
+                "runtime_version": "1.22",
+                "python_version": "3.11",
+                "docker_specs": {"go_version": "1.22.99"},
+            },
+        )
+
+        assert spec["docker_specs"] == {"go_version": "1.22.99"}
+
+    def test_non_python_swebench_spec_preserves_install_list(self, tmp_path):
+        plan = {
+            "language": "go",
+            "python_version": "3.11",
+            "runtime_version": "1.22",
+            "install": ["go mod download"],
+            "build": ["go test ./..."],
+            "test_cmd_base": "go test -json ./...",
+        }
+        result = generate_adapter("owner/go-repo", plan, out_root=tmp_path)
+
+        mod_spec = importlib.util.spec_from_file_location(
+            "go_adapter_test", Path(result["adapter_path"])
+        )
+        mod = importlib.util.module_from_spec(mod_spec)
+        mod_spec.loader.exec_module(mod)
+
+        swebench_spec = mod.MAP_REPO_VERSION_TO_SPECS["owner/go-repo"]["0.0.0"]
+        assert swebench_spec["install"] == ["go mod download"]
+        assert swebench_spec["build"] == ["go test ./..."]
+
 
 class TestGenerateAdapter:
     def test_writes_specs_json_and_adapter_py(self, tmp_path):
@@ -233,7 +309,7 @@ class TestGenerateAdapter:
         assert mod.MAP_REPO_TO_PARSER["org/custom-repo"] is custom_parser.parse_custom
         assert (
             mod.MAP_REPO_VERSION_TO_SPECS["org/custom-repo"]["v9"]["install"]
-            == "uv sync && go test"
+            == ["uv sync", "go test"]
         )
 
     def test_generation_is_deterministic(self, tmp_path):
