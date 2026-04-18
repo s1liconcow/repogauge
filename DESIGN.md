@@ -52,3 +52,4 @@ The current product scope is intentionally narrow in v1:
 ## Reference decisions
 
 - Architecture decision record: [docs/ADRs/0001-mvp-architecture.md](docs/ADRs/0001-mvp-architecture.md)
+- Language adapter registry: [docs/ADRs/0002-language-adapter-registry.md](docs/ADRs/0002-language-adapter-registry.md)

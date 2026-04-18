@@ -205,6 +205,8 @@ reruns skip work that hasn't changed.
   provider, not to RepoGauge.
 - **Real harness, not a simulation.** Evaluation runs through the official
   SWE-bench harness, same as the public leaderboards.
+- **Language-aware dispatch.** The adapter-registry invariants live in
+  [ADR-0002](docs/ADRs/0002-language-adapter-registry.md).
 
 ## Scope and non-goals
 
