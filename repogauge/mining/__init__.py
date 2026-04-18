@@ -4,7 +4,15 @@ Deterministic repository inspection and related discovery utilities live here.
 """
 
 from .inspect import inspect_repository
-from .file_roles import FileRole, FileRoleClassification, classify_file, classify_files
+from .file_roles import (
+    FileRole,
+    FileRoleClassification,
+    classify_file,
+    classify_files,
+    merged_rules,
+    reset_cache,
+    rules_for_language_detections,
+)
 from .scan import scan_repository
 from .score import ScoredCommit, score_scan_commit
 
@@ -15,6 +23,9 @@ __all__ = [
     "FileRoleClassification",
     "classify_file",
     "classify_files",
+    "merged_rules",
+    "reset_cache",
+    "rules_for_language_detections",
     "ScoredCommit",
     "score_scan_commit",
 ]

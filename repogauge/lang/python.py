@@ -675,11 +675,9 @@ class PythonAdapter:
             test_filename_patterns=["test_*.py", "*_test.py", "*_test_*.py"],
             test_dir_names={"test", "tests"},
             config_build_filenames={
-                ".github",
                 "pyproject.toml",
                 "setup.py",
                 "setup.cfg",
-                "tox.ini",
                 "noxfile.py",
                 "requirements.txt",
                 "requirements-dev.txt",
@@ -697,6 +695,7 @@ class PythonAdapter:
                 "venv",
                 ".eggs",
             },
+            test_support_filenames={"conftest.py", "pytest.ini", "tox.ini"},
         )
 
     def harness_template_vars(self, spec: dict[str, Any]) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Protocol, runtime_checkable
 
@@ -24,6 +24,7 @@ class FileRoleRules:
     test_dir_names: set[str]
     config_build_filenames: set[str]
     vendor_dir_names: set[str]
+    test_support_filenames: set[str] = field(default_factory=set)
 
 
 @runtime_checkable
@@ -85,6 +86,11 @@ def _store_adapter(adapter: LanguageAdapter) -> None:
         raise ValueError(f"language adapter already registered: {adapter_name}")
     _REGISTERED_ADAPTERS.append(adapter)
     _REGISTERED_ADAPTERS.sort(key=_adapter_name)
+    try:
+        from repogauge.mining.file_roles import reset_cache
+    except Exception:
+        return
+    reset_cache()
 
 
 def _register_builtin_adapters() -> None:
