@@ -1,0 +1,25 @@
+{
+  "build": [],
+  "docker_specs": {
+    "python_version": "3.10"
+  },
+  "ext": "py",
+  "install": [
+    "uv sync --active --all-groups",
+    "python -m pip install pytest"
+  ],
+  "install_str_join": " && ",
+  "language": "python",
+  "module_name": "s1liconcow_repogauge",
+  "parser": "junit",
+  "parser_import": "repogauge.parsers.junit.parse_repogauge_junit",
+  "parser_import_module": "repogauge.parsers.junit",
+  "parser_import_name": "parse_repogauge_junit",
+  "pre_install": [],
+  "python_version": "3.10",
+  "repo": "s1liconcow/repogauge",
+  "runtime_version": "3.10",
+  "strategy_name": "uv:pytest-default",
+  "test_cmd_base": "python -m pytest",
+  "version": "0.0.0"
+}
