@@ -1,9 +1,11 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from repogauge.runner.container_exec import (
     WorkspaceContainerError,
     _containerize_environment,
     _ensure_solver_command_available,
+    _local_repo_setup_commands,
     _resolve_host_tool_fallback,
     _solver_shell_command,
 )
@@ -50,6 +52,28 @@ def test_ensure_solver_command_available_reports_missing_binary() -> None:
     assert "solver command 'claude' was not found" in message
     assert "ghcr.io/example/base:latest" in message
     assert "providers.<id>.image" in message
+
+
+def test_local_repo_setup_commands_strip_remote_clone_bootstrap() -> None:
+    test_spec = SimpleNamespace(
+        repo_script_list=[
+            "git clone -o origin https://github.com/owner/repo /testbed",
+            "chmod -R 777 /testbed",
+            "cd /testbed",
+            "git reset --hard deadbeef",
+            "git remote remove origin",
+            "pip install uv",
+            "uv sync --active --all-groups",
+        ]
+    )
+
+    assert _local_repo_setup_commands(test_spec) == (
+        "git config --global --add safe.directory /testbed || true",
+        "chmod -R 777 /testbed",
+        "cd /testbed",
+        "pip install uv",
+        "uv sync --active --all-groups",
+    )
 
 
 def test_resolve_host_tool_fallback_for_codex(monkeypatch, tmp_path: Path) -> None:

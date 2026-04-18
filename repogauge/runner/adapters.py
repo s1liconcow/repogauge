@@ -1825,7 +1825,7 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
         return reason
 
     def _command_env_for_home(self, home_root: Path) -> dict[str, str] | None:
-        mode, _ = self._resolve_auth_mode()
+        mode = self._resolved_auth_mode or "ambient"
         if mode == "subscription":
             return _claude_cli_child_env_for_home(home_root)
         if mode == "api_key":
@@ -1865,6 +1865,12 @@ class ClaudeCLIAdapter(_BaseConcreteSolverAdapter):
             if request.workspace_path is not None
             else Path.home()
         )
+        if (
+            not self.containerized
+            and self._resolved_auth_mode is None
+            and self._preflight_reason is None
+        ):
+            self._resolve_auth_mode()
         command_env = self._command_env_for_home(claude_home_root)
         try:
             if self.containerized and request.workspace_path is not None:

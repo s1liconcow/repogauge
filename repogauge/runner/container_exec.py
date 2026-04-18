@@ -16,7 +16,7 @@ from typing import Mapping
 from repogauge.exec import CommandResult
 from swebench.harness.constants import DOCKER_USER, DOCKER_WORKDIR
 from swebench.harness.docker_build import (
-    build_instance_image,
+    build_env_images,
     close_logger,
     setup_logger,
 )
@@ -28,6 +28,8 @@ _CONTAINER_ATTEMPT_ROOT = "/repogauge"
 _CONTAINER_PROMPT_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/prompt.txt"
 _CONTAINER_STDOUT_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/stdout.txt"
 _CONTAINER_STDERR_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/stderr.txt"
+_CONTAINER_SETUP_STDOUT_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/setup_stdout.txt"
+_CONTAINER_SETUP_STDERR_PATH = f"{_CONTAINER_ATTEMPT_ROOT}/setup_stderr.txt"
 _CONTAINER_HOST_TOOLS_ROOT = f"{_CONTAINER_ATTEMPT_ROOT}/host-tools"
 _CONTAINER_CODEX_SEED_HOME = f"{_CONTAINER_ATTEMPT_ROOT}/codex-home"
 _CONTAINER_CODEX_RUNTIME_HOME = "/home/nonroot/.repogauge-codex-home"
@@ -50,6 +52,14 @@ class _ExecOutcome:
 class _HostToolFallback:
     command: list[str]
     mounts: dict[str, dict[str, str]]
+
+
+@dataclass(frozen=True)
+class _ResolvedContainerSpec:
+    image: str
+    platform: str | None
+    cap_add: tuple[str, ...]
+    setup_commands: tuple[str, ...]
 
 
 def _sanitize_container_name(value: str) -> str:
@@ -94,10 +104,7 @@ def _resolve_image(
     instance_row: Mapping[str, object],
     image_override: str | None,
     client,
-) -> tuple[str, str | None, list[str]]:
-    if image_override:
-        return image_override, None, []
-
+) -> _ResolvedContainerSpec:
     logger = setup_logger(attempt_id, attempt_root / "container_image.log", mode="a")
     try:
         try:
@@ -108,12 +115,61 @@ def _resolve_image(
                 f"row for {instance_id}: {exc}"
             ) from exc
 
-        build_instance_image(test_spec, client, logger, nocache=False)
         run_args = test_spec.docker_specs.get("run_args", {})
-        cap_add = list(run_args.get("cap_add", []))
-        return test_spec.instance_image_key, test_spec.platform, cap_add
+        cap_add = tuple(run_args.get("cap_add", []))
+        setup_commands = _local_repo_setup_commands(test_spec)
+        if image_override:
+            return _ResolvedContainerSpec(
+                image=image_override,
+                platform=None,
+                cap_add=cap_add,
+                setup_commands=setup_commands,
+            )
+
+        import docker.errors as docker_errors  # type: ignore[import]
+
+        try:
+            client.images.get(test_spec.env_image_key)
+        except docker_errors.ImageNotFound:
+            build_env_images(
+                client,
+                [test_spec],
+                force_rebuild=False,
+                max_workers=1,
+                namespace=None,
+                instance_image_tag="latest",
+                env_image_tag="latest",
+            )
+
+        return _ResolvedContainerSpec(
+            image=test_spec.env_image_key,
+            platform=test_spec.platform,
+            cap_add=cap_add,
+            setup_commands=setup_commands,
+        )
     finally:
         close_logger(logger)
+
+
+def _local_repo_setup_commands(test_spec) -> tuple[str, ...]:
+    commands: list[str] = []
+    for raw_command in getattr(test_spec, "repo_script_list", []):
+        command = str(raw_command).strip()
+        if not command:
+            continue
+        if command.startswith("git clone -o origin https://github.com/"):
+            continue
+        if command.startswith("git reset --hard "):
+            continue
+        if command == "git remote remove origin":
+            continue
+        commands.append(command)
+    if not commands:
+        return ()
+    return (
+        f"git config --global --add safe.directory {shlex.quote(DOCKER_WORKDIR)} || true",
+        *commands,
+    )
 
 
 def _exec_in_container(
@@ -393,6 +449,49 @@ def _solver_shell_command(command: list[str]) -> str:
     )
 
 
+def _run_workspace_setup_in_container(
+    *,
+    attempt_root: Path,
+    container,
+    image: str,
+    setup_commands: tuple[str, ...],
+    timeout_seconds: int | None,
+) -> None:
+    if not setup_commands:
+        return
+
+    stdout_path = attempt_root / "setup_stdout.txt"
+    stderr_path = attempt_root / "setup_stderr.txt"
+    for path in (stdout_path, stderr_path):
+        if path.exists():
+            path.unlink()
+
+    shell_cmd = (
+        "{ set -euxo pipefail && "
+        + " && ".join(setup_commands)
+        + "; }"
+        + f" > {shlex.quote(_CONTAINER_SETUP_STDOUT_PATH)}"
+        + f" 2> {shlex.quote(_CONTAINER_SETUP_STDERR_PATH)}"
+    )
+    outcome = _exec_in_container(
+        container,
+        f"/bin/bash -lc {shlex.quote(shell_cmd)}",
+        timeout_seconds,
+    )
+    if outcome.timed_out:
+        raise WorkspaceContainerError(
+            "container workspace setup timed out in image "
+            f"{image}; check {stdout_path} and {stderr_path}"
+        )
+    if outcome.exit_code == 0:
+        return
+    raise WorkspaceContainerError(
+        "container workspace setup failed in image "
+        f"{image} with exit code {outcome.exit_code}; "
+        f"check {stdout_path} and {stderr_path}"
+    )
+
+
 def run_solver_command_in_container(
     *,
     attempt_id: str,
@@ -418,7 +517,7 @@ def run_solver_command_in_container(
     container = None
     logger = setup_logger(attempt_id, attempt_root / "container_run.log", mode="a")
     try:
-        image, platform, cap_add = _resolve_image(
+        resolved = _resolve_image(
             attempt_id=attempt_id,
             attempt_root=attempt_root,
             instance_id=str(instance_row.get("instance_id", "")),
@@ -439,7 +538,7 @@ def run_solver_command_in_container(
             str(attempt_root): {"bind": _CONTAINER_ATTEMPT_ROOT, "mode": "rw"},
         }
         create_kwargs = {
-            "image": image,
+            "image": resolved.image,
             "name": container_name,
             "user": DOCKER_USER,
             "detach": True,
@@ -449,16 +548,16 @@ def run_solver_command_in_container(
                 environment=environment,
                 attempt_root=attempt_root,
             ),
-            "cap_add": cap_add,
+            "cap_add": list(resolved.cap_add),
         }
-        if platform:
-            create_kwargs["platform"] = platform
+        if resolved.platform:
+            create_kwargs["platform"] = resolved.platform
         container = client.containers.create(**create_kwargs)
         container.start()
         resolved_command = list(command)
         try:
             _ensure_solver_command_available(
-                container=container, command=resolved_command, image=image
+                container=container, command=resolved_command, image=resolved.image
             )
         except WorkspaceContainerError:
             fallback = _resolve_host_tool_fallback(command)
@@ -472,9 +571,16 @@ def run_solver_command_in_container(
             container.start()
             resolved_command = fallback.command
             _ensure_solver_command_available(
-                container=container, command=resolved_command, image=image
+                container=container, command=resolved_command, image=resolved.image
             )
 
+        _run_workspace_setup_in_container(
+            attempt_root=attempt_root,
+            container=container,
+            image=resolved.image,
+            setup_commands=resolved.setup_commands,
+            timeout_seconds=timeout_seconds,
+        )
         shell_cmd = _solver_shell_command(resolved_command)
         outcome = _exec_in_container(
             container,
