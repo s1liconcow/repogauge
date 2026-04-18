@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-REPOGAUGE_SCHEMA_VERSION = "0.1.0"
+REPOGAUGE_SCHEMA_VERSION = "0.2.0"
 
 
 class ContractState(str, Enum):
@@ -46,6 +46,8 @@ class RepoProfile(ContractRecord):
     repo: str = ""
     default_branch: str = "main"
     source_path: str = ""
+    language: Optional[str] = None
+    language_version: Optional[str] = None
     python_version: Optional[str] = None
     package_manager: Optional[str] = None
     install_cmds: List[str] = field(default_factory=list)
@@ -134,6 +136,8 @@ class ValidationRow(ContractRecord):
 class AdapterSpec(ContractRecord):
     repo: str = ""
     version: str = ""
+    language: str = "python"
+    runtime_version: str = ""
     docker_specs: Dict[str, Any] = field(default_factory=dict)
     install_cmds: List[str] = field(default_factory=list)
     test_cmds: List[str] = field(default_factory=list)

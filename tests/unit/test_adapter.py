@@ -13,6 +13,8 @@ class TestBuildAdapterSpec:
     def test_populates_all_required_fields(self):
         plan = {
             "python_version": "3.11",
+            "language": "python",
+            "runtime_version": "3.11",
             "version": "1.2.3",
             "pre_install": [],
             "install": ["pip install -e ."],
@@ -23,6 +25,8 @@ class TestBuildAdapterSpec:
         spec = build_adapter_spec("owner/repo", plan)
         assert spec["repo"] == "owner/repo"
         assert spec["version"] == "1.2.3"
+        assert spec["language"] == "python"
+        assert spec["runtime_version"] == "3.11"
         assert spec["python_version"] == "3.11"
         assert spec["install"] == ["pip install -e ."]
         assert spec["test_cmd_base"] == "pytest"
@@ -33,6 +37,8 @@ class TestBuildAdapterSpec:
     def test_defaults_when_plan_is_sparse(self):
         spec = build_adapter_spec("owner/repo", {})
         assert spec["python_version"] == "3.11"
+        assert spec["language"] == "python"
+        assert spec["runtime_version"] == "3.11"
         assert spec["install"] == ["pip install -e ."]
         assert spec["test_cmd_base"] == "python -m pytest"
         assert spec["parser"] == "junit"
@@ -42,6 +48,8 @@ class TestGenerateAdapter:
     def test_writes_specs_json_and_adapter_py(self, tmp_path):
         plan = {
             "python_version": "3.12",
+            "language": "python",
+            "runtime_version": "3.12",
             "install": ["poetry install"],
             "test_cmd_base": "pytest",
             "strategy_name": "poetry:pytest",
@@ -53,6 +61,8 @@ class TestGenerateAdapter:
     def test_specs_json_is_valid_json_with_required_keys(self, tmp_path):
         plan = {
             "python_version": "3.10",
+            "language": "python",
+            "runtime_version": "3.10",
             "install": ["pip install -e ."],
             "test_cmd_base": "pytest",
         }
@@ -61,6 +71,8 @@ class TestGenerateAdapter:
         for key in (
             "repo",
             "version",
+            "language",
+            "runtime_version",
             "python_version",
             "install",
             "test_cmd_base",
@@ -74,6 +86,8 @@ class TestGenerateAdapter:
     def test_adapter_py_is_importable_and_get_spec_returns_dict(self, tmp_path):
         plan = {
             "python_version": "3.11",
+            "language": "python",
+            "runtime_version": "3.11",
             "install": ["pip install -e ."],
             "test_cmd_base": "pytest",
         }
@@ -83,6 +97,8 @@ class TestGenerateAdapter:
         mod = importlib.util.module_from_spec(mod_spec)
         mod_spec.loader.exec_module(mod)
         assert mod.REPO == "owner/proj"
+        assert mod.LANGUAGE == "python"
+        assert mod.RUNTIME_VERSION == "3.11"
         assert mod.PYTHON_VERSION == "3.11"
         assert mod.PARSER == "junit"
         assert mod.MODULE_NAME == "owner_proj"
@@ -97,6 +113,8 @@ class TestGenerateAdapter:
         assert adapter_spec["repo"] == "owner/proj"
         assert adapter_spec["module_name"] == "owner_proj"
         assert adapter_spec["version"] == "0.0.0"
+        assert adapter_spec["language"] == "python"
+        assert adapter_spec["runtime_version"] == "3.11"
 
     def test_adapter_registration_maps_are_stable(self, tmp_path):
         plan = {

@@ -34,7 +34,14 @@ def build_adapter_spec(
     repo_name: str, environment_plan: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Build a serialisable adapter spec dict from a repo name and env plan."""
-    python_version = environment_plan.get("python_version", "3.11")
+    python_version = str(environment_plan.get("python_version", "3.11") or "3.11")
+    language = str(environment_plan.get("language", "python") or "python")
+    runtime_version_value = environment_plan.get("runtime_version")
+    runtime_version = (
+        str(runtime_version_value)
+        if runtime_version_value not in (None, "")
+        else (python_version if language == "python" else "")
+    )
     pre_install = environment_plan.get("pre_install", [])
     install = environment_plan.get("install", ["pip install -e ."])
     build = environment_plan.get("build", [])
@@ -44,6 +51,8 @@ def build_adapter_spec(
     return {
         "repo": repo_name,
         "version": str(environment_plan.get("version", "0.0.0")),
+        "language": language,
+        "runtime_version": runtime_version,
         "python_version": python_version,
         "pre_install": pre_install,
         "install": install,
@@ -73,6 +82,8 @@ from repogauge.parsers.junit import parse_repogauge_junit
 REPO = {repo_repr}
 VERSION = {version_repr}
 MODULE_NAME = {module_name_repr}
+LANGUAGE = {language_repr}
+RUNTIME_VERSION = {runtime_version_repr}
 PYTHON_VERSION = {python_version_repr}
 PRE_INSTALL = {pre_install_repr}
 INSTALL = {install_repr}
@@ -93,6 +104,8 @@ def get_spec() -> dict:
         "repo": REPO,
         "version": VERSION,
         "module_name": MODULE_NAME,
+        "language": LANGUAGE,
+        "runtime_version": RUNTIME_VERSION,
         "python_version": PYTHON_VERSION,
         "pre_install": PRE_INSTALL,
         "install": INSTALL,
@@ -135,6 +148,8 @@ def _swebench_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "python": spec["python_version"],
         "python_version": spec["python_version"],
+        "language": spec["language"],
+        "runtime_version": spec["runtime_version"],
         "pre_install": pre_install,
         "install": install_str,
         "test_cmd": spec["test_cmd_base"],
@@ -152,6 +167,8 @@ def _render_adapter(spec: Dict[str, Any]) -> str:
         repo_repr=repr(spec["repo"]),
         version_repr=repr(spec["version"]),
         module_name_repr=repr(spec["module_name"]),
+        language_repr=repr(spec["language"]),
+        runtime_version_repr=repr(spec["runtime_version"]),
         python_version_repr=repr(spec["python_version"]),
         pre_install_repr=repr(spec["pre_install"]),
         install_repr=repr(spec["install"]),
