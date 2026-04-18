@@ -31,6 +31,7 @@ from .mining.scan import scan_repository
 from repogauge.runner.analyze import (
     build_analysis_report,
     build_predictions_from_attempts,
+    join_attempt_rows,
     load_attempt_rows,
     load_instance_result_rows,
     summarize_attempt_metrics,
@@ -39,6 +40,7 @@ from repogauge.runner.analyze import (
     write_summary_json,
     write_summary_parquet,
 )
+from repogauge.runner.diff_judge import run_diff_judge
 from repogauge.runner.features import TASK_FEATURE_VERSION
 from repogauge.runner.matrix import MatrixConfigurationError, load_matrix_config
 from repogauge.runner.adapters import SolverAdapterError, build_solver_adapters
@@ -72,9 +74,13 @@ RESUME_HELP = "Resume into an existing artifact directory."
 DRY_RUN_HELP = (
     "Validate inputs and render intended commands without mutating artifacts."
 )
+RETRY_FAILURES_FROM_HELP = (
+    "Path to a prior run root or run_jobs.jsonl. Retries only the jobs whose "
+    "final prior status was unsuccessful."
+)
 LLM_MODE_HELP = (
     "Control advisory triage model usage: off/local_only/allow_remote. "
-    "Currently only affects the review command."
+    "Affects review triage and analyze-stage LLM judging."
 )
 VERBOSE_HELP = "Enable verbose output."
 
@@ -197,6 +203,10 @@ def _build_parser() -> argparse.ArgumentParser:
                 help="Stable run identifier used as runs/<run-id> output directory.",
             )
             cmd.add_argument(
+                "--retry-failures-from",
+                help=RETRY_FAILURES_FROM_HELP,
+            )
+            cmd.add_argument(
                 "--dataset",
                 help="Dataset path override (defaults to matrix.yaml dataset.path).",
             )
@@ -284,6 +294,30 @@ def _build_parser() -> argparse.ArgumentParser:
                 "--container-host",
                 help="Docker-compatible socket/host override for the auto eval pass.",
             )
+            cmd.add_argument(
+                "--merge-retries",
+                action="store_true",
+                help=(
+                    "Merge sibling <run-id>-retry* directories into the selected run"
+                    " before analysis, preferring the latest retry result per job."
+                ),
+            )
+            cmd.add_argument(
+                "--judge-diffs",
+                action="store_true",
+                help=(
+                    "Run an advisory LLM judge that compares generated diffs against"
+                    " the golden patch during analysis."
+                ),
+            )
+            cmd.add_argument(
+                "--judge-model",
+                help="Model identifier for analyze-stage diff judging.",
+            )
+            cmd.add_argument(
+                "--judge-provider",
+                help="Provider for analyze-stage diff judging.",
+            )
         if name == "train-router":
             cmd.add_argument(
                 "--seed",
@@ -330,6 +364,25 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
         "config": namespace.config or "",
         "dataset": namespace.dataset if command == "run" else "",
         "run_id": namespace.run_id if command == "run" else "",
+        "retry_failures_from": (
+            getattr(namespace, "retry_failures_from", "") if command == "run" else ""
+        ),
+        "merge_retries": (
+            bool(getattr(namespace, "merge_retries", False))
+            if command == "analyze"
+            else False
+        ),
+        "judge_diffs": (
+            bool(getattr(namespace, "judge_diffs", False))
+            if command == "analyze"
+            else False
+        ),
+        "judge_model": getattr(namespace, "judge_model", "")
+        if command == "analyze"
+        else "",
+        "judge_provider": getattr(namespace, "judge_provider", "")
+        if command == "analyze"
+        else "",
         "commit_range": namespace.commit_range if command == "mine" else "",
         "max_commits": namespace.max_commits if command == "mine" else 0,
         "exclude_merges": namespace.exclude_merges if command == "mine" else False,
@@ -520,6 +573,61 @@ def _load_dataset_rows(dataset_path: Path) -> dict[str, dict[str, object]]:
     return rows
 
 
+_RETRYABLE_RUN_JOB_STATUSES = {
+    SolverAttemptState.FAILED,
+    SolverAttemptState.TIMED_OUT,
+    SolverAttemptState.INVALID_PATCH,
+    SolverAttemptState.BUDGET_EXCEEDED,
+}
+
+
+def _resolve_retry_run_jobs_path(path_value: str | Path) -> Path:
+    source = Path(path_value).expanduser().resolve()
+    candidate = source / "run_jobs.jsonl" if source.is_dir() else source
+    if not candidate.exists():
+        raise SolverSchedulerError(f"retry source not found: {candidate}")
+    if not candidate.is_file():
+        raise SolverSchedulerError(f"retry source is not a file: {candidate}")
+    return candidate
+
+
+def _job_seed_from_job_id(job_id: str) -> str:
+    prefix, sep, seed = str(job_id).rpartition(":")
+    if not sep or not prefix or not seed.strip():
+        raise SolverSchedulerError(f"job row missing parseable seed in job_id: {job_id}")
+    return seed.strip()
+
+
+def _load_retry_failure_keys(run_jobs_path: Path) -> set[tuple[str, str, str]]:
+    final_status_by_key: dict[tuple[str, str, str], str] = {}
+    try:
+        for raw_line in run_jobs_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            payload = json.loads(line)
+            job_id = str(payload.get("job_id", "")).strip()
+            instance_id = str(payload.get("instance_id", "")).strip()
+            solver_id = str(payload.get("solver_id", "")).strip()
+            status = str(payload.get("status", "")).strip()
+            if not job_id or not instance_id or not solver_id or not status:
+                raise SolverSchedulerError(
+                    f"retry source row missing required fields: {run_jobs_path}"
+                )
+            seed = _job_seed_from_job_id(job_id)
+            final_status_by_key[(instance_id, solver_id, seed)] = status
+    except json.JSONDecodeError as exc:
+        raise SolverSchedulerError(
+            f"retry source is not valid JSONL: {run_jobs_path}"
+        ) from exc
+
+    return {
+        key
+        for key, status in final_status_by_key.items()
+        if status in _RETRYABLE_RUN_JOB_STATUSES
+    }
+
+
 def _format_unexpected_error(exc: Exception) -> str:
     detail = str(exc).strip()
     exc_name = type(exc).__name__
@@ -601,6 +709,165 @@ def _resolve_analyze_paths(source: Path) -> tuple[Path | None, Path | None, Path
         )
 
     return attempts_path, instance_results_path, analyze_root
+
+
+_RETRY_FAMILY_PATTERN = re.compile(r"^(?P<base>.+?)-retry(?:-.+)?$")
+
+
+def _attempt_artifact_for_run_root(run_root: Path) -> Path | None:
+    return next(
+        (
+            candidate
+            for candidate in (
+                run_root / "attempts.jsonl",
+                run_root / "attempts.parquet",
+            )
+            if candidate.exists()
+        ),
+        None,
+    )
+
+
+def _instance_results_artifact_for_run_root(run_root: Path) -> Path | None:
+    direct = next(
+        (
+            candidate
+            for candidate in (
+                run_root / "instance_results.jsonl",
+                run_root / "validation.jsonl",
+            )
+            if candidate.exists()
+        ),
+        None,
+    )
+    if direct is not None:
+        return direct
+    eval_root = run_root / "eval"
+    return next(
+        (
+            candidate
+            for candidate in (
+                eval_root / "instance_results.jsonl",
+                eval_root / "validation.jsonl",
+            )
+            if candidate.exists()
+        ),
+        None,
+    )
+
+
+def _retry_family_base_name(run_name: str) -> str:
+    match = _RETRY_FAMILY_PATTERN.match(run_name)
+    if match is None:
+        return run_name
+    return match.group("base")
+
+
+def _discover_retry_family_run_roots(run_root: Path) -> list[Path]:
+    if not run_root.is_dir():
+        raise RuntimeError(f"retry merge requires a run directory, got: {run_root}")
+    parent = run_root.parent
+    base_name = _retry_family_base_name(run_root.name)
+
+    family: list[Path] = []
+    for candidate in sorted(path for path in parent.iterdir() if path.is_dir()):
+        candidate_name = candidate.name
+        if candidate_name != base_name and not candidate_name.startswith(
+            f"{base_name}-retry"
+        ):
+            continue
+        if _attempt_artifact_for_run_root(candidate) is None:
+            continue
+        family.append(candidate)
+
+    if not family:
+        raise RuntimeError(f"no runnable retry family found for {run_root}")
+
+    family.sort(key=lambda path: (0 if path.name == base_name else 1, path.name))
+    return family
+
+
+def _stable_attempt_merge_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    instance_id = str(row.get("instance_id", "")).strip()
+    solver_id = str(row.get("solver_id", "")).strip()
+    job_id = str(row.get("job_id", "")).strip()
+    if not instance_id or not solver_id or not job_id:
+        raise RuntimeError("attempt row missing instance_id, solver_id, or job_id")
+    return instance_id, solver_id, _job_seed_from_job_id(job_id)
+
+
+def _merge_retry_family_artifacts(
+    *,
+    source_run_root: Path,
+    out_root: Path,
+) -> tuple[Path, Path | None, dict[str, Any]]:
+    run_roots = _discover_retry_family_run_roots(source_run_root)
+    if len(run_roots) == 1:
+        run_root = run_roots[0]
+        attempts_path = _attempt_artifact_for_run_root(run_root)
+        if attempts_path is None:
+            raise RuntimeError(f"attempt artifacts not found in {run_root}")
+        return (
+            attempts_path,
+            _instance_results_artifact_for_run_root(run_root),
+            {"merged_retry_run_roots": [str(run_root)], "merged_retry_attempt_rows": 0},
+        )
+
+    merged_attempts_path = out_root / "attempts.merged.jsonl"
+    merged_instance_results_path = out_root / "instance_results.merged.jsonl"
+
+    merged_attempts: dict[tuple[str, str, str], dict[str, Any]] = {}
+    instance_result_paths: list[Path | None] = []
+    merged_instance_results: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for run_root in run_roots:
+        attempts_path = _attempt_artifact_for_run_root(run_root)
+        if attempts_path is None:
+            continue
+        for row in load_attempt_rows(attempts_path):
+            merged_attempts[_stable_attempt_merge_key(row)] = dict(row)
+
+        instance_results_path = _instance_results_artifact_for_run_root(run_root)
+        instance_result_paths.append(instance_results_path)
+        if instance_results_path is None:
+            continue
+        for row in load_instance_result_rows(instance_results_path):
+            key = (
+                str(row.get("solver_id", "")).strip(),
+                str(row.get("instance_id", "")).strip(),
+            )
+            if not key[0] or not key[1]:
+                continue
+            merged_instance_results[key] = dict(row)
+
+    merged_attempt_rows = list(merged_attempts.values())
+    merged_attempts_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in merged_attempt_rows),
+        encoding="utf-8",
+    )
+
+    merged_instance_results_output: Path | None = None
+    if instance_result_paths and all(path is not None for path in instance_result_paths):
+        merged_instance_results_output = merged_instance_results_path
+        merged_instance_results_path.write_text(
+            "".join(
+                json.dumps(row, sort_keys=True) + "\n"
+                for row in merged_instance_results.values()
+            ),
+            encoding="utf-8",
+        )
+
+    return (
+        merged_attempts_path,
+        merged_instance_results_output,
+        {
+            "merged_retry_run_roots": [str(path) for path in run_roots],
+            "merged_retry_attempt_rows": len(merged_attempt_rows),
+            "merged_retry_instance_result_rows": len(merged_instance_results)
+            if merged_instance_results_output is not None
+            else 0,
+        },
+    )
 
 
 def _count_matching_instance_results(
@@ -1565,6 +1832,56 @@ def _run_command(namespace: argparse.Namespace) -> int:
             print(f"repogauge analyze: error: {exc}", file=sys.stderr)
             return 1
 
+        analyze_merge_metadata: dict[str, Any] | None = None
+        if getattr(namespace, "merge_retries", False):
+            source_run_root = source if source.is_dir() else source.parent
+            try:
+                attempts_path, instance_results_path, analyze_merge_metadata = (
+                    _merge_retry_family_artifacts(
+                        source_run_root=source_run_root,
+                        out_root=out_root,
+                    )
+                )
+            except RuntimeError as exc:
+                manifest.mark_step(
+                    "inspect",
+                    ManifestStepStatus.FAILED,
+                    ended_at=datetime.now(timezone.utc)
+                    .replace(tzinfo=None)
+                    .isoformat()
+                    + "Z",
+                )
+                manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+                manifest.finish(
+                    status="failed",
+                    metadata={
+                        "reason": "analyze_retry_merge_failed",
+                        "path": str(source),
+                        "error": str(exc),
+                    },
+                )
+                manifest.mark_step(
+                    "finish",
+                    ManifestStepStatus.FAILED,
+                    ended_at=datetime.now(timezone.utc)
+                    .replace(tzinfo=None)
+                    .isoformat()
+                    + "Z",
+                )
+                manifest.write(manifest_path)
+                log_event(
+                    {
+                        "event": "command.finish",
+                        "command": command,
+                        "status": manifest.status,
+                        "timestamp": manifest.ended_at,
+                        "error": str(exc),
+                    },
+                    events_path,
+                )
+                print(f"repogauge analyze: error: {exc}", file=sys.stderr)
+                return 1
+
         if attempts_path is None:
             error_message = (
                 f"attempt artifacts not found in {analyze_root}; expected "
@@ -1832,6 +2149,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
         try:
             attempt_rows = load_attempt_rows(attempts_path)
             instance_results = load_instance_result_rows(instance_results_path)
+            joined_rows = join_attempt_rows(attempt_rows, instance_results)
             matched_instance_results = _count_matching_instance_results(
                 attempt_rows,
                 instance_results,
@@ -1856,6 +2174,53 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 group_by=("solver_id",),
                 expensive_cost_threshold=float(namespace.expensive_cost_threshold),
             )
+            llm_judge_result = None
+            llm_judge_report = None
+            if getattr(namespace, "judge_diffs", False):
+                judge_dataset_override = getattr(namespace, "dataset", None)
+                if judge_dataset_override:
+                    judge_dataset_path = Path(judge_dataset_override).resolve()
+                    if not judge_dataset_path.exists():
+                        raise RuntimeError(
+                            f"judge dataset not found: {judge_dataset_path}"
+                        )
+                else:
+                    judge_dataset_path = _dataset_path_from_attempts(attempts_path)
+                    if judge_dataset_path is None:
+                        raise RuntimeError(
+                            "could not determine dataset path for --judge-diffs; "
+                            "pass --dataset pointing at the benchmark dataset"
+                        )
+                llm_judge_result = run_diff_judge(
+                    joined_rows=joined_rows,
+                    dataset_rows=_load_dataset_rows(judge_dataset_path),
+                    out_root=out_root,
+                    llm_mode=namespace.llm_mode,
+                    model_name=getattr(namespace, "judge_model", None),
+                    provider=getattr(namespace, "judge_provider", None),
+                )
+                llm_judge_report = llm_judge_result.report
+
+            analysis_metadata = {
+                "run_root": str(analyze_root),
+                "input_root": str(source),
+                "group_by": _parse_group_by(namespace.group_by),
+                "expensive_cost_threshold": namespace.expensive_cost_threshold,
+                "task_feature_version": TASK_FEATURE_VERSION,
+                "attempt_rows": len(attempt_rows),
+                "instance_result_rows": len(instance_results),
+                "router_training_rows": len(router_rows),
+            }
+            if analyze_merge_metadata is not None:
+                analysis_metadata["run_retry_merge"] = analyze_merge_metadata
+            if llm_judge_result is not None:
+                analysis_metadata["llm_judge"] = {
+                    "rows_path": llm_judge_result.rows_path,
+                    "top_line": llm_judge_report.get("top_line", {})
+                    if llm_judge_report
+                    else {},
+                    "model": llm_judge_result.model,
+                }
             analysis_report = build_analysis_report(
                 attempts=attempt_rows,
                 instance_results=instance_results,
@@ -1863,16 +2228,8 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 solver_summaries=solver_rows,
                 group_by=_parse_group_by(namespace.group_by),
                 expensive_cost_threshold=float(namespace.expensive_cost_threshold),
-                metadata={
-                    "run_root": str(analyze_root),
-                    "input_root": str(source),
-                    "group_by": _parse_group_by(namespace.group_by),
-                    "expensive_cost_threshold": namespace.expensive_cost_threshold,
-                    "task_feature_version": TASK_FEATURE_VERSION,
-                    "attempt_rows": len(attempt_rows),
-                    "instance_result_rows": len(instance_results),
-                    "router_training_rows": len(router_rows),
-                },
+                metadata=analysis_metadata,
+                llm_judge_report=llm_judge_report,
             )
 
             summary_path = out_root / "summary.json"
@@ -1883,16 +2240,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             write_summary_json(
                 summary_path,
                 summary_rows,
-                metadata={
-                    "run_root": str(analyze_root),
-                    "input_root": str(source),
-                    "group_by": _parse_group_by(namespace.group_by),
-                    "expensive_cost_threshold": namespace.expensive_cost_threshold,
-                    "task_feature_version": TASK_FEATURE_VERSION,
-                    "attempt_rows": len(attempt_rows),
-                    "instance_result_rows": len(instance_results),
-                    "router_training_rows": len(router_rows),
-                },
+                metadata=analysis_metadata,
                 report=analysis_report,
             )
             write_summary_csv(
@@ -1909,15 +2257,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 report_html_path,
                 summary_rows,
                 group_by=_parse_group_by(namespace.group_by),
-                metadata={
-                    "run_root": str(analyze_root),
-                    "input_root": str(source),
-                    "group_by": _parse_group_by(namespace.group_by),
-                    "task_feature_version": TASK_FEATURE_VERSION,
-                    "attempt_rows": len(attempt_rows),
-                    "instance_result_rows": len(instance_results),
-                    "router_training_rows": len(router_rows),
-                },
+                metadata=analysis_metadata,
                 report=analysis_report,
             )
             write_router_training_rows(router_train_path, router_rows)
@@ -1939,6 +2279,16 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 instance_results_path
             )
             manifest.artifact_paths["analyze_run_root"] = str(analyze_root)
+            if llm_judge_result is not None:
+                manifest.artifact_paths["llm_judge"] = llm_judge_result.rows_path
+            if analyze_merge_metadata is not None:
+                manifest.artifact_paths["analyze_retry_merged_attempts"] = str(
+                    attempts_path
+                )
+                if instance_results_path is not None:
+                    manifest.artifact_paths["analyze_retry_merged_instance_results"] = (
+                        str(instance_results_path)
+                    )
             manifest.metadata["analyze"] = {
                 "group_by": _parse_group_by(namespace.group_by),
                 "expensive_cost_threshold": namespace.expensive_cost_threshold,
@@ -1950,7 +2300,16 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 "source": str(analyze_root),
                 "input_root": str(source),
                 "auto_eval": auto_eval_metadata,
+                "retry_merge": analyze_merge_metadata,
             }
+            if llm_judge_result is not None:
+                manifest.metadata["analyze"]["llm_judge"] = {
+                    "rows_path": llm_judge_result.rows_path,
+                    "top_line": llm_judge_report.get("top_line", {})
+                    if llm_judge_report
+                    else {},
+                    "model": llm_judge_result.model,
+                }
             manifest.mark_step(
                 "finish",
                 ManifestStepStatus.SUCCEEDED,
@@ -2204,13 +2563,45 @@ def _run_command(namespace: argparse.Namespace) -> int:
             "inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp
         )
         try:
+            retry_run_jobs_path: Path | None = None
+            retry_run_root: Path | None = None
+            retry_failure_keys: set[tuple[str, str, str]] | None = None
+            effective_run_id = namespace.run_id or None
+            if getattr(namespace, "retry_failures_from", None):
+                retry_run_jobs_path = _resolve_retry_run_jobs_path(
+                    namespace.retry_failures_from
+                )
+                retry_run_root = retry_run_jobs_path.parent
+                retry_failure_keys = _load_retry_failure_keys(retry_run_jobs_path)
+                if not retry_failure_keys:
+                    raise SolverSchedulerError(
+                        f"retry source has no unsuccessful jobs: {retry_run_jobs_path}"
+                    )
+                if not effective_run_id:
+                    effective_run_id = f"{retry_run_root.name}-retry"
             matrix = load_matrix_config(
                 namespace.path,
-                run_id=namespace.run_id or None,
+                run_id=effective_run_id,
                 dataset_path=namespace.dataset or None,
             )
             jobs = plan_jobs(matrix)
             run_root = out_root / matrix.run_id
+            if retry_run_root is not None and run_root.resolve() == retry_run_root:
+                raise SolverSchedulerError(
+                    "retry target run_root would overwrite the retry source; "
+                    "pass --run-id to write the retry into a different run directory"
+                )
+            if retry_failure_keys is not None:
+                jobs = [
+                    job
+                    for job in jobs
+                    if (job.instance_id, job.solver_id, str(job.seed))
+                    in retry_failure_keys
+                ]
+                if not jobs:
+                    raise SolverSchedulerError(
+                        "retry source jobs did not match the current matrix plan"
+                    )
             matrix_out = run_root / "matrix.yaml"
             jobs_out = run_root / "jobs.jsonl"
             run_manifest_out = run_root / "manifest.json"
@@ -2391,6 +2782,12 @@ def _run_command(namespace: argparse.Namespace) -> int:
             manifest.artifact_paths["run_summary"] = str(run_summary_out)
             if adapter_path is not None:
                 manifest.artifact_paths["adapter"] = str(adapter_path)
+            if retry_run_jobs_path is not None:
+                manifest.metadata["run_retry"] = {
+                    "source_run_jobs": str(retry_run_jobs_path),
+                    "retry_job_count": len(jobs),
+                    "retry_statuses": sorted(_RETRYABLE_RUN_JOB_STATUSES),
+                }
             manifest.finish(
                 status="succeeded",
                 metadata={

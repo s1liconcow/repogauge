@@ -820,6 +820,7 @@ def build_analysis_report(
     group_by: tuple[str, ...],
     expensive_cost_threshold: float,
     metadata: dict[str, Any] | None = None,
+    llm_judge_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the structured payload that feeds the static analysis report."""
     joined_rows = join_attempt_rows(attempts, instance_results)
@@ -973,6 +974,8 @@ def build_analysis_report(
                 "marginal_cost_per_extra_resolve"
             ),
         }
+    if llm_judge_report is not None:
+        report["llm_judge"] = llm_judge_report
 
     return report
 
@@ -1245,6 +1248,7 @@ def write_summary_html(
     failure_breakdown = report.get("failure_reason_breakdown", [])
     unresolved_samples = report.get("unresolved_samples", [])
     cost_opportunity = report.get("cost_opportunity", {})
+    llm_judge = report.get("llm_judge", {})
 
     solver_rows = list(solver_comparison.get("rows", []))
     savings_by_solver = {
@@ -1440,14 +1444,14 @@ def write_summary_html(
         min_rate = min(rates)
         max_rate = max(rates)
         palette = (
-            "#0f4c81",
-            "#1f7a8c",
-            "#ef8354",
-            "#4b7bec",
-            "#20bf6b",
-            "#eb3b5a",
-            "#3867d6",
-            "#8854d0",
+            "#635bff",
+            "#22d3ee",
+            "#f472b6",
+            "#a78bfa",
+            "#10b981",
+            "#fbbf24",
+            "#f43f5e",
+            "#38bdf8",
         )
 
         def x_pos(cost: float) -> float:
@@ -1459,6 +1463,8 @@ def write_summary_html(
 
         def y_pos(rate: float) -> float:
             if max_rate == min_rate:
+                if 0.0 <= max_rate <= 1.0:
+                    return margin_top + plot_height - (rate * plot_height)
                 return margin_top + plot_height / 2
             return (
                 margin_top
@@ -1792,6 +1798,40 @@ def write_summary_html(
             "format": "currency",
         },
     ]
+    judge_solver_columns = [
+        {"key": "solver_id", "label": "Solver", "format": "text"},
+        {"key": "judged_job_count", "label": "Judged Jobs", "format": "int"},
+        {"key": "avg_overall_delta", "label": "Avg Delta", "format": "default"},
+        {"key": "better_share", "label": "Better Share", "format": "percent"},
+        {"key": "worse_share", "label": "Worse Share", "format": "percent"},
+        {
+            "key": "resolved_but_worse_count",
+            "label": "Resolved But Worse",
+            "format": "int",
+        },
+        {
+            "key": "unresolved_but_promising_count",
+            "label": "Unresolved But Promising",
+            "format": "int",
+        },
+    ]
+    judge_dimension_columns = [
+        {"key": "name", "label": "Dimension", "format": "text"},
+        {"key": "weight", "label": "Weight", "format": "default"},
+        {"key": "avg_delta", "label": "Avg Delta", "format": "default"},
+        {"key": "better_share", "label": "Better Share", "format": "percent"},
+        {"key": "worse_share", "label": "Worse Share", "format": "percent"},
+    ]
+    judge_sample_columns = [
+        {"key": "solver_id", "label": "Solver", "format": "text"},
+        {"key": "instance_id", "label": "Instance", "format": "text"},
+        {"key": "overall_label", "label": "Verdict", "format": "text"},
+        {"key": "overall_delta", "label": "Delta", "format": "default"},
+        {"key": "confidence", "label": "Confidence", "format": "default"},
+        {"key": "harness_outcome", "label": "Harness", "format": "text"},
+        {"key": "attempt_state", "label": "Attempt", "format": "text"},
+        {"key": "summary", "label": "Summary", "format": "text"},
+    ]
     instance_savings_columns = [
         {"key": "instance_id", "label": "Instance", "format": "text"},
         {"key": "cheapest_solver_id", "label": "Cheapest Solver", "format": "text"},
@@ -1823,267 +1863,386 @@ def write_summary_html(
             "</details></section>"
         )
 
+    llm_judge_sections = ""
+    if llm_judge:
+        judge_top_line = llm_judge.get("top_line", {})
+        judge_summary_body = (
+            f"{_format_integer(judge_top_line.get('scored_job_count'))} jobs judged. "
+            f"Average delta {_display_number(judge_top_line.get('avg_overall_delta'))}. "
+            f"Better {_format_percent(judge_top_line.get('better_share'))}, "
+            f"worse {_format_percent(judge_top_line.get('worse_share'))}."
+        )
+        judge_best_solver_body = (
+            f"{_coerce_str(judge_top_line.get('best_solver_id') or 'n/a')} leads the advisory code-health comparison."
+        )
+        judge_error_body = (
+            f"{_format_integer(judge_top_line.get('error_job_count'))} latest-attempt rows could not be scored."
+        )
+        llm_judge_sections = (
+            '<div class="spotlight-grid">'
+            + render_callout("LLM Judge", judge_summary_body, tone="accent")
+            + render_callout("Best Judge Solver", judge_best_solver_body, tone="success")
+            + render_callout("Judge Errors", judge_error_body, tone="warning")
+            + "</div>"
+            + render_table(
+                title="LLM Judge Solver View",
+                subtitle="Advisory diff-versus-gold scoring aggregated on the latest attempt per job.",
+                table_id="llm-judge-solvers",
+                rows=llm_judge.get("solver_rows", []),
+                columns=judge_solver_columns,
+                empty_message="No judge rows were available.",
+            )
+            + '<div class="two-up">'
+            + render_table(
+                title="Judge Dimensions",
+                subtitle="Average better-or-worse signal per rubric dimension on the latest attempt per job.",
+                table_id="llm-judge-dimensions",
+                rows=llm_judge.get("dimension_rows", []),
+                columns=judge_dimension_columns,
+                empty_message="No rubric dimension data was available.",
+            )
+            + render_table(
+                title="Resolved But Worse Than Gold",
+                subtitle="Successful attempts that still looked worse than the reference patch on code-health grounds.",
+                table_id="llm-judge-resolved-worse",
+                rows=llm_judge.get("resolved_but_worse_than_gold", []),
+                columns=judge_sample_columns,
+                empty_message="No resolved attempts were judged worse than gold.",
+            )
+            + "</div>"
+            + '<div class="two-up">'
+            + render_table(
+                title="Unresolved But Promising",
+                subtitle="Attempts that failed the harness but still looked directionally better than the gold patch on code quality.",
+                table_id="llm-judge-unresolved-promising",
+                rows=llm_judge.get("unresolved_but_promising", []),
+                columns=judge_sample_columns,
+                empty_message="No unresolved attempts looked promising against gold.",
+            )
+            + render_table(
+                title="Best Diff Samples",
+                subtitle="The strongest candidate diffs according to the advisory judge.",
+                table_id="llm-judge-best-samples",
+                rows=llm_judge.get("best_samples", []),
+                columns=judge_sample_columns,
+                empty_message="No judged samples were available.",
+            )
+            + "</div>"
+            + render_table(
+                title="Worst Diff Samples",
+                subtitle="The weakest candidate diffs according to the advisory judge.",
+                table_id="llm-judge-worst-samples",
+                rows=llm_judge.get("worst_samples", []),
+                columns=judge_sample_columns,
+                empty_message="No judged samples were available.",
+            )
+        )
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>RepoGauge Analysis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"/>
   <style>
     :root {{
-      --bg: #f6f3ee;
-      --bg-2: #fffdf9;
-      --ink: #102135;
-      --muted: #5b6879;
-      --line: rgba(18, 33, 53, 0.12);
-      --panel: rgba(255, 255, 255, 0.82);
-      --panel-strong: rgba(255, 255, 255, 0.94);
-      --shadow: 0 24px 80px rgba(15, 33, 53, 0.12);
-      --blue: #0f4c81;
-      --teal: #0f7c82;
-      --orange: #eb8f47;
-      --green: #198754;
-      --rose: #d94f70;
-      --violet: #6a52d3;
-      --gold: #d5a021;
-      --radius-xl: 28px;
-      --radius-lg: 20px;
-      --radius-md: 14px;
-      --font-sans: "Avenir Next", "Segoe UI Variable Text", "SF Pro Display", "Helvetica Neue", sans-serif;
-      --font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Code", monospace;
+      --ink: #0a0c17;
+      --ink-soft: #1a1f33;
+      --body: #2a3145;
+      --muted: #5a6379;
+      --muted-2: #8892a6;
+      --hairline: rgba(10, 12, 23, 0.08);
+      --hairline-strong: rgba(10, 12, 23, 0.14);
+      --paper: #ffffff;
+      --paper-warm: #fafbff;
+      --canvas: #f4f5fb;
+      --accent: #635bff;
+      --accent-2: #22d3ee;
+      --accent-3: #f472b6;
+      --accent-glow: #a78bfa;
+      --amber: #fbbf24;
+      --emerald: #10b981;
+      --rose: #f43f5e;
+      --night: #06070f;
+      --night-2: #0b0e1c;
+      --r-sm: 10px;
+      --r-md: 14px;
+      --r-lg: 20px;
+      --r-xl: 28px;
+      --r-xxl: 36px;
+      --shadow-xs: 0 1px 2px rgba(10,12,23,0.04), 0 2px 6px rgba(10,12,23,0.04);
+      --shadow-sm: 0 2px 6px rgba(10,12,23,0.05), 0 8px 24px rgba(10,12,23,0.06);
+      --shadow-md: 0 10px 32px rgba(10,12,23,0.08), 0 2px 6px rgba(10,12,23,0.04);
+      --shadow-lg: 0 24px 60px rgba(10,12,23,0.12);
+      --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+      --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, "Cascadia Code", monospace;
     }}
     * {{ box-sizing: border-box; }}
     html, body {{ margin: 0; padding: 0; }}
     body {{
       font-family: var(--font-sans);
-      color: var(--ink);
+      color: var(--body);
       background:
-        radial-gradient(circle at top left, rgba(15, 124, 130, 0.16), transparent 28%),
-        radial-gradient(circle at top right, rgba(235, 143, 71, 0.14), transparent 26%),
-        linear-gradient(180deg, #fbf8f3 0%, #f6f3ee 46%, #f0ece5 100%);
+        radial-gradient(1100px 540px at 12% -4%, rgba(99,91,255,0.06), transparent 60%),
+        radial-gradient(900px 420px at 92% 8%, rgba(34,211,238,0.05), transparent 55%),
+        linear-gradient(180deg, #f8f9fd 0%, #f3f4fa 100%);
       min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "ss01", "cv11";
     }}
     .page {{
       max-width: 1440px;
       margin: 0 auto;
-      padding: 32px 24px 56px;
+      padding: 32px 24px 64px;
     }}
     .hero {{
       position: relative;
       overflow: hidden;
-      border-radius: 32px;
-      padding: 36px;
+      border-radius: var(--r-xxl);
+      padding: 44px 44px 40px;
       background:
-        linear-gradient(135deg, rgba(11, 52, 87, 0.96), rgba(18, 76, 129, 0.92) 52%, rgba(15, 124, 130, 0.88));
-      color: white;
-      box-shadow: var(--shadow);
+        radial-gradient(1100px 480px at 85% -12%, rgba(34,211,238,0.28), transparent 55%),
+        radial-gradient(900px 520px at 10% 115%, rgba(244,114,182,0.22), transparent 55%),
+        radial-gradient(720px 420px at 48% 48%, rgba(99,91,255,0.34), transparent 60%),
+        linear-gradient(160deg, var(--night) 0%, var(--night-2) 55%, #141932 100%);
+      color: #ffffff;
+      box-shadow: var(--shadow-lg);
       isolation: isolate;
     }}
-    .hero::before,
-    .hero::after {{
+    .hero::before {{
       content: "";
       position: absolute;
-      border-radius: 999px;
-      filter: blur(10px);
-      opacity: 0.58;
+      inset: 0;
+      background-image:
+        linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(65% 60% at 50% 40%, #000 60%, transparent 100%);
+      opacity: 0.6;
       z-index: -1;
-    }}
-    .hero::before {{
-      width: 320px;
-      height: 320px;
-      right: -60px;
-      top: -90px;
-      background: radial-gradient(circle, rgba(255,255,255,0.22), transparent 68%);
-    }}
-    .hero::after {{
-      width: 240px;
-      height: 240px;
-      left: -30px;
-      bottom: -70px;
-      background: radial-gradient(circle, rgba(235,143,71,0.45), transparent 66%);
     }}
     .hero__eyebrow {{
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      font-size: 12px;
-      letter-spacing: 0.12em;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: rgba(255,255,255,0.75);
-      margin-bottom: 16px;
+      color: rgba(255,255,255,0.72);
+      margin-bottom: 22px;
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
     }}
     .hero__eyebrow::before {{
       content: "";
-      width: 28px;
-      height: 1px;
-      background: rgba(255,255,255,0.45);
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--emerald);
+      box-shadow: 0 0 10px rgba(16,185,129,0.85);
     }}
     .hero h1 {{
       margin: 0 0 14px;
-      font-size: clamp(2.4rem, 4vw, 4rem);
-      line-height: 0.96;
-      letter-spacing: -0.04em;
-      max-width: 12ch;
+      font-size: clamp(2.1rem, 3.6vw, 3.4rem);
+      line-height: 1.03;
+      letter-spacing: -0.035em;
+      max-width: 16ch;
+      font-weight: 700;
+      background: linear-gradient(180deg, #ffffff 42%, rgba(255,255,255,0.72) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
     }}
     .hero p {{
       margin: 0;
-      max-width: 68ch;
-      color: rgba(255,255,255,0.86);
-      font-size: 1.04rem;
-      line-height: 1.6;
+      max-width: 72ch;
+      color: rgba(220, 226, 245, 0.78);
+      font-size: 1.02rem;
+      line-height: 1.65;
     }}
     .hero__stats {{
-      margin-top: 26px;
+      margin-top: 30px;
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
+      gap: 12px;
     }}
     .hero__stat {{
       padding: 16px 18px;
-      border-radius: 18px;
-      background: rgba(255,255,255,0.08);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: var(--r-md);
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      border: 1px solid rgba(255,255,255,0.10);
     }}
     .hero__stat-label {{
-      font-size: 0.72rem;
-      letter-spacing: 0.08em;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: rgba(255,255,255,0.68);
+      color: rgba(220, 226, 245, 0.56);
     }}
     .hero__stat-value {{
       display: block;
       margin-top: 10px;
-      font-size: 1.3rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
+      font-size: 1.12rem;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+      color: #ffffff;
     }}
     .section-grid {{
       display: grid;
-      gap: 22px;
-      margin-top: 24px;
+      gap: 20px;
+      margin-top: 22px;
     }}
     .metric-grid {{
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
+      gap: 16px;
     }}
     .spotlight-grid {{
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
+      gap: 16px;
     }}
     .two-up {{
       display: grid;
       grid-template-columns: 1.45fr 1fr;
-      gap: 22px;
+      gap: 20px;
     }}
     .panel {{
-      background: var(--panel);
-      border: 1px solid rgba(16, 33, 53, 0.08);
-      border-radius: var(--radius-xl);
-      box-shadow: var(--shadow);
+      background: var(--paper);
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-xl);
+      box-shadow: var(--shadow-sm);
       padding: 24px;
-      backdrop-filter: blur(12px);
-      animation: panel-enter 480ms ease both;
+      animation: panel-enter 460ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
     }}
-    .panel--chart {{
-      overflow: hidden;
-    }}
+    .panel--chart {{ overflow: hidden; }}
     .section-heading {{
       display: flex;
       align-items: flex-end;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 18px;
     }}
     .section-heading h2 {{
       margin: 0;
-      font-size: 1.28rem;
-      letter-spacing: -0.03em;
+      font-size: 1.2rem;
+      letter-spacing: -0.025em;
+      color: var(--ink);
+      font-weight: 600;
     }}
     .section-heading p {{
-      margin: 0;
+      margin: 4px 0 0;
       color: var(--muted);
       max-width: 76ch;
       line-height: 1.55;
+      font-size: 0.92rem;
     }}
     .metric-card {{
       position: relative;
       overflow: hidden;
-      min-height: 188px;
-      border-radius: 24px;
+      min-height: 180px;
+      border-radius: var(--r-lg);
       padding: 22px;
-      background: var(--panel-strong);
-      border: 1px solid rgba(16, 33, 53, 0.08);
-      box-shadow: 0 18px 45px rgba(16, 33, 53, 0.08);
+      background: var(--paper);
+      border: 1px solid var(--hairline);
+      box-shadow: var(--shadow-xs);
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }}
+    .metric-card:hover {{
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
     }}
     .metric-card::before {{
       content: "";
       position: absolute;
       inset: 0 auto auto 0;
       width: 100%;
-      height: 4px;
-      background: linear-gradient(90deg, rgba(15, 76, 129, 0.18), rgba(15, 124, 130, 0.68), rgba(235, 143, 71, 0.68));
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
     }}
-    .metric-card--success::before {{ background: linear-gradient(90deg, rgba(25,135,84,0.25), rgba(25,135,84,0.9)); }}
-    .metric-card--accent::before {{ background: linear-gradient(90deg, rgba(15,76,129,0.3), rgba(15,124,130,0.88)); }}
-    .metric-card--cool::before {{ background: linear-gradient(90deg, rgba(106,82,211,0.24), rgba(75,123,236,0.92)); }}
-    .metric-card--warm::before {{ background: linear-gradient(90deg, rgba(235,143,71,0.28), rgba(235,143,71,0.95)); }}
-    .metric-card--highlight::before {{ background: linear-gradient(90deg, rgba(213,160,33,0.28), rgba(213,160,33,0.95)); }}
+    .metric-card--success::before   {{ background: linear-gradient(90deg, var(--emerald), #34d399); }}
+    .metric-card--accent::before    {{ background: linear-gradient(90deg, var(--accent), var(--accent-glow)); }}
+    .metric-card--cool::before      {{ background: linear-gradient(90deg, var(--accent-2), #67e8f9); }}
+    .metric-card--warm::before      {{ background: linear-gradient(90deg, var(--accent-3), #fb7185); }}
+    .metric-card--highlight::before {{ background: linear-gradient(90deg, var(--amber), #fde68a); }}
     .metric-card__eyebrow {{
       display: inline-block;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.09em;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--muted);
     }}
     .metric-card__title {{
-      margin: 12px 0 10px;
-      font-size: 1rem;
-      font-weight: 600;
+      margin: 10px 0 14px;
+      font-size: 0.95rem;
+      font-weight: 500;
       color: var(--ink);
     }}
     .metric-card__value {{
-      font-size: clamp(1.7rem, 2.5vw, 2.6rem);
-      line-height: 0.95;
-      letter-spacing: -0.05em;
+      font-size: clamp(1.7rem, 2.5vw, 2.4rem);
+      line-height: 0.96;
+      letter-spacing: -0.045em;
       font-weight: 700;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
     }}
     .metric-card__support {{
-      margin: 14px 0 0;
+      margin: 12px 0 0;
       color: var(--muted);
       line-height: 1.5;
-      max-width: 26ch;
+      max-width: 28ch;
+      font-size: 0.88rem;
     }}
     .callout {{
-      border-radius: 22px;
+      border-radius: var(--r-lg);
       padding: 22px;
-      background: rgba(255,255,255,0.72);
-      border: 1px solid rgba(16,33,53,0.08);
+      background: var(--paper);
+      border: 1px solid var(--hairline);
+      box-shadow: var(--shadow-xs);
     }}
     .callout h3 {{
-      margin: 0 0 8px;
-      font-size: 0.9rem;
+      margin: 0 0 10px;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.14em;
       color: var(--muted);
+      font-weight: 600;
     }}
     .callout p {{
       margin: 0;
-      font-size: 1.08rem;
-      line-height: 1.6;
-      letter-spacing: -0.015em;
+      font-size: 1.02rem;
+      line-height: 1.55;
+      letter-spacing: -0.01em;
+      color: var(--ink);
     }}
-    .callout--success {{ background: linear-gradient(180deg, rgba(25,135,84,0.08), rgba(255,255,255,0.88)); }}
-    .callout--accent {{ background: linear-gradient(180deg, rgba(15,76,129,0.08), rgba(255,255,255,0.88)); }}
-    .callout--warning {{ background: linear-gradient(180deg, rgba(235,143,71,0.11), rgba(255,255,255,0.88)); }}
+    .callout--success {{
+      background: linear-gradient(180deg, rgba(16,185,129,0.08), var(--paper) 70%);
+      border-color: rgba(16,185,129,0.22);
+    }}
+    .callout--accent {{
+      background: linear-gradient(180deg, rgba(99,91,255,0.07), var(--paper) 70%);
+      border-color: rgba(99,91,255,0.20);
+    }}
+    .callout--warning {{
+      background: linear-gradient(180deg, rgba(244,114,182,0.09), var(--paper) 70%);
+      border-color: rgba(244,114,182,0.22);
+    }}
     .table-shell {{
       overflow: auto;
-      border-radius: 18px;
-      border: 1px solid rgba(16,33,53,0.08);
-      background: rgba(255,255,255,0.72);
+      border-radius: var(--r-md);
+      border: 1px solid var(--hairline);
+      background: var(--paper);
     }}
     table {{
       width: 100%;
@@ -2091,29 +2250,34 @@ def write_summary_html(
       min-width: 820px;
     }}
     th, td {{
-      padding: 14px 16px;
-      border-bottom: 1px solid rgba(16,33,53,0.08);
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--hairline);
       text-align: left;
-      font-size: 0.94rem;
+      font-size: 0.92rem;
       vertical-align: top;
+      color: var(--ink);
     }}
+    td {{ font-variant-numeric: tabular-nums; }}
     thead th {{
       position: sticky;
       top: 0;
-      background: rgba(255,255,255,0.96);
+      background: var(--paper-warm);
       z-index: 1;
-      font-size: 0.79rem;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
       color: var(--muted);
+      border-bottom: 1px solid var(--hairline-strong);
     }}
-    tbody tr:hover {{
-      background: rgba(15,124,130,0.04);
-    }}
+    tbody tr {{ transition: background 120ms ease; }}
+    tbody tr:hover {{ background: rgba(99,91,255,0.04); }}
+    tbody tr:last-child td {{ border-bottom: 0; }}
     .sort-button {{
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       border: 0;
       padding: 0;
       background: transparent;
@@ -2123,9 +2287,10 @@ def write_summary_html(
       letter-spacing: inherit;
       cursor: pointer;
     }}
+    .sort-button:hover {{ color: var(--accent); }}
     .sort-button__glyph {{
-      font-size: 0.92em;
-      opacity: 0.55;
+      font-size: 0.9em;
+      opacity: 0.5;
     }}
     .bar-list {{
       list-style: none;
@@ -2134,72 +2299,68 @@ def write_summary_html(
       display: grid;
       gap: 14px;
     }}
-    .bar-list__item {{
-      padding: 0;
-    }}
+    .bar-list__item {{ padding: 0; }}
     .bar-list__header {{
       display: flex;
       justify-content: space-between;
       gap: 12px;
       margin-bottom: 8px;
       color: var(--ink);
+      font-size: 0.92rem;
     }}
+    .bar-list__header strong {{ font-variant-numeric: tabular-nums; }}
     .bar-list__track {{
-      height: 12px;
+      height: 10px;
       border-radius: 999px;
-      background: rgba(16,33,53,0.08);
+      background: rgba(10,12,23,0.06);
       overflow: hidden;
     }}
     .bar-list__fill {{
       display: block;
       height: 100%;
       border-radius: inherit;
-      background: linear-gradient(90deg, var(--blue), var(--teal));
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
     }}
-    .bar-list__fill--blue {{ background: linear-gradient(90deg, var(--blue), var(--teal)); }}
-    .bar-list__fill--orange {{ background: linear-gradient(90deg, var(--orange), #f5c257); }}
-    .bar-list__fill--rose {{ background: linear-gradient(90deg, var(--rose), #ff8fa3); }}
-    .chart-shell {{
-      display: grid;
-      gap: 18px;
-    }}
+    .bar-list__fill--blue   {{ background: linear-gradient(90deg, var(--accent), var(--accent-2)); }}
+    .bar-list__fill--orange {{ background: linear-gradient(90deg, var(--accent-3), var(--amber)); }}
+    .bar-list__fill--rose   {{ background: linear-gradient(90deg, var(--rose), var(--accent-3)); }}
+    .chart-shell {{ display: grid; gap: 16px; }}
     .chart-surface {{
-      fill: rgba(255,255,255,0.68);
-      stroke: rgba(16,33,53,0.08);
+      fill: #fafbff;
+      stroke: var(--hairline);
     }}
     .chart-grid {{
-      stroke: rgba(16,33,53,0.08);
+      stroke: rgba(10,12,23,0.07);
       stroke-width: 1;
     }}
-    .chart-grid--vertical {{
-      stroke-dasharray: 4 7;
-    }}
+    .chart-grid--vertical {{ stroke-dasharray: 3 6; }}
     .chart-axis {{
-      stroke: rgba(16,33,53,0.22);
-      stroke-width: 1.5;
+      stroke: rgba(10,12,23,0.22);
+      stroke-width: 1.25;
     }}
     .chart-axis-label {{
-      fill: rgba(16,33,53,0.64);
-      font-size: 11px;
-      font-family: var(--font-sans);
+      fill: var(--muted);
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.04em;
     }}
     .chart-title {{
-      fill: rgba(16,33,53,0.9);
-      font-size: 13px;
+      fill: var(--ink);
+      font-size: 12px;
       font-weight: 600;
       font-family: var(--font-sans);
     }}
     .chart-point-label {{
-      fill: rgba(16,33,53,0.84);
-      font-size: 11px;
-      font-weight: 700;
-      font-family: var(--font-sans);
-      letter-spacing: 0.01em;
+      fill: var(--ink);
+      font-size: 10.5px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      letter-spacing: 0.02em;
     }}
     .legend {{
       display: flex;
       flex-wrap: wrap;
-      gap: 12px 18px;
+      gap: 10px 18px;
       list-style: none;
       margin: 0;
       padding: 0;
@@ -2209,39 +2370,42 @@ def write_summary_html(
       align-items: center;
       gap: 8px;
       color: var(--muted);
+      font-size: 0.88rem;
     }}
     .legend__swatch {{
-      width: 12px;
-      height: 12px;
+      width: 10px;
+      height: 10px;
       border-radius: 999px;
     }}
     .chip {{
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 7px 11px;
+      padding: 6px 11px;
       border-radius: 999px;
-      background: rgba(15,76,129,0.10);
-      color: var(--blue);
-      font-size: 0.77rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
+      background: rgba(99,91,255,0.10);
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
     }}
     .chip--warning {{
-      background: rgba(235,143,71,0.12);
-      color: #a55a00;
+      background: rgba(251,191,36,0.14);
+      color: #b45309;
     }}
     .incident-grid {{
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 18px;
+      gap: 16px;
     }}
     .incident-card {{
-      border-radius: 20px;
-      padding: 20px;
-      background: rgba(255,255,255,0.78);
-      border: 1px solid rgba(16,33,53,0.08);
+      border-radius: var(--r-lg);
+      padding: 22px;
+      background: var(--paper);
+      border: 1px solid var(--hairline);
+      box-shadow: var(--shadow-xs);
     }}
     .incident-card__top {{
       display: flex;
@@ -2251,29 +2415,34 @@ def write_summary_html(
     }}
     .incident-card h3 {{
       margin: 16px 0 8px;
-      font-size: 1.02rem;
+      font-size: 1rem;
       letter-spacing: -0.02em;
+      color: var(--ink);
+      font-weight: 600;
     }}
     .incident-card p {{
       margin: 0;
       color: var(--muted);
       line-height: 1.55;
+      font-size: 0.92rem;
     }}
     .incident-card__meta {{
       margin: 18px 0 0;
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
+      gap: 10px;
     }}
     .incident-card__meta div {{
-      padding: 12px;
-      border-radius: 14px;
-      background: rgba(16,33,53,0.04);
+      padding: 12px 14px;
+      border-radius: var(--r-sm);
+      background: var(--canvas);
+      border: 1px solid var(--hairline);
     }}
     .incident-card__meta dt {{
-      font-size: 0.76rem;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
       color: var(--muted);
       margin-bottom: 6px;
     }}
@@ -2281,41 +2450,46 @@ def write_summary_html(
       margin: 0;
       font-weight: 600;
       line-height: 1.45;
-    }}
-    .metadata-panel {{
-      border-radius: 18px;
-      background: rgba(255,255,255,0.5);
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
     }}
     .metadata-panel summary {{
       cursor: pointer;
-      font-weight: 700;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
     }}
+    .metadata-panel[open] summary {{ color: var(--accent); }}
     pre {{
       margin: 16px 0 0;
       padding: 18px;
       overflow: auto;
-      background: rgba(16,33,53,0.92);
-      color: #f4f5f7;
-      border-radius: 18px;
+      background: var(--night);
+      color: #d7dbef;
+      border-radius: var(--r-md);
+      border: 1px solid rgba(255,255,255,0.08);
       font-family: var(--font-mono);
       font-size: 12px;
-      line-height: 1.6;
+      line-height: 1.65;
     }}
     .empty-state {{
-      border-radius: 18px;
-      padding: 22px;
-      background: rgba(16,33,53,0.04);
+      border-radius: var(--r-md);
+      padding: 20px 22px;
+      background: var(--canvas);
+      border: 1px dashed var(--hairline-strong);
       color: var(--muted);
+      font-size: 0.92rem;
     }}
     @keyframes panel-enter {{
-      from {{
-        opacity: 0;
-        transform: translateY(8px);
-      }}
-      to {{
-        opacity: 1;
-        transform: translateY(0);
-      }}
+      from {{ opacity: 0; transform: translateY(8px); }}
+      to   {{ opacity: 1; transform: translateY(0); }}
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      .panel {{ animation: none; }}
+      .metric-card {{ transition: none; }}
     }}
     @media (max-width: 1120px) {{
       .metric-grid,
@@ -2328,7 +2502,7 @@ def write_summary_html(
     }}
     @media (max-width: 760px) {{
       .page {{ padding: 18px 14px 32px; }}
-      .hero {{ padding: 24px; }}
+      .hero {{ padding: 26px; }}
       .metric-grid,
       .spotlight-grid,
       .two-up,
@@ -2347,7 +2521,7 @@ def write_summary_html(
   <main class="page">
     <header class="hero">
       <span class="hero__eyebrow">RepoGauge Analysis</span>
-      <h1>Model performance you can actually route by.</h1>
+      <h1>Replace vibes with evidence.</h1>
       <p>
         This report turns raw run and evaluation artifacts into a decision surface:
         which solvers win, which ones are cheap, how their latency and token burn compare,
@@ -2464,6 +2638,7 @@ def write_summary_html(
     }
       </div>
       {render_unresolved_cards(unresolved_samples)}
+      {llm_judge_sections}
       {metadata_block}
     </section>
   </main>

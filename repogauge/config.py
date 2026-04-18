@@ -170,6 +170,23 @@ class AttemptRow(ContractRecord):
 
 
 @dataclass
+class DiffJudgeRow(ContractRecord):
+    attempt_id: str = ""
+    job_id: str = ""
+    instance_id: str = ""
+    solver_id: str = ""
+    resolved: bool = False
+    harness_outcome: str = "unknown"
+    attempt_state: str = "unknown"
+    overall_delta: float = 0.0
+    overall_label: str = "same"
+    confidence: float = 0.0
+    summary: str = ""
+    dimensions: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class InstanceEvalRow(ContractRecord):
     instance_id: str = ""
     solver_id: str = ""
@@ -192,6 +209,7 @@ ALL_RECORD_TYPES = [
     AdapterSpec,
     JobRow,
     AttemptRow,
+    DiffJudgeRow,
     InstanceEvalRow,
 ]
 

@@ -133,6 +133,57 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
         group_by=("task_cluster",),
         expensive_cost_threshold=5.0,
         metadata={"run_root": "/tmp/run"},
+        llm_judge_report={
+            "enabled": True,
+            "top_line": {
+                "judged_attempt_count": 2,
+                "judged_job_count": 2,
+                "scored_job_count": 2,
+                "error_job_count": 0,
+                "cache_hit_count": 0,
+                "avg_overall_delta": 0.4,
+                "better_share": 0.5,
+                "worse_share": 0.0,
+                "best_solver_id": "solver-expensive",
+            },
+            "solver_rows": [
+                {
+                    "solver_id": "solver-expensive",
+                    "judged_job_count": 2,
+                    "avg_overall_delta": 0.4,
+                    "better_share": 0.5,
+                    "worse_share": 0.0,
+                    "resolved_but_worse_count": 0,
+                    "unresolved_but_promising_count": 1,
+                }
+            ],
+            "dimension_rows": [
+                {
+                    "name": "maintainability",
+                    "weight": 0.2,
+                    "avg_delta": 0.5,
+                    "better_share": 0.5,
+                    "worse_share": 0.0,
+                }
+            ],
+            "resolved_but_worse_than_gold": [],
+            "unresolved_but_promising": [
+                {
+                    "attempt_id": "a-1",
+                    "instance_id": "inst-2",
+                    "solver_id": "solver-expensive",
+                    "resolved": False,
+                    "harness_outcome": "timeout",
+                    "attempt_state": "succeeded",
+                    "overall_delta": 0.4,
+                    "overall_label": "better",
+                    "confidence": 0.8,
+                    "summary": "Directionally good.",
+                }
+            ],
+            "best_samples": [],
+            "worst_samples": [],
+        },
     )
 
     assert report["top_line"]["best_solver_id"] == "solver-expensive"
@@ -144,6 +195,7 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert report["top_line"]["total_tool_calls"] == 2
     assert report["cost_opportunity"]["portfolio_cost_floor_usd"] == 8.0
     assert report["cost_opportunity"]["best_solver_mixed_routing_gap_usd"] == 5.0
+    assert report["llm_judge"]["top_line"]["best_solver_id"] == "solver-expensive"
     assert (
         report["cost_opportunity"]["solver_savings"][0]["solver_id"]
         == "solver-expensive"
@@ -181,5 +233,7 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert "Total Tokens" in html
     assert "Avg Tool Calls" in html
     assert "Best Solver" in html
+    assert "LLM Judge Solver View" in html
+    assert "Unresolved But Promising" in html
     assert "task_cluster" in html
     assert "Solver" in html
