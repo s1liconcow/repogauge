@@ -4,6 +4,9 @@ from repogauge import __version__  # noqa: F401
 from repogauge.cli import main
 from repogauge.config import DatasetInstance
 from repogauge.config import RepoProfile
+from repogauge.lang import DetectionResult
+from repogauge.lang import FileRoleRules
+from repogauge.lang import detect_language
 from repogauge.validation import EnvPlan
 from repogauge.manifest import Manifest
 from repogauge.export.specs import AdapterConfig
@@ -40,3 +43,6 @@ def test_contract_imports():
         confidence=1.0,
         provenance=[],
     )
+    assert DetectionResult(language="unknown", confidence=0.0, signals=[])
+    assert FileRoleRules(set(), [], set(), set(), set())
+    assert callable(detect_language)
