@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 import re
 
+from repogauge.lang import detect_language, find_adapter, iter_adapters
 from repogauge.mining.signature import REPO_VERSION_UNKNOWN, build_environment_signature
 from repogauge.exec import run_command
 from repogauge.utils.git import get_default_branch, get_repo_root
@@ -163,93 +164,6 @@ def _detect_repo_name(repo_root: Path, warnings: list[dict]) -> str:
     return repo_root.name
 
 
-def _detect_package_and_install_hints(
-    repo_root: Path,
-) -> tuple[list[str], list[str], list[str]]:
-    install_hints: list[str] = []
-    package_managers: list[str] = []
-    hints: list[str] = []
-
-    pyproject = repo_root / "pyproject.toml"
-    setup_py = repo_root / "setup.py"
-    setup_cfg = repo_root / "setup.cfg"
-    requirements_files = sorted(repo_root.glob("requirements*.txt"))
-    pipenv_files = [repo_root / "Pipfile"]
-    uv_lock = repo_root / "uv.lock"
-
-    if pyproject.exists():
-        text = _safe_read_text(pyproject)
-        package_managers.append("pyproject")
-        if "tool.poetry" in text:
-            package_managers.append("poetry")
-            install_hints.append("poetry install")
-            hints.append("pyproject:poetry")
-        elif "[project]" in text:
-            package_managers.append("pep621")
-            install_hints.append("pip install -e .")
-            hints.append("pyproject:project")
-        else:
-            install_hints.append("pip install -e .")
-            hints.append("pyproject:generic")
-
-    if setup_py.exists():
-        package_managers.append("setuptools")
-        install_hints.append("pip install -e .")
-        hints.append("setup.py")
-
-    if setup_cfg.exists():
-        package_managers.append("setuptools")
-        install_hints.append("pip install -e .")
-        if "tool.pytest" in _safe_read_text(setup_cfg):
-            hints.append("setup.cfg:tool.pytest")
-
-    for req in requirements_files:
-        package_managers.append("requirements")
-        install_hints.append(f"pip install -r {req.name}")
-        hints.append(f"requirements:{req.name}")
-
-    if pipenv_files[0].exists():
-        package_managers.append("pipenv")
-        install_hints.append("pipenv install")
-
-    if uv_lock.exists():
-        package_managers.append("uv")
-        install_hints.append("uv sync")
-
-    if not install_hints:
-        install_hints.append("pip install -e .")
-
-    return (
-        _as_sorted_unique(package_managers),
-        _as_sorted_unique(install_hints),
-        _as_sorted_unique(hints),
-    )
-
-
-def _detect_test_runner_hints(repo_root: Path) -> list[str]:
-    commands: list[str] = []
-    if (repo_root / "tox.ini").exists():
-        commands.append("tox")
-    if (repo_root / "noxfile.py").exists():
-        commands.append("nox")
-
-    pyproject = _safe_read_text(repo_root / "pyproject.toml")
-    setup_cfg = _safe_read_text(repo_root / "setup.cfg")
-
-    if (repo_root / "pytest.ini").exists():
-        commands.append("pytest")
-    if "tool.pytest.ini_options" in pyproject or "[tool.pytest" in setup_cfg:
-        commands.append("pytest")
-    if "unittest" in pyproject.lower() or "unittest" in setup_cfg.lower():
-        commands.append("python -m unittest")
-
-    if "testpath" in setup_cfg or "addopts" in setup_cfg:
-        commands.append("pytest")
-    if not commands:
-        commands.append("python -m pytest")
-    return _as_sorted_unique(commands)
-
-
 def _parse_repo_profile_warnings(
     repo_root: Path,
     package_managers: list[str],
@@ -277,7 +191,7 @@ def _parse_repo_profile_warnings(
                 "type": "python_version_conflict",
                 "message": f"Conflicting python versions detected: {', '.join(python_versions)}",
             }
-        )
+    )
     return warnings
 
 
@@ -297,23 +211,6 @@ def _detect_ci_files(repo_root: Path) -> list[str]:
         elif path.exists():
             raw.append(str(path.relative_to(repo_root)))
     return _as_sorted_unique(raw)
-
-
-def _detect_test_paths(repo_root: Path) -> list[str]:
-    paths = []
-    if (repo_root / "tests").is_dir():
-        paths.append("tests")
-    if (repo_root / "test").is_dir():
-        paths.append("test")
-    return paths
-
-
-def _detect_package_style(repo_root: Path) -> str:
-    if (repo_root / "src").is_dir():
-        return "src"
-    if any((repo_root / p).is_dir() for p in ["lib", "package"]):
-        return "flat"
-    return "unknown"
 
 
 def inspect_repository(path: str | Path) -> Dict[str, Any]:
@@ -344,63 +241,79 @@ def inspect_repository(path: str | Path) -> Dict[str, Any]:
             }
         )
 
-    package_managers, install_hints, package_hints = _detect_package_and_install_hints(
-        repo_root_resolved
-    )
-    test_commands = _detect_test_runner_hints(repo_root_resolved)
-    repo_version = _detect_package_version(repo_root_resolved)
-
-    python_versions: list[str] = []
-    if (repo_root_resolved / ".python-version").exists():
-        python_versions.extend(
-            _parse_version_tokens(
-                _safe_read_text(repo_root_resolved / ".python-version")
-            )
-        )
-    if (repo_root_resolved / "pyproject.toml").exists():
-        python_versions.extend(
-            _parse_requires_python(
-                _safe_read_text(repo_root_resolved / "pyproject.toml")
-            )
+    detection = detect_language(repo_root_resolved)
+    language_detections: list[dict[str, Any]] = []
+    for adapter in iter_adapters():
+        result = adapter.detect(repo_root_resolved)
+        language_detections.append(
+            {
+                "name": adapter.name(),
+                "confidence": result.confidence,
+                "signals": list(result.signals),
+            }
         )
 
-    if (repo_root_resolved / "tox.ini").exists():
-        tox_text = _safe_read_text(repo_root_resolved / "tox.ini")
-        python_versions.extend(_parse_version_tokens(tox_text))
-    python_versions = _as_sorted_unique(python_versions)
+    try:
+        adapter = find_adapter(detection.language)
+        language = detection.language
+    except KeyError:
+        adapter = find_adapter("python")
+        language = adapter.name()
+
+    inspected = adapter.inspect(repo_root_resolved)
+    language_hints = inspected.get("language_hints")
+    if not isinstance(language_hints, dict):
+        language_hints = inspected.get("python_hints")
+    if not isinstance(language_hints, dict):
+        language_hints = {}
+    python_hints = inspected.get("python_hints")
+    if not isinstance(python_hints, dict):
+        python_hints = {}
+
+    install_hints = inspected.get("install_hints")
+    if not isinstance(install_hints, list):
+        install_hints = []
+    test_runner_hints = inspected.get("test_runner_hints")
+    if not isinstance(test_runner_hints, dict):
+        test_runner_hints = {"commands": [], "signals": []}
+    test_paths = inspected.get("test_paths")
+    if not isinstance(test_paths, list):
+        test_paths = []
+    profile_warnings = inspected.get("profile_warnings")
+    if not isinstance(profile_warnings, list):
+        profile_warnings = []
+    repo_version = inspected.get("repo_version", REPO_VERSION_UNKNOWN)
+    if not isinstance(repo_version, str) or not repo_version.strip():
+        repo_version = REPO_VERSION_UNKNOWN
 
     warnings.extend(
-        _parse_repo_profile_warnings(
-            repo_root_resolved,
-            package_managers=package_managers,
-            test_commands=test_commands,
-            python_versions=python_versions,
-        )
+        [item for item in profile_warnings if isinstance(item, dict)]
     )
+
     profile = {
         "repo_name": repo_name,
         "repo_root": str(repo_root_resolved),
         "repo_version": repo_version,
         "default_branch": default_branch,
+        "language": language,
+        "language_version": detection.runtime_version
+        or inspected.get("language_version")
+        or inspected.get("runtime_version")
+        or "",
         "commit_range": {
             "from": f"{default_branch}~100",
             "to": "HEAD",
         },
-        "python_hints": {
-            "versions": python_versions,
-            "package_managers": package_managers,
-            "package_style": _detect_package_style(repo_root_resolved),
-            "signals": package_hints,
-        },
+        "language_hints": language_hints,
         "install_hints": install_hints,
-        "test_runner_hints": {
-            "commands": test_commands,
-            "signals": [],
-        },
+        "test_runner_hints": test_runner_hints,
         "ci_files": _detect_ci_files(repo_root_resolved),
-        "test_paths": _detect_test_paths(repo_root_resolved),
+        "test_paths": test_paths,
+        "language_detection": language_detections,
         "profile_warnings": warnings,
     }
+    if language == "python":
+        profile["python_hints"] = python_hints or language_hints
     profile["environment_signature"] = build_environment_signature(profile)
     profile["environment_plan"] = build_environment_plan(profile).to_dict()
     profile["version"] = profile["environment_signature"]["version"]

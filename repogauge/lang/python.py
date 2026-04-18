@@ -385,6 +385,15 @@ def _detect_package_style(repo_root: Path) -> str:
     return "unknown"
 
 
+def _detect_test_paths(repo_root: Path) -> list[str]:
+    paths: list[str] = []
+    if (repo_root / "tests").is_dir():
+        paths.append("tests")
+    if (repo_root / "test").is_dir():
+        paths.append("test")
+    return paths
+
+
 def _detect_python_versions(repo_root: Path) -> list[str]:
     versions: list[str] = []
     if (repo_root / ".python-version").exists():
@@ -566,6 +575,7 @@ class PythonAdapter:
                 "commands": test_commands,
                 "signals": [],
             },
+            "test_paths": _detect_test_paths(repo_root),
             "profile_warnings": warnings,
         }
 
