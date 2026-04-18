@@ -1,5 +1,15 @@
 """Parser adapters for RepoGauge-to-harness bridge."""
 
-from .junit import parse_repogauge_junit
+from .junit import (
+    get_parser,
+    parse_repogauge_junit,
+    parse_repogauge_test_output,
+    register_parser,
+)
 
-__all__ = ["parse_repogauge_junit"]
+__all__ = [
+    "get_parser",
+    "parse_repogauge_junit",
+    "parse_repogauge_test_output",
+    "register_parser",
+]

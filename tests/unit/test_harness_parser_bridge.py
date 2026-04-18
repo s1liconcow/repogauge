@@ -1,11 +1,16 @@
 """Tests for the exported harness parser bridge module."""
 
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from repogauge.parsers.junit import parse_repogauge_junit
+from repogauge.parsers.junit import (
+    parse_repogauge_junit,
+    parse_repogauge_test_output,
+)
 from repogauge.validation.junit_parser import (
     JUnitParseError,
     OUTCOME_FAIL,
@@ -135,3 +140,39 @@ def test_parse_repogauge_junit_rejects_unknown_payload():
 def test_parse_repogauge_junit_propagates_parse_error_for_malformed_xml():
     with pytest.raises(JUnitParseError, match="malformed"):
         parse_repogauge_junit("<not valid xml")
+
+
+def test_parse_repogauge_test_output_dispatches_by_parser_name(tmp_path: Path) -> None:
+    xml_path = tmp_path / "results.xml"
+    xml_path.write_text(textwrap.dedent(XML), encoding="utf-8")
+
+    parsed = parse_repogauge_test_output(xml_path, parser_name="junit")
+
+    assert parsed == {
+        "tests/unit/test_foo.py::test_ok": OUTCOME_PASS,
+        "tests/unit/test_foo.py::test_fail": OUTCOME_FAIL,
+    }
+
+
+def test_parse_repogauge_test_output_rejects_unknown_parser_name() -> None:
+    with pytest.raises(KeyError, match="unknown test parser"):
+        parse_repogauge_test_output("ignored", parser_name="unknown")
+
+
+def test_importing_bridge_module_does_not_eagerly_import_swebench_parser() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "import repogauge.parsers.junit; "
+                "print('swebench.harness.log_parsers.python' in sys.modules)"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == "False"

@@ -1,16 +1,19 @@
-"""Harness-facing JUnit parser bridge for pytest outputs."""
+"""Harness-facing test-output parser bridge."""
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
-from typing import Any, Dict, Mapping
-
-from swebench.harness.log_parsers.python import parse_log_pytest_v2
+from typing import Any, Callable, Dict, Mapping
 
 from repogauge.validation.junit_parser import (
     parse_junit_xml,
     parse_junit_xml_content,
 )
+
+ParserFn = Callable[[object, Any | None], Dict[str, str]]
+
+_PARSER_REGISTRY: dict[str, ParserFn] = {}
 
 
 def _existing_path_from_text(report: str) -> Path | None:
@@ -26,7 +29,10 @@ def _existing_path_from_text(report: str) -> Path | None:
     return None
 
 
-def _parse_string_payload(report: str, test_spec: Any | None) -> Dict[str, str]:
+def _parse_pytest_log_payload(report: str, test_spec: Any | None) -> Dict[str, str]:
+    parse_log_pytest_v2 = import_module(
+        "swebench.harness.log_parsers.python"
+    ).parse_log_pytest_v2
     text = report.strip()
     if not text:
         return {}
@@ -38,9 +44,36 @@ def _parse_string_payload(report: str, test_spec: Any | None) -> Dict[str, str]:
     return parse_log_pytest_v2(normalized, test_spec)
 
 
-def parse_repogauge_junit(
-    report: object, test_spec: Any | None = None
+def _normalize_parser_name(parser_name: str) -> str:
+    normalized = parser_name.strip().lower()
+    if not normalized:
+        raise KeyError("unknown test parser: ''")
+    return normalized
+
+
+def register_parser(name: str, parser: ParserFn) -> None:
+    normalized = _normalize_parser_name(name)
+    if normalized in _PARSER_REGISTRY:
+        raise ValueError(f"test parser already registered: {normalized}")
+    _PARSER_REGISTRY[normalized] = parser
+
+
+def get_parser(name: str) -> ParserFn:
+    normalized = _normalize_parser_name(name)
+    try:
+        return _PARSER_REGISTRY[normalized]
+    except KeyError as exc:
+        raise KeyError(f"unknown test parser: {name!r}") from exc
+
+
+def _parse_test_output_for_name(
+    report: object, test_spec: Any | None, parser_name: str
 ) -> Dict[str, str]:
+    parser = get_parser(parser_name)
+    return parser(report, test_spec)
+
+
+def _parse_junit_output(report: object, test_spec: Any | None) -> Dict[str, str]:
     """Parse pytest JUnit output into ``{test_id: outcome}``.
 
     The harness may pass either a path to a JUnit XML file or raw XML text. In
@@ -64,13 +97,13 @@ def parse_repogauge_junit(
         return parse_junit_xml(report)
 
     if isinstance(report, (bytes, bytearray)):
-        return _parse_string_payload(report.decode("utf-8"), test_spec)
+        return _parse_pytest_log_payload(report.decode("utf-8"), test_spec)
 
     if isinstance(report, str):
         path = _existing_path_from_text(report)
         if path is not None:
             return parse_junit_xml(path)
-        return _parse_string_payload(report, test_spec)
+        return _parse_pytest_log_payload(report, test_spec)
 
     if isinstance(report, Mapping):
         candidate_keys = (
@@ -89,7 +122,7 @@ def parse_repogauge_junit(
             if value is None:
                 continue
             try:
-                return parse_repogauge_junit(value, test_spec)
+                return _parse_junit_output(value, test_spec)
             except TypeError:
                 continue
 
@@ -97,3 +130,23 @@ def parse_repogauge_junit(
         f"unsupported report payload for parser: {type(report).__name__}; "
         f"expected file path, XML content, or mapping"
     )
+
+
+def parse_repogauge_test_output(
+    report: object,
+    test_spec: Any | None = None,
+    *,
+    parser_name: str = "junit",
+) -> Dict[str, str]:
+    """Dispatch test-output parsing by parser name."""
+    return _parse_test_output_for_name(report, test_spec, parser_name)
+
+
+def parse_repogauge_junit(
+    report: object, test_spec: Any | None = None
+) -> Dict[str, str]:
+    """Parse pytest JUnit output into ``{test_id: outcome}``."""
+    return parse_repogauge_test_output(report, test_spec, parser_name="junit")
+
+
+register_parser("junit", _parse_junit_output)
