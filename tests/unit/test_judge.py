@@ -164,9 +164,9 @@ def test_run_harness_evaluation_marks_missing_predictions_as_skipped(
     )
 
     def fake_run_batch(*, batch_key: str, rows: list[tuple[dict, dict]], **kwargs):
-        instance_rows = [
-            _result_row_from_instance(dataset_row=rows[0][0], status="resolved")
-        ]
+        row = _result_row_from_instance(dataset_row=rows[0][0], status="resolved")
+        row["solver_id"] = rows[0][1]["model_name_or_path"]
+        instance_rows = [row]
         return JudgeBatchResult(
             instance_rows=instance_rows,
             metadata={"batch_key": batch_key},
@@ -340,9 +340,9 @@ def test_run_harness_evaluation_carries_solver_id_from_predictions(
     )
 
     def fake_run_batch(*, batch_key: str, rows: list[tuple[dict, dict]], **kwargs):
-        instance_rows = [
-            _result_row_from_instance(dataset_row=rows[0][0], status="resolved")
-        ]
+        row = _result_row_from_instance(dataset_row=rows[0][0], status="resolved")
+        row["solver_id"] = rows[0][1]["model_name_or_path"]
+        instance_rows = [row]
         return JudgeBatchResult(
             instance_rows=instance_rows,
             metadata={"batch_key": batch_key},
@@ -374,6 +374,135 @@ def test_run_harness_evaluation_carries_solver_id_from_predictions(
     assert instance_results[0]["solver_id"] == "solver-x"
     assert instance_results[0]["status"] == "resolved"
     assert instance_results[0]["resolved"] is True
+
+
+def test_run_harness_evaluation_keeps_multiple_solver_rows_per_instance(
+    tmp_path: Path,
+) -> None:
+    dataset_rows = [
+        {
+            "instance_id": "inst-a",
+            "patch": "diff --git a/x b/x\n+print('ok')",
+            "repo": "repo",
+            "version": "1",
+        },
+        {
+            "instance_id": "inst-b",
+            "patch": "diff --git a/y b/y\n+print('ok')",
+            "repo": "repo",
+            "version": "1",
+        },
+    ]
+    predictions_rows = [
+        {
+            "instance_id": "inst-a",
+            "model_name_or_path": "solver-x",
+            "model_patch": "diff-a-x",
+        },
+        {
+            "instance_id": "inst-a",
+            "model_name_or_path": "solver-y",
+            "model_patch": "diff-a-y",
+        },
+        {
+            "instance_id": "inst-b",
+            "model_name_or_path": "solver-x",
+            "model_patch": "diff-b-x",
+        },
+        {
+            "instance_id": "inst-b",
+            "model_name_or_path": "solver-y",
+            "model_patch": "diff-b-y",
+        },
+    ]
+
+    dataset_path = tmp_path / "dataset.jsonl"
+    dataset_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+        encoding="utf-8",
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in predictions_rows),
+        encoding="utf-8",
+    )
+
+    def fake_run_batch(*, batch_key: str, rows: list[tuple[dict, dict]], **kwargs):
+        instance_rows = []
+        for dataset_row, prediction_row in rows:
+            status = (
+                "resolved"
+                if prediction_row["model_name_or_path"] == "solver-x"
+                or dataset_row["instance_id"] == "inst-a"
+                else "not_resolved"
+            )
+            row = _result_row_from_instance(dataset_row=dataset_row, status=status)
+            row["solver_id"] = prediction_row["model_name_or_path"]
+            instance_rows.append(row)
+        return JudgeBatchResult(
+            instance_rows=instance_rows,
+            metadata={"batch_key": batch_key},
+            batch_key=batch_key,
+        )
+
+    with patch("repogauge.runner.judge._run_batch") as mock_run_batch:
+        mock_run_batch.side_effect = fake_run_batch
+        summary = run_harness_evaluation(
+            dataset_path=dataset_path,
+            predictions_path=predictions_path,
+            out_root=tmp_path,
+            adapter_path=None,
+            workers=1,
+            timeout_seconds=120,
+            gold_if_missing=False,
+            container_runtime="docker",
+            judge_config=JudgeSchedulerConfig(batch_size=32),
+        )
+
+    assert summary.total == 4
+    assert summary.resolved == 3
+
+    instance_results = [
+        json.loads(line)
+        for line in (tmp_path / "instance_results.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [
+        (row["instance_id"], row["solver_id"], row["status"])
+        for row in instance_results
+    ] == [
+        ("inst-a", "solver-x", "resolved"),
+        ("inst-a", "solver-y", "resolved"),
+        ("inst-b", "solver-x", "resolved"),
+        ("inst-b", "solver-y", "not_resolved"),
+    ]
+
+    resolved_predictions = [
+        json.loads(line)
+        for line in (tmp_path / "predictions.resolved.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [
+        (row["instance_id"], row["model_name_or_path"]) for row in resolved_predictions
+    ] == [
+        ("inst-a", "solver-x"),
+        ("inst-a", "solver-y"),
+        ("inst-b", "solver-x"),
+    ]
+
+    resolved_dataset = [
+        json.loads(line)
+        for line in (tmp_path / "dataset.resolved.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [row["instance_id"] for row in resolved_dataset] == [
+        "inst-a",
+        "inst-a",
+        "inst-b",
+    ]
 
 
 def test_parse_harness_results_supports_swebench_4x_id_lists() -> None:

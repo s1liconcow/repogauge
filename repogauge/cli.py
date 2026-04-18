@@ -594,7 +594,9 @@ def _resolve_retry_run_jobs_path(path_value: str | Path) -> Path:
 def _job_seed_from_job_id(job_id: str) -> str:
     prefix, sep, seed = str(job_id).rpartition(":")
     if not sep or not prefix or not seed.strip():
-        raise SolverSchedulerError(f"job row missing parseable seed in job_id: {job_id}")
+        raise SolverSchedulerError(
+            f"job row missing parseable seed in job_id: {job_id}"
+        )
     return seed.strip()
 
 
@@ -847,7 +849,9 @@ def _merge_retry_family_artifacts(
     )
 
     merged_instance_results_output: Path | None = None
-    if instance_result_paths and all(path is not None for path in instance_result_paths):
+    if instance_result_paths and all(
+        path is not None for path in instance_result_paths
+    ):
         merged_instance_results_output = merged_instance_results_path
         merged_instance_results_path.write_text(
             "".join(
@@ -1846,9 +1850,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 manifest.mark_step(
                     "inspect",
                     ManifestStepStatus.FAILED,
-                    ended_at=datetime.now(timezone.utc)
-                    .replace(tzinfo=None)
-                    .isoformat()
+                    ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     + "Z",
                 )
                 manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
@@ -1863,9 +1865,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 manifest.mark_step(
                     "finish",
                     ManifestStepStatus.FAILED,
-                    ended_at=datetime.now(timezone.utc)
-                    .replace(tzinfo=None)
-                    .isoformat()
+                    ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     + "Z",
                 )
                 manifest.write(manifest_path)

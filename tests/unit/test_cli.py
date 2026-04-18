@@ -1834,11 +1834,15 @@ solvers:
             self.assertTrue(merged_attempts_path.exists())
             merged_attempts = [
                 json.loads(line)
-                for line in merged_attempts_path.read_text(encoding="utf-8").splitlines()
+                for line in merged_attempts_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
                 if line.strip()
             ]
             self.assertEqual(len(merged_attempts), 1)
-            self.assertEqual(merged_attempts[0]["job_id"], "unit-run-retry:inst-1:solver-a:7")
+            self.assertEqual(
+                merged_attempts[0]["job_id"], "unit-run-retry:inst-1:solver-a:7"
+            )
             self.assertEqual(
                 Path(paths["analyze_retry_merged_instance_results"]),
                 run_root / "analyze" / "instance_results.merged.jsonl",
@@ -1983,7 +1987,9 @@ solvers:
             manifest = json.loads(
                 (run_root / "analyze" / "manifest.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(manifest["artifact_paths"]["llm_judge"], str(judge_rows_path))
+            self.assertEqual(
+                manifest["artifact_paths"]["llm_judge"], str(judge_rows_path)
+            )
             summary = json.loads(
                 Path(manifest["artifact_paths"]["analyze_summary"]).read_text(
                     encoding="utf-8"

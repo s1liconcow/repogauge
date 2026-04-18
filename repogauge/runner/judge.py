@@ -226,25 +226,29 @@ def _write_resolved_eval_artifacts(
 ) -> tuple[Path, Path]:
     dataset_path = out_root / "dataset.resolved.jsonl"
     predictions_path = out_root / "predictions.resolved.jsonl"
-    prediction_by_id = _prepare_prediction_index(predictions_rows)
-    resolved_ids = {
-        _coerce_text(row.get("instance_id"))
+    dataset_by_id = {
+        _coerce_text(row.get("instance_id")): row
+        for row in dataset_rows
+        if _coerce_text(row.get("instance_id"))
+    }
+    resolved_keys = {
+        key
         for row in instance_rows
         if _coerce_text(row.get("status")) == "resolved"
+        for key in [_instance_prediction_key(row)]
+        if key is not None
     }
 
-    resolved_dataset_rows = [
-        dict(dataset_row)
-        for dataset_row in dataset_rows
-        if _coerce_text(dataset_row.get("instance_id")) in resolved_ids
-    ]
     resolved_prediction_rows = [
-        prediction_by_id[instance_id]
-        for instance_id in [
-            _coerce_text(dataset_row.get("instance_id"))
-            for dataset_row in resolved_dataset_rows
-        ]
-        if instance_id in prediction_by_id
+        dict(prediction_row)
+        for prediction_row in predictions_rows
+        if _instance_prediction_key(prediction_row) in resolved_keys
+    ]
+    resolved_dataset_rows = [
+        dict(dataset_by_id[instance_id])
+        for prediction_row in resolved_prediction_rows
+        for instance_id in [_coerce_text(prediction_row.get("instance_id"))]
+        if instance_id in dataset_by_id
     ]
 
     _write_jsonl_rows(dataset_path, resolved_dataset_rows)
@@ -387,11 +391,7 @@ def _augment_instance_rows_with_harness_logs(
         for row in dataset_rows
         if _coerce_text(row.get("instance_id"))
     }
-    prediction_by_id = {
-        _coerce_text(row.get("instance_id")): row
-        for row in prediction_rows
-        if _coerce_text(row.get("instance_id"))
-    }
+    prediction_by_key = _prepare_prediction_index(prediction_rows)
     _augment_instance_rows_with_prediction_solver_ids(
         instance_rows=instance_rows,
         prediction_rows=prediction_rows,
@@ -399,7 +399,8 @@ def _augment_instance_rows_with_harness_logs(
     for row in instance_rows:
         instance_id = _coerce_text(row.get("instance_id"))
         dataset_row = dataset_by_id.get(instance_id)
-        prediction_row = prediction_by_id.get(instance_id)
+        key = _instance_prediction_key(row)
+        prediction_row = prediction_by_key.get(key) if key is not None else None
         if dataset_row is None or prediction_row is None:
             continue
         existing_metadata = row.get("metadata")
@@ -432,14 +433,28 @@ def _augment_instance_rows_with_harness_logs(
 
 def _prepare_prediction_index(
     predictions_rows: list[Dict[str, Any]],
-) -> dict[str, Dict[str, Any]]:
-    by_id: dict[str, Dict[str, Any]] = {}
+) -> dict[tuple[str, str], Dict[str, Any]]:
+    by_key: dict[tuple[str, str], Dict[str, Any]] = {}
     for prediction in predictions_rows:
-        instance_id = _coerce_text(prediction.get("instance_id"))
-        if not instance_id:
+        key = _instance_prediction_key(prediction)
+        if key is None:
             continue
-        by_id[instance_id] = dict(prediction)
-    return by_id
+        by_key[key] = dict(prediction)
+    return by_key
+
+
+def _prediction_solver_id(row: Mapping[str, Any]) -> str:
+    return _coerce_text(row.get("solver_id") or row.get("model_name_or_path"))
+
+
+def _instance_prediction_key(
+    row: Mapping[str, Any],
+) -> tuple[str, str] | None:
+    instance_id = _coerce_text(row.get("instance_id"))
+    solver_id = _prediction_solver_id(row)
+    if not instance_id or not solver_id:
+        return None
+    return (solver_id, instance_id)
 
 
 def _augment_instance_rows_with_prediction_solver_ids(
@@ -447,16 +462,22 @@ def _augment_instance_rows_with_prediction_solver_ids(
     instance_rows: list[dict[str, Any]],
     prediction_rows: list[Dict[str, Any]],
 ) -> None:
-    prediction_by_id = _prepare_prediction_index(prediction_rows)
+    prediction_by_instance: dict[str, list[Dict[str, Any]]] = {}
+    for prediction_row in prediction_rows:
+        instance_id = _coerce_text(prediction_row.get("instance_id"))
+        if not instance_id:
+            continue
+        prediction_by_instance.setdefault(instance_id, []).append(prediction_row)
     for row in instance_rows:
         if _coerce_text(row.get("solver_id")):
             continue
         instance_id = _coerce_text(row.get("instance_id"))
         if not instance_id:
             continue
-        prediction_row = prediction_by_id.get(instance_id)
-        if prediction_row is None:
+        matches = prediction_by_instance.get(instance_id, [])
+        if len(matches) != 1:
             continue
+        prediction_row = matches[0]
         solver_id = _coerce_text(
             prediction_row.get("solver_id") or prediction_row.get("model_name_or_path")
         )
@@ -474,28 +495,39 @@ def _prepare_batches(
     predictions_rows: list[Dict[str, Any]],
     batch_size: int,
 ) -> PreparedBatches:
-    prediction_by_id = _prepare_prediction_index(predictions_rows)
+    dataset_by_id = {
+        _coerce_text(row.get("instance_id")): row
+        for row in dataset_rows
+        if _coerce_text(row.get("instance_id"))
+    }
     grouped: dict[str, list[tuple[Dict[str, Any], Dict[str, Any]]]] = {}
     missing_prediction_rows: list[dict[str, Any]] = []
+    seen_prediction_instance_ids: set[str] = set()
 
-    for dataset_row in dataset_rows:
-        instance_id = _coerce_text(dataset_row.get("instance_id"))
+    for prediction in predictions_rows:
+        instance_id = _coerce_text(prediction.get("instance_id"))
         if not instance_id:
             continue
-        prediction = prediction_by_id.get(instance_id)
-        if prediction is None:
-            missing_prediction_rows.append(
-                _result_row_from_instance(
-                    dataset_row=dataset_row,
-                    status="skipped",
-                    reason="missing_prediction",
-                )
-            )
+        dataset_row = dataset_by_id.get(instance_id)
+        if dataset_row is None:
             continue
+        seen_prediction_instance_ids.add(instance_id)
         key = _batch_key_for_prediction(
             dataset_row=dataset_row, prediction_row=prediction
         )
         grouped.setdefault(key, []).append((dataset_row, prediction))
+
+    for dataset_row in dataset_rows:
+        instance_id = _coerce_text(dataset_row.get("instance_id"))
+        if not instance_id or instance_id in seen_prediction_instance_ids:
+            continue
+        missing_prediction_rows.append(
+            _result_row_from_instance(
+                dataset_row=dataset_row,
+                status="skipped",
+                reason="missing_prediction",
+            )
+        )
 
     batches: list[tuple[str, BatchRows]] = []
     for key, pairs in grouped.items():
@@ -1186,43 +1218,48 @@ def run_harness_evaluation(
                 f"official harness batch execution failed: {exc}"
             ) from exc
 
-    by_instance_id: dict[str, dict[str, Any]] = {}
-    for row in missing_rows:
-        iid = _coerce_text(row.get("instance_id"))
-        if iid:
-            by_instance_id[iid] = row
+    dataset_by_id = {
+        _coerce_text(row.get("instance_id")): row
+        for row in dataset_rows
+        if _coerce_text(row.get("instance_id"))
+    }
+    row_by_key: dict[tuple[str, str], dict[str, Any]] = {}
 
     for batch in batch_results:
         for row in batch.instance_rows:
-            iid = _coerce_text(row.get("instance_id"))
-            if not iid:
+            key = _instance_prediction_key(row)
+            if key is None:
                 continue
             row["metadata"] = dict(
                 row.get("metadata", {}), **{"batch_key": batch.batch_key}
             )
-            by_instance_id[iid] = row
+            row_by_key[key] = row
 
     instance_rows = []
-    for dataset_row in dataset_rows:
-        iid = _coerce_text(dataset_row.get("instance_id"))
-        if not iid:
+    for prediction_row in predictions_rows:
+        key = _instance_prediction_key(prediction_row)
+        if key is None:
             continue
-        row = by_instance_id.get(iid)
+        solver_id, instance_id = key
+        dataset_row = dataset_by_id.get(instance_id)
+        if dataset_row is None:
+            continue
+        row = row_by_key.get(key)
         if row is None:
-            instance_rows.append(
-                _result_row_from_instance(
-                    dataset_row=dataset_row,
-                    status="error",
-                    reason="no harness result for instance",
-                )
+            row = _result_row_from_instance(
+                dataset_row=dataset_row,
+                status="error",
+                reason="no harness result for prediction",
             )
-            continue
+            row["solver_id"] = solver_id
         row["environment_strategy"] = (
             row.get("environment_strategy")
             or _coerce_text(dataset_row.get("version"))
             or "default"
         )
         instance_rows.append(row)
+
+    instance_rows.extend(missing_rows)
 
     if not instance_rows:
         instance_rows = [

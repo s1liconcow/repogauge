@@ -1872,16 +1872,14 @@ def write_summary_html(
             f"Better {_format_percent(judge_top_line.get('better_share'))}, "
             f"worse {_format_percent(judge_top_line.get('worse_share'))}."
         )
-        judge_best_solver_body = (
-            f"{_coerce_str(judge_top_line.get('best_solver_id') or 'n/a')} leads the advisory code-health comparison."
-        )
-        judge_error_body = (
-            f"{_format_integer(judge_top_line.get('error_job_count'))} latest-attempt rows could not be scored."
-        )
+        judge_best_solver_body = f"{_coerce_str(judge_top_line.get('best_solver_id') or 'n/a')} leads the advisory code-health comparison."
+        judge_error_body = f"{_format_integer(judge_top_line.get('error_job_count'))} latest-attempt rows could not be scored."
         llm_judge_sections = (
             '<div class="spotlight-grid">'
             + render_callout("LLM Judge", judge_summary_body, tone="accent")
-            + render_callout("Best Judge Solver", judge_best_solver_body, tone="success")
+            + render_callout(
+                "Best Judge Solver", judge_best_solver_body, tone="success"
+            )
             + render_callout("Judge Errors", judge_error_body, tone="warning")
             + "</div>"
             + render_table(

@@ -700,6 +700,43 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.exit_reason, "boom")
         self.assertEqual(result.stderr_output, "")
 
+    def test_codex_cli_finalize_output_allows_workspace_fallback_without_patch(
+        self,
+    ) -> None:
+        provider = _provider_for_command("codex")
+        adapter = CodexCLIAdapter(
+            solver_id="solver-a",
+            provider_id="codex",
+            provider_config=provider.config,
+            behavior={"model": "gpt-5.4"},
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            request = adapter.prepare_request(
+                job=_job(job_id="run-1:repo__sample-1:solver-a:6b"),
+                attempt_id="run-1:repo__sample-1:solver-a:6b:attempt-1",
+                attempt_index=1,
+                instance_row={
+                    "instance_id": "repo__sample-1",
+                    "repo": "repo",
+                    "base_commit": "abc123",
+                    "problem_statement": "fix bug",
+                },
+                workspace_path=Path(workspace),
+            )
+            result = adapter.finalize_output(
+                request,
+                SolverAdapterResult(
+                    attempt_id=request.attempt_id,
+                    status=SolverAttemptState.SUCCEEDED,
+                    model_patch=None,
+                    raw_output="Implemented the requested change.",
+                ),
+            )
+
+        self.assertEqual(result.status, SolverAttemptState.SUCCEEDED)
+        self.assertIsNone(result.model_patch)
+        self.assertEqual(result.raw_output, "Implemented the requested change.")
+
     def _opencode_provider(self, command: str = "opencode") -> MatrixProvider:
         return MatrixProvider(
             provider_id="opencode",

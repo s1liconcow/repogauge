@@ -217,6 +217,47 @@ class CanonicalPatchAdapter(SolverAdapter):
         return result
 
 
+class WorkspaceOnlyAdapter(SolverAdapter):
+    """Adapter that edits the worktree and relies on scheduler normalization."""
+
+    def requires_workspace(self) -> bool:
+        return True
+
+    def prepare_request(
+        self,
+        *,
+        job: PlannedRunJob,
+        attempt_id: str,
+        attempt_index: int,
+        instance_row=None,
+        workspace_path=None,
+    ) -> SolverAdapterRequest:
+        return SolverAdapterRequest(
+            attempt_id=attempt_id,
+            attempt_index=attempt_index,
+            job=job,
+            instance_row=instance_row,
+            workspace_path=workspace_path,
+        )
+
+    def execute_attempt(self, request: SolverAdapterRequest) -> SolverAdapterResult:
+        assert request.workspace_path is not None
+        (request.workspace_path / "src.py").write_text(
+            "print('after')\n", encoding="utf-8"
+        )
+        return SolverAdapterResult(
+            attempt_id=request.attempt_id,
+            status=SolverAttemptState.SUCCEEDED,
+            model_patch=None,
+            raw_output="Implemented the requested change.",
+        )
+
+    def finalize_output(
+        self, request: SolverAdapterRequest, result: SolverAdapterResult
+    ) -> SolverAdapterResult:
+        return result
+
+
 class SourceAwareAdapter(SolverAdapter):
     """Adapter that returns fixed usage/cost metadata with provenance."""
 
@@ -971,6 +1012,57 @@ def test_scheduler_workspace_normalizes_from_model_patch_when_raw_output_is_json
         Path(row["metadata"]["normalized_patch_path"])
         .read_text(encoding="utf-8")
         .startswith("diff --git a/src.py b/src.py\n")
+    )
+
+
+def test_scheduler_workspace_normalizes_from_workspace_when_output_is_summary_only(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_command(["git", "init", "-b", "main"], cwd=str(repo))
+    run_command(["git", "config", "user.name", "ci"], cwd=str(repo))
+    run_command(["git", "config", "user.email", "ci@example.com"], cwd=str(repo))
+    (repo / "src.py").write_text("print('before')\n", encoding="utf-8")
+    run_command(["git", "add", "src.py"], cwd=str(repo))
+    run_command(["git", "commit", "-m", "base"], cwd=str(repo))
+    commit = run_command(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip()
+
+    job = _job(job_id="run-1:i-1:solver-a:1", solver_id="solver-a")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            source_repo_root=repo,
+            attempt_workspaces_root=tmp_path / "attempt_workspaces",
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    dataset_rows = {
+        "i-1": {
+            "instance_id": "i-1",
+            "repo": "sample/repo",
+            "base_commit": commit,
+            "version": "1.0.0",
+            "problem_statement": "Update the log line.",
+        }
+    }
+
+    summary = scheduler.run(
+        [job],
+        adapters={"solver-a": WorkspaceOnlyAdapter()},
+        dataset_rows=dataset_rows,
+    )
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    assert len(attempt_rows) == 1
+    row = attempt_rows[0]
+    assert row["attempt_state"] == SolverAttemptState.SUCCEEDED
+    assert row["raw_output"] == "Implemented the requested change."
+    assert "print('after')" in row["model_patch"]
+    assert (
+        Path(row["metadata"]["normalized_patch_path"]).read_text(encoding="utf-8")
+        == row["model_patch"]
     )
 
 

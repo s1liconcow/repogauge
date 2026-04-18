@@ -318,7 +318,7 @@ def _judge_prompt(prompt_payload: Mapping[str, Any]) -> str:
         " genuinely cleaner, safer, or better tested, mark it better.\n"
         "Favor task fit and correctness over style.\n\n"
         "Required JSON shape:\n"
-        '{'
+        "{"
         '"summary":"short text",'
         '"confidence":0.0,'
         '"dimensions":['
@@ -637,9 +637,7 @@ def build_diff_judge_report(
         if _coerce_text(row.get("overall_label")) in {"worse", "much_worse"}
     )
     cache_hit_count = sum(
-        1
-        for row in rows
-        if _safe_bool(row.get("metadata", {}).get("cache_hit"))
+        1 for row in rows if _safe_bool(row.get("metadata", {}).get("cache_hit"))
     )
 
     solver_buckets: dict[str, list[dict[str, Any]]] = {}
@@ -739,7 +737,8 @@ def build_diff_judge_report(
     resolved_but_worse = [
         _sample_row(row)
         for row in scored_rows
-        if _safe_bool(row.get("resolved")) and _safe_float(row.get("overall_delta")) <= -0.35
+        if _safe_bool(row.get("resolved"))
+        and _safe_float(row.get("overall_delta")) <= -0.35
     ]
     resolved_but_worse.sort(
         key=lambda row: (row["overall_delta"], row["instance_id"], row["solver_id"])
@@ -765,11 +764,14 @@ def build_diff_judge_report(
     )[:10]
 
     avg_delta = (
-        sum(_safe_float(row.get("overall_delta")) for row in scored_rows) / len(scored_rows)
+        sum(_safe_float(row.get("overall_delta")) for row in scored_rows)
+        / len(scored_rows)
         if scored_rows
         else 0.0
     )
-    best_solver_id = _coerce_text(solver_rows[0].get("solver_id")) if solver_rows else ""
+    best_solver_id = (
+        _coerce_text(solver_rows[0].get("solver_id")) if solver_rows else ""
+    )
     return {
         "enabled": True,
         "model": dict(model),
@@ -823,7 +825,9 @@ def run_diff_judge(
         instance_id = _coerce_text(row.get("instance_id"))
         dataset_row = dataset_rows.get(instance_id)
         if dataset_row is None:
-            raise RuntimeError(f"dataset row missing for judged instance: {instance_id}")
+            raise RuntimeError(
+                f"dataset row missing for judged instance: {instance_id}"
+            )
 
         attempt_id = _coerce_text(row.get("attempt_id")) or (
             f"{_coerce_text(row.get('solver_id'))}:{instance_id}:{counter}"
@@ -871,9 +875,14 @@ def run_diff_judge(
             encoding="utf-8",
         )
         try:
-            request_payload, response_payload, usage, usage_source, cost, cost_source = (
-                _invoke_model(model=model, prompt=prompt)
-            )
+            (
+                request_payload,
+                response_payload,
+                usage,
+                usage_source,
+                cost,
+                cost_source,
+            ) = _invoke_model(model=model, prompt=prompt)
             request_ref.write_text(
                 json.dumps(
                     {
@@ -891,7 +900,9 @@ def run_diff_judge(
                 json.dumps(response_payload, sort_keys=True, indent=2) + "\n",
                 encoding="utf-8",
             )
-            response_text = _extract_response_text(normalized_provider, response_payload)
+            response_text = _extract_response_text(
+                normalized_provider, response_payload
+            )
             judged_rows.append(
                 _judge_row_from_response(
                     row=dict(row, attempt_id=attempt_id, job_id=job_id),

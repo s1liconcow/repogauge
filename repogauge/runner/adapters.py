@@ -670,6 +670,19 @@ class _BaseConcreteSolverAdapter(SolverAdapter, ABC):
 
         if result.status == SolverAttemptState.SUCCEEDED:
             if not patch:
+                if request.workspace_path is not None:
+                    return SolverAdapterResult(
+                        attempt_id=result.attempt_id,
+                        status=result.status,
+                        model_patch=result.model_patch,
+                        raw_output=result.raw_output,
+                        exit_reason=result.exit_reason,
+                        usage_source=result.usage_source,
+                        cost_source=result.cost_source,
+                        usage=_coerce_usage(result.usage),
+                        cost=_coerce_cost(result.cost),
+                        metadata=metadata,
+                    )
                 return SolverAdapterResult(
                     attempt_id=result.attempt_id,
                     status=SolverAttemptState.INVALID_PATCH,
