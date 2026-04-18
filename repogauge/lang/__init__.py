@@ -104,9 +104,12 @@ def _register_builtin_adapters() -> None:
     if _BUILTINS_REGISTERED:
         return
     from .python import PythonAdapter
+    from .java import JavaAdapter
 
     if not any(_adapter_name(existing) == "python" for existing in _REGISTERED_ADAPTERS):
         _store_adapter(PythonAdapter())
+    if not any(_adapter_name(existing) == "java" for existing in _REGISTERED_ADAPTERS):
+        _store_adapter(JavaAdapter())
     _BUILTINS_REGISTERED = True
 
 

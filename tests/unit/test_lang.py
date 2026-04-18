@@ -94,7 +94,12 @@ def test_detect_language_uses_lexicographic_tie_break_and_sorted_iteration(
         )
     )
 
-    assert [adapter.name() for adapter in iter_adapters()] == ["alpha", "python", "zeta"]
+    assert [adapter.name() for adapter in iter_adapters()] == [
+        "alpha",
+        "java",
+        "python",
+        "zeta",
+    ]
     assert isinstance(FakeAdapter("alpha", DetectionResult("alpha", 1.0, [])), LanguageAdapter)
 
     result = detect_language(tmp_path)

@@ -119,6 +119,13 @@ def test_detect_language_uses_lexicographic_tie_break(tmp_path: Path) -> None:
     assert result.language == "alpha"
     assert result.confidence == pytest.approx(0.8)
 
+    assert [adapter.name() for adapter in iter_adapters()] == [
+        "alpha",
+        "java",
+        "python",
+        "zeta",
+    ]
+
 
 def test_find_adapter_returns_python_adapter() -> None:
     adapter = find_adapter("python")
@@ -127,10 +134,21 @@ def test_find_adapter_returns_python_adapter() -> None:
     assert adapter.name() == "python"
 
 
+def test_find_adapter_returns_java_adapter() -> None:
+    from repogauge.lang.java import JavaAdapter
+
+    adapter = find_adapter("java")
+
+    assert isinstance(adapter, JavaAdapter)
+    assert adapter.name() == "java"
+
+
 def test_find_adapter_unknown_raises_key_error() -> None:
     with pytest.raises(KeyError, match="unknown language adapter: 'missing'"):
         find_adapter("missing")
 
 
 def test_registry_starts_without_fake_adapters() -> None:
-    assert all(adapter.name() != "fake" for adapter in iter_adapters())
+    names = {adapter.name() for adapter in iter_adapters()}
+    assert "fake" not in names
+    assert {"java", "python"}.issubset(names)
