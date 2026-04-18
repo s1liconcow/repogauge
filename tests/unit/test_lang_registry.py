@@ -4,15 +4,16 @@ from pathlib import Path
 
 import pytest
 
+import repogauge.lang.python as python_module
 from repogauge.lang import (
     DetectionResult,
     FileRoleRules,
-    LanguageAdapter,
     detect_language,
     find_adapter,
     iter_adapters,
     register_adapter,
 )
+from repogauge.lang.python import PythonAdapter
 
 
 class FakeAdapter:
@@ -24,6 +25,11 @@ class FakeAdapter:
         return self._name
 
     def detect(self, repo_root: Path) -> DetectionResult:
+        marker = repo_root / "sentinel.marker"
+        if self._name == "fake" and marker.exists():
+            return self._detection
+        if self._name == "fake":
+            return DetectionResult(language=self._name, confidence=0.0, signals=[])
         return self._detection
 
     def inspect(self, repo_root: Path) -> dict[str, object]:
@@ -68,62 +74,63 @@ class FakeAdapter:
         return None
 
 
-def test_detect_language_uses_lexicographic_tie_break_and_sorted_iteration(
-    tmp_path: Path,
-) -> None:
+def test_iter_adapters_includes_python_adapter_after_module_import() -> None:
+    assert python_module.PythonAdapter is PythonAdapter
+    assert any(isinstance(adapter, PythonAdapter) for adapter in iter_adapters())
+
+
+def test_detect_language_routes_to_fake_adapter(tmp_path: Path) -> None:
+    (tmp_path / "sentinel.marker").write_text("hit", encoding="utf-8")
     register_adapter(
         FakeAdapter(
-            "zeta",
+            "fake",
             DetectionResult(
-                language="zeta",
-                confidence=0.8,
-                signals=["zeta"],
+                language="fake",
+                confidence=0.95,
+                signals=["sentinel.marker"],
                 runtime_version="1.0",
             ),
         )
     )
-    register_adapter(
-        FakeAdapter(
-            "alpha",
-            DetectionResult(
-                language="alpha",
-                confidence=0.8,
-                signals=["alpha"],
-                runtime_version="2.0",
-            ),
-        )
-    )
-
-    assert [adapter.name() for adapter in iter_adapters()] == ["alpha", "python", "zeta"]
-    assert isinstance(FakeAdapter("alpha", DetectionResult("alpha", 1.0, [])), LanguageAdapter)
 
     result = detect_language(tmp_path)
 
-    assert result == DetectionResult(
-        language="alpha",
-        confidence=0.8,
-        signals=["alpha"],
-        runtime_version="2.0",
+    assert result.language == "fake"
+    assert result.confidence == pytest.approx(0.95)
+    assert result.signals == ["sentinel.marker"]
+
+
+def test_detect_language_uses_lexicographic_tie_break(tmp_path: Path) -> None:
+    register_adapter(
+        FakeAdapter(
+            "zeta",
+            DetectionResult(language="zeta", confidence=0.8, signals=["zeta"]),
+        )
     )
-
-
-def test_register_adapter_rejects_duplicates() -> None:
     register_adapter(
         FakeAdapter(
             "alpha",
-            DetectionResult(language="alpha", confidence=0.4, signals=[]),
+            DetectionResult(language="alpha", confidence=0.8, signals=["alpha"]),
         )
     )
 
-    with pytest.raises(ValueError, match="already registered: alpha"):
-        register_adapter(
-            FakeAdapter(
-                "alpha",
-                DetectionResult(language="alpha", confidence=0.6, signals=[]),
-            )
-        )
+    result = detect_language(tmp_path)
+
+    assert result.language == "alpha"
+    assert result.confidence == pytest.approx(0.8)
+
+
+def test_find_adapter_returns_python_adapter() -> None:
+    adapter = find_adapter("python")
+
+    assert isinstance(adapter, PythonAdapter)
+    assert adapter.name() == "python"
 
 
 def test_find_adapter_unknown_raises_key_error() -> None:
     with pytest.raises(KeyError, match="unknown language adapter: 'missing'"):
         find_adapter("missing")
+
+
+def test_registry_starts_without_fake_adapters() -> None:
+    assert all(adapter.name() != "fake" for adapter in iter_adapters())

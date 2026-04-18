@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from repogauge.mining.signature import REPO_VERSION_UNKNOWN
+from repogauge.mining.signature import _to_pkg_label
+from repogauge.mining.signature import _to_python_label
+from repogauge.mining.signature import _to_test_label
 from repogauge.validation.env_detect import EnvPlan
+from repogauge.parsers.junit import parse_repogauge_junit
 
 from . import DetectionResult, FileRoleRules
 
@@ -446,9 +450,17 @@ def _detect_python(repo_root: Path) -> tuple[float, list[str]]:
         signals.append("tests")
     if list(repo_root.glob("requirements*.txt")):
         signals.append("requirements")
+    if any(repo_root.rglob("*.py")):
+        signals.append("python_files")
 
-    if any(signal in signals for signal in ("pyproject.toml", "setup.py", "setup.cfg")):
+    if "pyproject.toml" in signals:
         confidence = 1.0
+    elif any(signal in signals for signal in ("setup.py", "setup.cfg")):
+        confidence = 0.9
+    elif "requirements" in signals:
+        confidence = 0.8
+    elif "python_files" in signals:
+        confidence = 0.5
     elif signals:
         confidence = 0.6
     return confidence, _sorted_unique(signals)
@@ -563,23 +575,36 @@ class PythonAdapter:
     def parse_test_output(
         self, report: object, test_spec: object | None
     ) -> dict[str, str]:
-        return {}
+        return parse_repogauge_junit(report, test_spec)
 
     def file_role_rules(self) -> FileRoleRules:
         return FileRoleRules(
-            prod_extensions={".py"},
-            test_filename_patterns=["test_*.py", "*_test.py", "tests.py"],
+            prod_extensions={".py", ".pyi"},
+            test_filename_patterns=["test_*.py", "*_test.py", "*_test_*.py"],
             test_dir_names={"test", "tests"},
             config_build_filenames={
+                ".github",
                 "pyproject.toml",
                 "setup.py",
                 "setup.cfg",
                 "tox.ini",
                 "noxfile.py",
-                "pytest.ini",
-                ".python-version",
+                "requirements.txt",
+                "requirements-dev.txt",
+                "requirements.in",
+                "pipfile",
+                "pipfile.lock",
             },
-            vendor_dir_names={"__pycache__", "build", "dist", ".venv", "venv"},
+            vendor_dir_names={
+                "__pycache__",
+                ".mypy_cache",
+                ".pytest_cache",
+                "site-packages",
+                "vendor",
+                ".venv",
+                "venv",
+                ".eggs",
+            },
         )
 
     def harness_template_vars(self, spec: dict[str, Any]) -> dict[str, Any]:
@@ -591,11 +616,25 @@ class PythonAdapter:
         }
 
     def signature_labels(self, profile: dict[str, Any]) -> dict[str, str]:
-        version = str(profile.get("language_version") or profile.get("runtime_version") or "")
+        python_hints = profile.get("python_hints") if isinstance(profile, dict) else {}
+        if not isinstance(python_hints, dict):
+            python_hints = {}
+        test_runner_hints = (
+            profile.get("test_runner_hints") if isinstance(profile, dict) else {}
+        )
+        if not isinstance(test_runner_hints, dict):
+            test_runner_hints = {}
+        versions = _coerce_list(python_hints.get("versions"))
+        if not versions:
+            version = profile.get("language_version") or profile.get("runtime_version")
+            if version:
+                versions = [str(version)]
+        commands = _coerce_list(test_runner_hints.get("commands"))
+        managers = _coerce_list(python_hints.get("package_managers"))
         return {
-            "runtime_label": f"python:{version}" if version else "python",
-            "test_label": "pytest",
-            "package_label": "python",
+            "runtime_label": _to_python_label(versions),
+            "test_label": _to_test_label(commands),
+            "package_label": _to_pkg_label(managers),
         }
 
     def dependency_signature_inputs(
