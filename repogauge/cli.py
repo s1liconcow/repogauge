@@ -34,6 +34,7 @@ from repogauge.runner.analyze import (
     join_attempt_rows,
     load_attempt_rows,
     load_instance_result_rows,
+    load_jsonl_rows,
     summarize_attempt_metrics,
     write_summary_csv,
     write_summary_html,
@@ -2176,6 +2177,13 @@ def _run_command(namespace: argparse.Namespace) -> int:
             )
             llm_judge_result = None
             llm_judge_report = None
+            llm_judge_rows: list[dict[str, Any]] | None = None
+            preexisting_judge_path = out_root / "judge" / "llm_judge.jsonl"
+            if preexisting_judge_path.exists():
+                try:
+                    llm_judge_rows = load_jsonl_rows(preexisting_judge_path)
+                except Exception:
+                    llm_judge_rows = None
             if getattr(namespace, "judge_diffs", False):
                 judge_dataset_override = getattr(namespace, "dataset", None)
                 if judge_dataset_override:
@@ -2198,8 +2206,10 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     llm_mode=namespace.llm_mode,
                     model_name=getattr(namespace, "judge_model", None),
                     provider=getattr(namespace, "judge_provider", None),
+                    progress_stream=sys.stderr,
                 )
                 llm_judge_report = llm_judge_result.report
+                llm_judge_rows = list(llm_judge_result.rows)
 
             analysis_metadata = {
                 "run_root": str(analyze_root),
@@ -2230,6 +2240,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 expensive_cost_threshold=float(namespace.expensive_cost_threshold),
                 metadata=analysis_metadata,
                 llm_judge_report=llm_judge_report,
+                llm_judge_rows=llm_judge_rows,
             )
 
             summary_path = out_root / "summary.json"

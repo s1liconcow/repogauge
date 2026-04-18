@@ -20,6 +20,7 @@ def _attempt_row(
     problem_statement: str,
     usage: dict[str, object] | None = None,
     raw_output: str = "",
+    **extra: object,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "solver_id": solver_id,
@@ -31,6 +32,7 @@ def _attempt_row(
     }
     if usage is not None:
         row["usage"] = usage
+    row.update(extra)
     return row
 
 
@@ -62,6 +64,10 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             cost=1.0,
             problem_statement="Cheap path resolves one issue.",
             usage={"input_tokens": 1000, "output_tokens": 100},
+            attempt_id="attempt-cheap-1",
+            attempt_state="succeeded",
+            instance_repo="owner/repo",
+            model_patch="diff --git a/a.py b/a.py\n+print('cheap')\n",
         ),
         _attempt_row(
             "solver-cheap",
@@ -70,6 +76,10 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             cost=0.5,
             problem_statement="Cheap path misses the timeout case.",
             usage={"input_tokens": 900, "output_tokens": 80},
+            attempt_id="attempt-cheap-2",
+            attempt_state="failed",
+            instance_repo="owner/repo",
+            model_patch="diff --git a/b.py b/b.py\n+print('cheap-timeout')\n",
         ),
         _attempt_row(
             "solver-expensive",
@@ -79,6 +89,10 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             problem_statement="Expensive path resolves the hard case.",
             usage={"input_tokens": 3200, "output_tokens": 210},
             raw_output='{"type":"item.started","item":{"type":"command_execution"}}',
+            attempt_id="attempt-expensive-1",
+            attempt_state="succeeded",
+            instance_repo="owner/repo",
+            model_patch="diff --git a/a.py b/a.py\n+print('expensive')\n",
         ),
         _attempt_row(
             "solver-expensive",
@@ -88,6 +102,10 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             problem_statement="Expensive path resolves the timeout case.",
             usage={"input_tokens": 3400, "output_tokens": 260},
             raw_output='{"type":"response.output_item.added","item":{"type":"tool_call"}}',
+            attempt_id="attempt-expensive-2",
+            attempt_state="succeeded",
+            instance_repo="owner/repo",
+            model_patch="diff --git a/b.py b/b.py\n+print('expensive-timeout')\n",
         ),
     ]
     instance_results = [
@@ -184,6 +202,31 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
             "best_samples": [],
             "worst_samples": [],
         },
+        llm_judge_rows=[
+            {
+                "attempt_id": "attempt-expensive-2",
+                "job_id": "job-expensive-2",
+                "instance_id": "inst-2",
+                "solver_id": "solver-expensive",
+                "resolved": True,
+                "harness_outcome": "resolved",
+                "attempt_state": "succeeded",
+                "overall_delta": 0.4,
+                "overall_label": "better",
+                "confidence": 0.8,
+                "summary": "Directionally good.",
+                "dimensions": [
+                    {
+                        "name": "maintainability",
+                        "weight": 0.2,
+                        "delta": 1,
+                        "label": "better",
+                        "rationale": "Cleaner structure.",
+                    }
+                ],
+                "metadata": {"judge_status": "scored"},
+            }
+        ],
     )
 
     assert report["top_line"]["best_solver_id"] == "solver-expensive"
@@ -196,6 +239,8 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert report["cost_opportunity"]["portfolio_cost_floor_usd"] == 8.0
     assert report["cost_opportunity"]["best_solver_mixed_routing_gap_usd"] == 5.0
     assert report["llm_judge"]["top_line"]["best_solver_id"] == "solver-expensive"
+    assert report["attempt_browser"]["judge_available"] is True
+    assert report["attempt_browser"]["instance_count"] == 2
     assert (
         report["cost_opportunity"]["solver_savings"][0]["solver_id"]
         == "solver-expensive"
@@ -235,5 +280,8 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert "Best Solver" in html
     assert "LLM Judge Solver View" in html
     assert "Unresolved But Promising" in html
+    assert "Attempt Browser" in html
+    assert "LLM Judge included" in html
+    assert "solver-tab" in html
     assert "task_cluster" in html
     assert "Solver" in html

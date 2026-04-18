@@ -811,6 +811,158 @@ def _build_solver_summary_payloads(
     return sorted(payloads, key=_solver_ranking_key)
 
 
+def build_attempt_browser(
+    *,
+    attempts: list[dict[str, Any]],
+    instance_results: list[dict[str, Any]],
+    llm_judge_rows: list[Mapping[str, Any]] | None = None,
+    max_instances: int = 60,
+    max_patch_chars: int = 60000,
+    max_problem_chars: int = 8000,
+) -> dict[str, Any]:
+    """Produce a per-instance payload for the report's attempt browser tab."""
+    judge_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for row in llm_judge_rows or []:
+        solver_id = _coerce_str(row.get("solver_id"))
+        instance_id = _coerce_str(row.get("instance_id"))
+        if solver_id and instance_id:
+            judge_by_key[(solver_id, instance_id)] = row
+
+    joined = join_attempt_rows(attempts, instance_results)
+    latest_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in joined:
+        solver_id = _solver_id_from_row(row)
+        instance_id = _coerce_str(row.get("instance_id"))
+        if not solver_id or not instance_id:
+            continue
+        key = (solver_id, instance_id)
+        existing = latest_by_key.get(key)
+        row_ended = _coerce_str(row.get("attempt_ended_at"))
+        existing_ended = (
+            _coerce_str(existing.get("attempt_ended_at")) if existing else ""
+        )
+        row_idx = _coerce_non_negative_int(row.get("attempt_index"))
+        existing_idx = (
+            _coerce_non_negative_int(existing.get("attempt_index")) if existing else -1
+        )
+        if (
+            existing is None
+            or row_ended > existing_ended
+            or (row_ended == existing_ended and row_idx > existing_idx)
+        ):
+            latest_by_key[key] = dict(row)
+
+    by_instance: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (solver_id, instance_id), row in latest_by_key.items():
+        patch = _coerce_str(row.get("model_patch"))
+        patch_truncated = False
+        if len(patch) > max_patch_chars:
+            patch = patch[:max_patch_chars]
+            patch_truncated = True
+
+        judge_row = judge_by_key.get((solver_id, instance_id))
+        judge_payload: dict[str, Any] | None = None
+        if judge_row is not None:
+            dimensions_raw = judge_row.get("dimensions") or []
+            dimensions: list[dict[str, Any]] = []
+            if isinstance(dimensions_raw, list):
+                for dim in dimensions_raw:
+                    if not isinstance(dim, Mapping):
+                        continue
+                    dimensions.append(
+                        {
+                            "name": _coerce_str(dim.get("name")),
+                            "weight": dim.get("weight"),
+                            "delta": dim.get("delta"),
+                            "label": _coerce_str(dim.get("label")),
+                            "rationale": _coerce_str(dim.get("rationale")),
+                        }
+                    )
+            judge_payload = {
+                "summary": _coerce_str(judge_row.get("summary")),
+                "overall_label": _coerce_str(judge_row.get("overall_label")),
+                "overall_delta": judge_row.get("overall_delta"),
+                "confidence": judge_row.get("confidence"),
+                "dimensions": dimensions,
+            }
+
+        by_instance[instance_id].append(
+            {
+                "solver_id": solver_id,
+                "attempt_id": _coerce_str(row.get("attempt_id")),
+                "attempt_state": _coerce_str(row.get("attempt_state")),
+                "resolved": bool(row.get("resolved")),
+                "harness_outcome": _coerce_str(row.get("harness_outcome")),
+                "failure_reason": _coerce_str(row.get("failure_reason")),
+                "duration_ms": _coerce_non_negative_int(row.get("duration_ms")),
+                "attempt_cost_usd": row.get("attempt_cost_usd"),
+                "input_tokens": _coerce_non_negative_int(row.get("input_tokens")),
+                "output_tokens": _coerce_non_negative_int(row.get("output_tokens")),
+                "total_tokens": _coerce_non_negative_int(row.get("total_tokens")),
+                "tool_calls": _coerce_non_negative_int(row.get("tool_calls")),
+                "model_patch": patch,
+                "model_patch_truncated": patch_truncated,
+                "model_patch_length": _coerce_non_negative_int(
+                    row.get("patch_length")
+                )
+                or len(_coerce_str(row.get("model_patch"))),
+                "judge": judge_payload,
+            }
+        )
+
+    instances_with_problem: dict[str, str] = {}
+    instance_repo: dict[str, str] = {}
+    for attempt in attempts:
+        instance_id = _coerce_str(attempt.get("instance_id"))
+        if not instance_id:
+            continue
+        statement = _coerce_str(attempt.get("problem_statement"))
+        if statement and instance_id not in instances_with_problem:
+            instances_with_problem[instance_id] = statement
+        repo = _coerce_str(attempt.get("instance_repo"))
+        if repo and instance_id not in instance_repo:
+            instance_repo[instance_id] = repo
+
+    instances: list[dict[str, Any]] = []
+    for instance_id, solver_rows in by_instance.items():
+        solver_rows.sort(key=lambda item: item["solver_id"])
+        resolved_solvers = sum(1 for item in solver_rows if item["resolved"])
+        problem_text = instances_with_problem.get(instance_id, "")
+        problem_truncated = False
+        if len(problem_text) > max_problem_chars:
+            problem_text = problem_text[:max_problem_chars]
+            problem_truncated = True
+        instances.append(
+            {
+                "instance_id": instance_id,
+                "instance_repo": instance_repo.get(instance_id, ""),
+                "problem_statement": problem_text,
+                "problem_statement_truncated": problem_truncated,
+                "solver_count": len(solver_rows),
+                "resolved_count": resolved_solvers,
+                "solvers": solver_rows,
+            }
+        )
+
+    def _sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+        share_denom = max(item["solver_count"], 1)
+        resolution_bucket = int((item["resolved_count"] / share_denom) * 100)
+        return (-resolution_bucket, -item["solver_count"], item["instance_id"])
+
+    instances.sort(key=_sort_key)
+    truncated = len(instances) > max_instances
+    if truncated:
+        instances = instances[:max_instances]
+
+    return {
+        "instances": instances,
+        "instance_count": len(by_instance),
+        "rendered_count": len(instances),
+        "truncated": truncated,
+        "judge_available": bool(judge_by_key),
+    }
+
+
 def build_analysis_report(
     *,
     attempts: list[dict[str, Any]],
@@ -821,6 +973,7 @@ def build_analysis_report(
     expensive_cost_threshold: float,
     metadata: dict[str, Any] | None = None,
     llm_judge_report: dict[str, Any] | None = None,
+    llm_judge_rows: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the structured payload that feeds the static analysis report."""
     joined_rows = join_attempt_rows(attempts, instance_results)
@@ -976,6 +1129,12 @@ def build_analysis_report(
         }
     if llm_judge_report is not None:
         report["llm_judge"] = llm_judge_report
+
+    report["attempt_browser"] = build_attempt_browser(
+        attempts=attempts,
+        instance_results=instance_results,
+        llm_judge_rows=llm_judge_rows,
+    )
 
     return report
 
@@ -1245,6 +1404,7 @@ def write_summary_html(
     solver_comparison = report.get("solver_comparison", {})
     budget_frontier = report.get("budget_frontier", [])
     pareto_frontier = report.get("pareto_frontier", [])
+    attempt_browser = report.get("attempt_browser", {})
     failure_breakdown = report.get("failure_reason_breakdown", [])
     unresolved_samples = report.get("unresolved_samples", [])
     cost_opportunity = report.get("cost_opportunity", {})
@@ -1567,6 +1727,261 @@ def write_summary_html(
             '<section class="panel"><div class="section-heading"><h2>Unresolved Samples</h2>'
             "<p>The highest-cost unresolved rows, surfaced to make debugging the next tranche straightforward.</p></div>"
             f'<div class="incident-grid">{"".join(cards)}</div></section>'
+        )
+
+    def render_diff(patch: str, truncated: bool) -> str:
+        if not patch:
+            return (
+                '<div class="empty-state">This attempt produced no patch. '
+                "The harness saw an empty diff, so there is nothing to compare.</div>"
+            )
+        line_html: list[str] = []
+        for raw_line in patch.splitlines():
+            if raw_line.startswith("diff --git"):
+                cls = "diff__file"
+            elif raw_line.startswith("+++ ") or raw_line.startswith("--- "):
+                cls = "diff__path"
+            elif raw_line.startswith("@@"):
+                cls = "diff__hunk"
+            elif raw_line.startswith("+") and not raw_line.startswith("+++"):
+                cls = "diff__add"
+            elif raw_line.startswith("-") and not raw_line.startswith("---"):
+                cls = "diff__del"
+            elif raw_line.startswith("index ") or raw_line.startswith("new file") or raw_line.startswith("deleted file"):
+                cls = "diff__meta"
+            else:
+                cls = "diff__ctx"
+            line_html.append(
+                f'<span class="{cls}">{html_escape(raw_line) or "&nbsp;"}</span>'
+            )
+        trailer = (
+            '<div class="diff__truncated">Diff truncated for display — '
+            "download the run artifacts for the full patch.</div>"
+            if truncated
+            else ""
+        )
+        diff_body = "".join(f"{line}\n" for line in line_html)
+        return f'<pre class="diff">{diff_body}</pre>{trailer}'
+
+    def render_judge_block(judge: Mapping[str, Any] | None) -> str:
+        if not judge:
+            return (
+                '<div class="judge-card judge-card--muted">'
+                '<div class="judge-card__title">LLM Judge</div>'
+                '<p class="judge-card__empty">No judge analysis was produced for this attempt.</p>'
+                "</div>"
+            )
+        label = _coerce_str(judge.get("overall_label")) or "same"
+        delta = judge.get("overall_delta")
+        confidence = judge.get("confidence")
+        summary = _coerce_str(judge.get("summary")) or "—"
+        tone = label.replace("_", "-") or "same"
+        dims = judge.get("dimensions") or []
+        dim_html = ""
+        if dims:
+            chips = []
+            for dim in dims:
+                if not isinstance(dim, Mapping):
+                    continue
+                name = _coerce_str(dim.get("name")).replace("_", " ").title() or "—"
+                dlabel = _coerce_str(dim.get("label")) or "same"
+                dtone = dlabel.replace("_", "-") or "same"
+                dvalue = dim.get("delta")
+                dvalue_str = (
+                    f"Δ{int(dvalue):+d}"
+                    if isinstance(dvalue, (int, float))
+                    else ""
+                )
+                rationale = _coerce_str(dim.get("rationale"))
+                chips.append(
+                    '<div class="dim">'
+                    f'<div class="dim__head">'
+                    f'<span class="dim__name">{html_escape(name)}</span>'
+                    f'<span class="chip chip--judge chip--judge-{html_escape(dtone)}">'
+                    f'{html_escape(dlabel.replace("_", " "))}'
+                    f' <em>{html_escape(dvalue_str)}</em></span>'
+                    "</div>"
+                    f'<p class="dim__rationale">{html_escape(rationale) or "—"}</p>'
+                    "</div>"
+                )
+            dim_html = f'<div class="dim-grid">{"".join(chips)}</div>'
+        delta_str = (
+            f"{float(delta):+.2f}" if isinstance(delta, (int, float)) else "—"
+        )
+        conf_str = (
+            f"{float(confidence):.2f}"
+            if isinstance(confidence, (int, float)) and confidence > 0
+            else "—"
+        )
+        return (
+            '<div class="judge-card">'
+            '<div class="judge-card__head">'
+            '<span class="judge-card__title">LLM Judge</span>'
+            f'<span class="chip chip--judge chip--judge-{html_escape(tone)}">'
+            f'{html_escape(label.replace("_", " "))}</span>'
+            "</div>"
+            '<dl class="judge-card__meta">'
+            f'<div><dt>Overall Δ</dt><dd>{html_escape(delta_str)}</dd></div>'
+            f'<div><dt>Confidence</dt><dd>{html_escape(conf_str)}</dd></div>'
+            "</dl>"
+            f'<p class="judge-card__summary">{html_escape(summary)}</p>'
+            f"{dim_html}"
+            "</div>"
+        )
+
+    def render_attempt_browser(payload: Mapping[str, Any]) -> str:
+        instances = list(payload.get("instances") or [])
+        if not instances:
+            return (
+                '<section class="panel"><div class="section-heading"><h2>Attempt Browser</h2>'
+                "<p>No attempts were available to inspect.</p></div>"
+                '<div class="empty-state">Run <code>repogauge analyze</code> on a run with '
+                "attempts to populate this browser.</div></section>"
+            )
+
+        judge_available = bool(payload.get("judge_available"))
+        rail_items: list[str] = []
+        panels: list[str] = []
+        for idx, inst in enumerate(instances):
+            iid = _coerce_str(inst.get("instance_id"))
+            resolved = _coerce_non_negative_int(inst.get("resolved_count"))
+            total = _coerce_non_negative_int(inst.get("solver_count")) or 1
+            share = resolved / total if total else 0.0
+            if resolved == total:
+                status_tone = "success"
+                status_label = "all pass"
+            elif resolved == 0:
+                status_tone = "fail"
+                status_label = "all fail"
+            else:
+                status_tone = "mixed"
+                status_label = f"{resolved}/{total}"
+            rail_items.append(
+                '<button type="button" class="browser__row" '
+                f'data-browser-row="{idx}" aria-selected="{"true" if idx == 0 else "false"}">'
+                f'<div class="browser__row-head">'
+                f'<span class="browser__row-id">{html_escape(iid)}</span>'
+                f'<span class="chip chip--status chip--status-{status_tone}">'
+                f'{html_escape(status_label)}</span>'
+                "</div>"
+                f'<div class="browser__row-meta">'
+                f'<span>{html_escape(_coerce_str(inst.get("instance_repo")) or "—")}</span>'
+                f'<span class="browser__row-bar"><span style="width:{share * 100:.0f}%"></span></span>'
+                "</div>"
+                "</button>"
+            )
+
+            solvers = list(inst.get("solvers") or [])
+            tab_buttons: list[str] = []
+            tab_panels: list[str] = []
+            for sidx, solver in enumerate(solvers):
+                solver_id = _coerce_str(solver.get("solver_id"))
+                resolved_row = bool(solver.get("resolved"))
+                chip_tone = "success" if resolved_row else "fail"
+                chip_label = "resolved" if resolved_row else "unresolved"
+                tab_buttons.append(
+                    '<button type="button" class="solver-tab" '
+                    f'data-attempt-tab="{idx}-{sidx}" '
+                    f'aria-selected="{"true" if sidx == 0 else "false"}">'
+                    f'<span class="solver-tab__name">{html_escape(solver_id)}</span>'
+                    f'<span class="chip chip--status chip--status-{chip_tone}">'
+                    f'{html_escape(chip_label)}</span>'
+                    "</button>"
+                )
+                duration_display = _format_duration_ms(solver.get("duration_ms"))
+                cost_display = _format_currency(solver.get("attempt_cost_usd"))
+                token_display = _format_compact_number(solver.get("total_tokens"))
+                tool_calls_display = _format_integer(solver.get("tool_calls"))
+                patch_length_display = _format_integer(solver.get("model_patch_length"))
+                harness = _coerce_str(solver.get("harness_outcome")) or "unknown"
+                attempt_state = _coerce_str(solver.get("attempt_state")) or "unknown"
+                failure_reason = _coerce_str(solver.get("failure_reason"))
+                meta_rows = [
+                    ("Harness", harness),
+                    ("Attempt State", attempt_state),
+                    ("Latency", duration_display),
+                    ("Spend", cost_display),
+                    ("Tokens", token_display),
+                    ("Tool Calls", tool_calls_display),
+                    ("Patch Size", f"{patch_length_display} chars"),
+                ]
+                if failure_reason:
+                    meta_rows.append(("Failure Reason", failure_reason))
+                meta_html = "".join(
+                    f"<div><dt>{html_escape(k)}</dt><dd>{html_escape(v)}</dd></div>"
+                    for k, v in meta_rows
+                )
+                tab_panels.append(
+                    '<div class="solver-panel" '
+                    f'data-attempt-panel="{idx}-{sidx}" '
+                    f'{"" if sidx == 0 else "hidden"}>'
+                    '<dl class="attempt-meta">'
+                    f"{meta_html}"
+                    "</dl>"
+                    '<div class="attempt-sections">'
+                    f'<div class="attempt-sections__diff">'
+                    '<div class="section-label">Diff</div>'
+                    f"{render_diff(_coerce_str(solver.get('model_patch')), bool(solver.get('model_patch_truncated')))}"
+                    "</div>"
+                    f'<div class="attempt-sections__judge">'
+                    f"{render_judge_block(solver.get('judge'))}"
+                    "</div>"
+                    "</div>"
+                    "</div>"
+                )
+
+            problem_truncated_hint = (
+                '<span class="problem__hint">(truncated for display)</span>'
+                if inst.get("problem_statement_truncated")
+                else ""
+            )
+            problem_body = html_escape(
+                _coerce_str(inst.get("problem_statement"))
+            ) or "<em>No problem statement was recorded for this instance.</em>"
+            panels.append(
+                f'<section class="browser__panel" data-browser-panel="{idx}" '
+                f'{"" if idx == 0 else "hidden"}>'
+                '<header class="browser__panel-head">'
+                f'<div class="browser__panel-id">{html_escape(iid)}</div>'
+                f'<div class="browser__panel-repo">{html_escape(_coerce_str(inst.get("instance_repo")) or "—")}</div>'
+                "</header>"
+                '<div class="problem">'
+                '<div class="section-label">Problem Statement '
+                f"{problem_truncated_hint}</div>"
+                f'<div class="problem__body">{problem_body}</div>'
+                "</div>"
+                f'<nav class="solver-tabs" role="tablist" aria-label="Solvers for {html_escape(iid)}">'
+                f"{''.join(tab_buttons)}</nav>"
+                f'<div class="solver-panels">{"".join(tab_panels)}</div>'
+                "</section>"
+            )
+
+        rendered_count = _coerce_non_negative_int(payload.get("rendered_count"))
+        total_count = _coerce_non_negative_int(payload.get("instance_count"))
+        truncated_note = ""
+        if payload.get("truncated"):
+            truncated_note = (
+                '<p class="browser__truncated">Showing the first '
+                f"{rendered_count} of {total_count} instances, sorted by resolution "
+                "rate. Rerun <code>analyze</code> with a narrower attempt set to "
+                "focus on a specific slice.</p>"
+            )
+        judge_note = (
+            '<span class="chip chip--judge chip--judge-better">LLM Judge included</span>'
+            if judge_available
+            else '<span class="chip chip--judge chip--judge-same">No judge analysis in this run</span>'
+        )
+        return (
+            '<section class="panel panel--browser"><div class="section-heading">'
+            "<h2>Attempt Browser</h2>"
+            f"<p>Inspect each instance, the solvers that attempted it, and the diffs they produced. {judge_note}</p>"
+            "</div>"
+            f"{truncated_note}"
+            '<div class="browser">'
+            f'<aside class="browser__rail" role="tablist" aria-label="Instances">'
+            f'{"".join(rail_items)}</aside>'
+            f'<div class="browser__panels">{"".join(panels)}</div>'
+            "</div></section>"
         )
 
     summary_cards = "".join(
@@ -2513,6 +2928,391 @@ def write_summary_html(
         align-items: flex-start;
       }}
     }}
+    .view-tabs {{
+      display: flex;
+      gap: 6px;
+      padding: 6px;
+      margin: 24px 0 4px;
+      background: var(--paper);
+      border: 1px solid var(--hairline);
+      border-radius: 999px;
+      box-shadow: var(--shadow-xs);
+      width: fit-content;
+    }}
+    .view-tabs__btn {{
+      appearance: none;
+      border: 0;
+      background: transparent;
+      padding: 10px 22px;
+      border-radius: 999px;
+      font-family: var(--font-sans);
+      font-size: 0.88rem;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 160ms ease, color 160ms ease;
+    }}
+    .view-tabs__btn:hover {{ color: var(--ink); }}
+    .view-tabs__btn[aria-selected="true"] {{
+      background: linear-gradient(135deg, var(--accent), var(--accent-glow));
+      color: #fff;
+      box-shadow: 0 6px 16px rgba(99,91,255,0.30);
+    }}
+    .view-panel[hidden] {{ display: none; }}
+    .panel--browser {{ padding: 24px; }}
+    .browser {{
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 20px;
+      margin-top: 8px;
+    }}
+    .browser__rail {{
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 780px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }}
+    .browser__rail::-webkit-scrollbar {{ width: 8px; }}
+    .browser__rail::-webkit-scrollbar-thumb {{
+      background: rgba(10,12,23,0.16);
+      border-radius: 999px;
+    }}
+    .browser__row {{
+      appearance: none;
+      text-align: left;
+      background: var(--paper);
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-md);
+      padding: 12px 14px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+    }}
+    .browser__row:hover {{
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }}
+    .browser__row[aria-selected="true"] {{
+      border-color: var(--accent);
+      background: linear-gradient(135deg, rgba(99,91,255,0.08), rgba(34,211,238,0.06));
+      box-shadow: inset 2px 0 0 var(--accent);
+    }}
+    .browser__row-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }}
+    .browser__row-id {{
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--ink);
+      font-weight: 600;
+      word-break: break-all;
+    }}
+    .browser__row-meta {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-transform: lowercase;
+    }}
+    .browser__row-bar {{
+      display: inline-block;
+      flex: 0 0 70px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(10,12,23,0.06);
+      overflow: hidden;
+    }}
+    .browser__row-bar > span {{
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }}
+    .browser__panels {{ min-width: 0; }}
+    .browser__panel[hidden] {{ display: none; }}
+    .browser__panel-head {{
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 14px;
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--hairline);
+    }}
+    .browser__panel-id {{
+      font-family: var(--font-mono);
+      font-size: 0.98rem;
+      font-weight: 600;
+      color: var(--ink);
+    }}
+    .browser__panel-repo {{
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }}
+    .browser__truncated {{
+      margin: 4px 0 12px;
+      padding: 10px 14px;
+      border-radius: var(--r-md);
+      background: rgba(99,91,255,0.06);
+      border: 1px solid rgba(99,91,255,0.18);
+      color: var(--ink);
+      font-size: 0.84rem;
+    }}
+    .section-label {{
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }}
+    .problem {{
+      background: var(--canvas);
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-md);
+      padding: 16px 18px;
+      margin-bottom: 20px;
+    }}
+    .problem__body {{
+      white-space: pre-wrap;
+      font-size: 0.92rem;
+      line-height: 1.6;
+      color: var(--ink);
+      max-height: 260px;
+      overflow-y: auto;
+    }}
+    .problem__hint {{
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      color: var(--muted);
+      text-transform: none;
+      letter-spacing: 0;
+      margin-left: 10px;
+    }}
+    .solver-tabs {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--hairline);
+      padding-bottom: 8px;
+    }}
+    .solver-tab {{
+      appearance: none;
+      border: 1px solid var(--hairline);
+      background: var(--paper);
+      padding: 8px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--body);
+      transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+    }}
+    .solver-tab:hover {{ border-color: var(--accent); color: var(--ink); }}
+    .solver-tab[aria-selected="true"] {{
+      background: var(--ink);
+      border-color: var(--ink);
+      color: #fff;
+    }}
+    .solver-tab[aria-selected="true"] .chip--status {{
+      background: rgba(255,255,255,0.14);
+      color: #fff;
+    }}
+    .solver-tab__name {{
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }}
+    .solver-panel[hidden] {{ display: none; }}
+    .attempt-meta {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 14px;
+      margin: 0 0 16px;
+      background: var(--canvas);
+      border: 1px solid var(--hairline);
+      border-radius: var(--r-md);
+      font-variant-numeric: tabular-nums;
+    }}
+    .attempt-meta > div {{ display: flex; flex-direction: column; gap: 4px; }}
+    .attempt-meta dt {{
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .attempt-meta dd {{
+      margin: 0;
+      font-size: 0.92rem;
+      color: var(--ink);
+      font-weight: 500;
+    }}
+    .attempt-sections {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }}
+    .diff {{
+      margin: 0;
+      padding: 14px 16px;
+      background: var(--night);
+      color: #d7dbef;
+      border-radius: var(--r-md);
+      border: 1px solid rgba(255,255,255,0.06);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.55;
+      max-height: 520px;
+      overflow: auto;
+      white-space: pre;
+    }}
+    .diff span {{ display: block; padding: 0 6px; }}
+    .diff__file {{ color: #f472b6; font-weight: 600; margin-top: 4px; }}
+    .diff__path {{ color: #a78bfa; }}
+    .diff__hunk {{ color: #fbbf24; background: rgba(251,191,36,0.08); }}
+    .diff__add {{ color: #86efac; background: rgba(16,185,129,0.12); }}
+    .diff__del {{ color: #fda4af; background: rgba(244,63,94,0.12); }}
+    .diff__meta {{ color: #8b93b0; }}
+    .diff__ctx {{ color: #c6cce0; }}
+    .diff__truncated {{
+      margin-top: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+    }}
+    .judge-card {{
+      background: linear-gradient(160deg, rgba(99,91,255,0.06), rgba(34,211,238,0.04));
+      border: 1px solid rgba(99,91,255,0.16);
+      border-radius: var(--r-md);
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }}
+    .judge-card--muted {{
+      background: var(--canvas);
+      border-color: var(--hairline);
+    }}
+    .judge-card__head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }}
+    .judge-card__title {{
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .judge-card__meta {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 0;
+      font-variant-numeric: tabular-nums;
+    }}
+    .judge-card__meta dt {{
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }}
+    .judge-card__meta dd {{
+      margin: 2px 0 0;
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--ink);
+    }}
+    .judge-card__summary {{
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.55;
+      color: var(--ink);
+    }}
+    .judge-card__empty {{
+      margin: 0;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }}
+    .dim-grid {{
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--hairline);
+    }}
+    .dim {{ display: flex; flex-direction: column; gap: 4px; }}
+    .dim__head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }}
+    .dim__name {{
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      letter-spacing: 0.06em;
+      color: var(--ink);
+      font-weight: 600;
+    }}
+    .dim__rationale {{
+      margin: 0;
+      font-size: 0.84rem;
+      color: var(--body);
+      line-height: 1.5;
+    }}
+    .chip--status {{
+      font-family: var(--font-mono);
+      font-size: 0.64rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(10,12,23,0.06);
+      color: var(--muted);
+    }}
+    .chip--status-success {{ background: rgba(16,185,129,0.14); color: #047857; }}
+    .chip--status-fail {{ background: rgba(244,63,94,0.14); color: #be123c; }}
+    .chip--status-mixed {{ background: rgba(251,191,36,0.18); color: #92400e; }}
+    .chip--judge {{
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      border-radius: 999px;
+    }}
+    .chip--judge em {{ font-style: normal; font-weight: 600; margin-left: 4px; }}
+    .chip--judge-better {{ background: rgba(16,185,129,0.14); color: #047857; }}
+    .chip--judge-much-better {{ background: rgba(16,185,129,0.24); color: #065f46; }}
+    .chip--judge-worse {{ background: rgba(244,63,94,0.14); color: #be123c; }}
+    .chip--judge-much-worse {{ background: rgba(244,63,94,0.24); color: #9f1239; }}
+    .chip--judge-same {{ background: rgba(10,12,23,0.08); color: var(--muted); }}
+    @media (max-width: 1100px) {{
+      .browser {{ grid-template-columns: 1fr; }}
+      .browser__rail {{ max-height: none; }}
+      .attempt-sections {{ grid-template-columns: 1fr; }}
+      .attempt-meta {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    }}
   </style>
 </head>
 <body>
@@ -2541,7 +3341,12 @@ def write_summary_html(
       </div>
     </header>
 
-    <section class="section-grid">
+    <nav class="view-tabs" role="tablist" aria-label="Report views">
+      <button type="button" class="view-tabs__btn" data-view-tab="overview" aria-selected="true" aria-controls="view-overview">Overview</button>
+      <button type="button" class="view-tabs__btn" data-view-tab="attempts" aria-selected="false" aria-controls="view-attempts">Attempts</button>
+    </nav>
+
+    <section class="section-grid view-panel" id="view-overview" data-view-panel="overview">
       <div class="metric-grid">{summary_cards}</div>
       <div class="spotlight-grid">{solver_spotlights}</div>
       {
@@ -2639,6 +3444,10 @@ def write_summary_html(
       {llm_judge_sections}
       {metadata_block}
     </section>
+
+    <section class="section-grid view-panel" id="view-attempts" data-view-panel="attempts" hidden>
+      {render_attempt_browser(attempt_browser)}
+    </section>
   </main>
   <script>
     (() => {{
@@ -2671,6 +3480,60 @@ def write_summary_html(
             return 0;
           }});
           rows.forEach((row) => tbody.appendChild(row));
+        }});
+      }});
+
+      document.querySelectorAll(".view-tabs__btn").forEach((button) => {{
+        button.addEventListener("click", () => {{
+          const target = button.dataset.viewTab;
+          document.querySelectorAll(".view-tabs__btn").forEach((peer) => {{
+            peer.setAttribute("aria-selected", peer === button ? "true" : "false");
+          }});
+          document.querySelectorAll("[data-view-panel]").forEach((panel) => {{
+            if (panel.dataset.viewPanel === target) {{
+              panel.removeAttribute("hidden");
+            }} else {{
+              panel.setAttribute("hidden", "");
+            }}
+          }});
+        }});
+      }});
+
+      document.querySelectorAll(".browser__row").forEach((row) => {{
+        row.addEventListener("click", () => {{
+          const idx = row.dataset.browserRow;
+          document.querySelectorAll(".browser__row").forEach((peer) => {{
+            peer.setAttribute("aria-selected", peer === row ? "true" : "false");
+          }});
+          document.querySelectorAll("[data-browser-panel]").forEach((panel) => {{
+            if (panel.dataset.browserPanel === idx) {{
+              panel.removeAttribute("hidden");
+            }} else {{
+              panel.setAttribute("hidden", "");
+            }}
+          }});
+        }});
+      }});
+
+      document.querySelectorAll(".solver-tab").forEach((tab) => {{
+        tab.addEventListener("click", () => {{
+          const target = tab.dataset.attemptTab;
+          if (!target) return;
+          const [panelIdx] = target.split("-");
+          const panelEl = document.querySelector(
+            `[data-browser-panel="${{panelIdx}}"]`
+          );
+          if (!panelEl) return;
+          panelEl.querySelectorAll(".solver-tab").forEach((peer) => {{
+            peer.setAttribute("aria-selected", peer === tab ? "true" : "false");
+          }});
+          panelEl.querySelectorAll("[data-attempt-panel]").forEach((panel) => {{
+            if (panel.dataset.attemptPanel === target) {{
+              panel.removeAttribute("hidden");
+            }} else {{
+              panel.setAttribute("hidden", "");
+            }}
+          }});
         }});
       }});
     }})();

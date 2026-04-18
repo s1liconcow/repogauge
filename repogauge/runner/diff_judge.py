@@ -6,10 +6,11 @@ import hashlib
 import json
 import os
 import re
+import sys
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, TextIO
 
 from repogauge.config import DiffJudgeRow
 from repogauge.exec import run_command
@@ -23,6 +24,7 @@ from repogauge.runner.adapters import (
     _parse_json_lines,
     _post_json,
 )
+from repogauge.runner.workspaces import _prepare_codex_home
 
 JUDGE_PROMPT_VERSION = "diff_judge/v1"
 JUDGE_ARTIFACT_FILENAME = "llm_judge.jsonl"
@@ -94,6 +96,56 @@ class DiffJudgeRunResult:
     rows: list[dict[str, Any]]
     report: dict[str, Any]
     model: dict[str, Any]
+
+
+class _JudgeProgressReporter:
+    def __init__(self, total: int, stream: TextIO | None) -> None:
+        self._total = max(total, 0)
+        self._stream = stream
+        self._is_tty = bool(stream and hasattr(stream, "isatty") and stream.isatty())
+        self._last_line_open = False
+
+    def _render(self, completed: int, message: str) -> None:
+        if self._stream is None or self._total <= 0:
+            return
+        bounded_completed = min(max(completed, 0), self._total)
+        width = 20
+        filled = int(width * bounded_completed / self._total)
+        bar = "#" * filled + "-" * (width - filled)
+        line = (
+            f"repogauge analyze: llm judge [{bar}] "
+            f"{bounded_completed}/{self._total} {message}"
+        )
+        if self._is_tty:
+            print(f"\r{line}", end="", file=self._stream, flush=True)
+            self._last_line_open = True
+            return
+        print(line, file=self._stream, flush=True)
+
+    def start(self, *, completed: int, solver_id: str, instance_id: str) -> None:
+        self._render(
+            completed,
+            f"calling judge for {solver_id} {instance_id}",
+        )
+
+    def finish(
+        self,
+        *,
+        completed: int,
+        solver_id: str,
+        instance_id: str,
+        status: str,
+    ) -> None:
+        self._render(
+            completed,
+            f"{status} {solver_id} {instance_id}",
+        )
+
+    def close(self) -> None:
+        if self._stream is None or not self._last_line_open:
+            return
+        print(file=self._stream, flush=True)
+        self._last_line_open = False
 
 
 def _normalize_provider(value: Any) -> str:
@@ -392,6 +444,12 @@ def _codex_cli_output_text(raw_output: str) -> str:
     return raw_output.strip()
 
 
+def _prepare_codex_cli_home(home_root: Path) -> dict[str, str]:
+    _prepare_codex_home(home_root)
+    (home_root / ".config").mkdir(parents=True, exist_ok=True)
+    return _codex_cli_env(home_root)
+
+
 def _invoke_model(
     *,
     model: LlmModelSpec,
@@ -448,7 +506,7 @@ def _invoke_model(
             "model": model.model_name,
         }
         home_root = Path.cwd() / ".repogauge" / "judge-codex-home"
-        command_env = _codex_cli_env(home_root)
+        command_env = _prepare_codex_cli_home(home_root)
         command_result = run_command(
             command,
             cwd=str(Path.cwd()),
@@ -599,7 +657,8 @@ def _load_existing_rows(path: Path) -> dict[tuple[str, str], dict[str, Any]]:
             continue
         attempt_id = _coerce_text(row.get("attempt_id"))
         cache_key = _coerce_text(row.get("metadata", {}).get("cache_key"))
-        if attempt_id and cache_key:
+        judge_status = _coerce_text(row.get("metadata", {}).get("judge_status"))
+        if attempt_id and cache_key and judge_status == "scored":
             loaded[(attempt_id, cache_key)] = row
     return loaded
 
@@ -878,10 +937,13 @@ def run_diff_judge(
     llm_mode: str | None,
     model_name: str | None,
     provider: str | None,
+    progress_stream: TextIO | None = None,
 ) -> DiffJudgeRunResult:
     normalized_provider = _normalize_provider(provider)
     validate_llm_judge_policy(llm_mode=llm_mode, provider=normalized_provider)
     model = _resolve_model(normalized_provider, model_name)
+    if progress_stream is None:
+        progress_stream = sys.stderr
 
     judge_root = out_root / "judge"
     requests_root = judge_root / "requests"
@@ -891,12 +953,14 @@ def run_diff_judge(
     responses_root.mkdir(parents=True, exist_ok=True)
     existing_rows = _load_existing_rows(rows_path)
 
+    candidate_rows = [
+        row for row in joined_rows if _coerce_text(row.get("model_patch")).strip()
+    ]
+    progress = _JudgeProgressReporter(len(candidate_rows), progress_stream)
+
     judged_rows: list[dict[str, Any]] = []
     counter = 0
-    for row in joined_rows:
-        patch = _coerce_text(row.get("model_patch")).strip()
-        if not patch:
-            continue
+    for row in candidate_rows:
         instance_id = _coerce_text(row.get("instance_id"))
         dataset_row = dataset_rows.get(instance_id)
         if dataset_row is None:
@@ -923,6 +987,12 @@ def run_diff_judge(
             metadata["cache_hit"] = True
             cached["metadata"] = metadata
             judged_rows.append(cached)
+            progress.finish(
+                completed=counter + 1,
+                solver_id=_coerce_text(row.get("solver_id")),
+                instance_id=instance_id,
+                status="cache-hit",
+            )
             counter += 1
             continue
 
@@ -937,6 +1007,11 @@ def run_diff_judge(
             "response_ref": str(response_ref),
             "prompt_version": model.prompt_version,
         }
+        progress.start(
+            completed=counter,
+            solver_id=_coerce_text(row.get("solver_id")),
+            instance_id=instance_id,
+        )
         request_ref.write_text(
             json.dumps(
                 {
@@ -992,6 +1067,12 @@ def run_diff_judge(
                     ),
                 )
             )
+            progress.finish(
+                completed=counter + 1,
+                solver_id=_coerce_text(row.get("solver_id")),
+                instance_id=instance_id,
+                status="scored",
+            )
         except Exception as exc:
             response_ref.write_text(
                 json.dumps({"error": str(exc)}, sort_keys=True, indent=2) + "\n",
@@ -1005,10 +1086,17 @@ def run_diff_judge(
                     error=str(exc),
                 )
             )
+            progress.finish(
+                completed=counter + 1,
+                solver_id=_coerce_text(row.get("solver_id")),
+                instance_id=instance_id,
+                status="error",
+            )
         counter += 1
 
     _write_rows(rows_path, judged_rows)
     report = build_diff_judge_report(judged_rows, model=model.to_dict())
+    progress.close()
     return DiffJudgeRunResult(
         rows_path=str(rows_path),
         rows=judged_rows,

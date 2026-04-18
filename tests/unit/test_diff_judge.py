@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -142,6 +143,210 @@ def test_run_diff_judge_writes_rows_and_reuses_cache(tmp_path: Path) -> None:
     assert cached.rows[0]["metadata"]["cache_hit"] is True
 
 
+def test_run_diff_judge_emits_progress_updates(tmp_path: Path) -> None:
+    joined_rows = [
+        {
+            "attempt_id": "run:inst-1:solver-a:1:attempt-1",
+            "job_id": "run:inst-1:solver-a:1",
+            "instance_id": "inst-1",
+            "solver_id": "solver-a",
+            "resolved": True,
+            "harness_outcome": "resolved",
+            "attempt_state": "succeeded",
+            "model_patch": "diff --git a/src.py b/src.py\n+print('candidate')\n",
+        }
+    ]
+    dataset_rows = {
+        "inst-1": {
+            "instance_id": "inst-1",
+            "problem_statement": "Fix the parser regression.",
+            "patch": "diff --git a/src.py b/src.py\n+print('gold')\n",
+            "test_patch": "diff --git a/test_src.py b/test_src.py\n+assert True\n",
+        }
+    }
+    response_payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "summary": "Cleaner than the gold patch.",
+                            "confidence": 0.9,
+                            "dimensions": [
+                                {
+                                    "name": "task_fit",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Still addresses the same bug.",
+                                },
+                                {
+                                    "name": "correctness_safety",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Less regression risk.",
+                                },
+                                {
+                                    "name": "maintainability",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Simpler control flow.",
+                                },
+                                {
+                                    "name": "test_quality",
+                                    "delta": 0,
+                                    "label": "same",
+                                    "rationale": "Comparable test posture.",
+                                },
+                                {
+                                    "name": "change_focus",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Tighter scope.",
+                                },
+                            ],
+                        }
+                    )
+                }
+            }
+        ]
+    }
+    progress_stream = io.StringIO()
+
+    with patch(
+        "repogauge.runner.diff_judge._invoke_model",
+        return_value=(
+            {"model": "judge-unit"},
+            response_payload,
+            {"input_tokens": 100},
+            "response.usage",
+            {"total_cost": 0.01},
+            "response.cost",
+        ),
+    ):
+        run_diff_judge(
+            joined_rows=joined_rows,
+            dataset_rows=dataset_rows,
+            out_root=tmp_path,
+            llm_mode="local_only",
+            model_name="judge-unit",
+            provider="local",
+            progress_stream=progress_stream,
+        )
+
+    progress_output = progress_stream.getvalue()
+    assert "repogauge analyze: llm judge" in progress_output
+    assert "calling judge for solver-a inst-1" in progress_output
+    assert "scored solver-a inst-1" in progress_output
+
+
+def test_run_diff_judge_does_not_reuse_cached_error_rows(tmp_path: Path) -> None:
+    joined_rows = [
+        {
+            "attempt_id": "run:inst-1:solver-a:1:attempt-1",
+            "job_id": "run:inst-1:solver-a:1",
+            "instance_id": "inst-1",
+            "solver_id": "solver-a",
+            "resolved": True,
+            "harness_outcome": "resolved",
+            "attempt_state": "succeeded",
+            "model_patch": "diff --git a/src.py b/src.py\n+print('candidate')\n",
+        }
+    ]
+    dataset_rows = {
+        "inst-1": {
+            "instance_id": "inst-1",
+            "problem_statement": "Fix the parser regression.",
+            "patch": "diff --git a/src.py b/src.py\n+print('gold')\n",
+            "test_patch": "diff --git a/test_src.py b/test_src.py\n+assert True\n",
+        }
+    }
+    response_payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "summary": "Cleaner than the gold patch.",
+                            "confidence": 0.9,
+                            "dimensions": [
+                                {
+                                    "name": "task_fit",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Still addresses the same bug.",
+                                },
+                                {
+                                    "name": "correctness_safety",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Less regression risk.",
+                                },
+                                {
+                                    "name": "maintainability",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Simpler control flow.",
+                                },
+                                {
+                                    "name": "test_quality",
+                                    "delta": 0,
+                                    "label": "same",
+                                    "rationale": "Comparable test posture.",
+                                },
+                                {
+                                    "name": "change_focus",
+                                    "delta": 1,
+                                    "label": "better",
+                                    "rationale": "Tighter scope.",
+                                },
+                            ],
+                        }
+                    )
+                }
+            }
+        ]
+    }
+
+    with patch(
+        "repogauge.runner.diff_judge._invoke_model",
+        side_effect=RuntimeError("judge unavailable"),
+    ) as mock_first:
+        errored = run_diff_judge(
+            joined_rows=joined_rows,
+            dataset_rows=dataset_rows,
+            out_root=tmp_path,
+            llm_mode="local_only",
+            model_name="judge-unit",
+            provider="local",
+        )
+    assert mock_first.call_count == 1
+    assert errored.rows[0]["metadata"]["judge_status"] == "error"
+
+    with patch(
+        "repogauge.runner.diff_judge._invoke_model",
+        return_value=(
+            {"model": "judge-unit"},
+            response_payload,
+            {"input_tokens": 100},
+            "response.usage",
+            {"total_cost": 0.01},
+            "response.cost",
+        ),
+    ) as mock_second:
+        retried = run_diff_judge(
+            joined_rows=joined_rows,
+            dataset_rows=dataset_rows,
+            out_root=tmp_path,
+            llm_mode="local_only",
+            model_name="judge-unit",
+            provider="local",
+        )
+
+    assert mock_second.call_count == 1
+    assert retried.rows[0]["metadata"]["judge_status"] == "scored"
+    assert retried.rows[0]["metadata"]["cache_hit"] is False
+
+
 def test_run_diff_judge_defaults_to_codex_cli_provider(tmp_path: Path) -> None:
     joined_rows = [
         {
@@ -209,7 +414,9 @@ def test_run_diff_judge_defaults_to_codex_cli_provider(tmp_path: Path) -> None:
             stdout=command_output,
             stderr="",
         ),
-    ) as mock_run_command:
+    ) as mock_run_command, patch(
+        "repogauge.runner.diff_judge.Path.cwd", return_value=tmp_path
+    ):
         result = run_diff_judge(
             joined_rows=joined_rows,
             dataset_rows=dataset_rows,
@@ -229,6 +436,7 @@ def test_run_diff_judge_defaults_to_codex_cli_provider(tmp_path: Path) -> None:
     assert result.model["model_name"] == "gpt-5.4"
     assert result.rows[0]["overall_label"] == "better"
     assert result.rows[0]["metadata"]["judge_status"] == "scored"
+    assert (tmp_path / ".repogauge" / "judge-codex-home" / ".codex").exists()
 
 
 def test_build_diff_judge_report_uses_latest_attempt_per_job() -> None:
