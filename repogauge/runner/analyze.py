@@ -902,9 +902,7 @@ def build_attempt_browser(
                 "tool_calls": _coerce_non_negative_int(row.get("tool_calls")),
                 "model_patch": patch,
                 "model_patch_truncated": patch_truncated,
-                "model_patch_length": _coerce_non_negative_int(
-                    row.get("patch_length")
-                )
+                "model_patch_length": _coerce_non_negative_int(row.get("patch_length"))
                 or len(_coerce_str(row.get("model_patch"))),
                 "judge": judge_payload,
             }
@@ -1747,7 +1745,11 @@ def write_summary_html(
                 cls = "diff__add"
             elif raw_line.startswith("-") and not raw_line.startswith("---"):
                 cls = "diff__del"
-            elif raw_line.startswith("index ") or raw_line.startswith("new file") or raw_line.startswith("deleted file"):
+            elif (
+                raw_line.startswith("index ")
+                or raw_line.startswith("new file")
+                or raw_line.startswith("deleted file")
+            ):
                 cls = "diff__meta"
             else:
                 cls = "diff__ctx"
@@ -1788,9 +1790,7 @@ def write_summary_html(
                 dtone = dlabel.replace("_", "-") or "same"
                 dvalue = dim.get("delta")
                 dvalue_str = (
-                    f"Δ{int(dvalue):+d}"
-                    if isinstance(dvalue, (int, float))
-                    else ""
+                    f"Δ{int(dvalue):+d}" if isinstance(dvalue, (int, float)) else ""
                 )
                 rationale = _coerce_str(dim.get("rationale"))
                 chips.append(
@@ -1798,16 +1798,14 @@ def write_summary_html(
                     f'<div class="dim__head">'
                     f'<span class="dim__name">{html_escape(name)}</span>'
                     f'<span class="chip chip--judge chip--judge-{html_escape(dtone)}">'
-                    f'{html_escape(dlabel.replace("_", " "))}'
-                    f' <em>{html_escape(dvalue_str)}</em></span>'
+                    f"{html_escape(dlabel.replace('_', ' '))}"
+                    f" <em>{html_escape(dvalue_str)}</em></span>"
                     "</div>"
                     f'<p class="dim__rationale">{html_escape(rationale) or "—"}</p>'
                     "</div>"
                 )
             dim_html = f'<div class="dim-grid">{"".join(chips)}</div>'
-        delta_str = (
-            f"{float(delta):+.2f}" if isinstance(delta, (int, float)) else "—"
-        )
+        delta_str = f"{float(delta):+.2f}" if isinstance(delta, (int, float)) else "—"
         conf_str = (
             f"{float(confidence):.2f}"
             if isinstance(confidence, (int, float)) and confidence > 0
@@ -1818,11 +1816,11 @@ def write_summary_html(
             '<div class="judge-card__head">'
             '<span class="judge-card__title">LLM Judge</span>'
             f'<span class="chip chip--judge chip--judge-{html_escape(tone)}">'
-            f'{html_escape(label.replace("_", " "))}</span>'
+            f"{html_escape(label.replace('_', ' '))}</span>"
             "</div>"
             '<dl class="judge-card__meta">'
-            f'<div><dt>Overall Δ</dt><dd>{html_escape(delta_str)}</dd></div>'
-            f'<div><dt>Confidence</dt><dd>{html_escape(conf_str)}</dd></div>'
+            f"<div><dt>Overall Δ</dt><dd>{html_escape(delta_str)}</dd></div>"
+            f"<div><dt>Confidence</dt><dd>{html_escape(conf_str)}</dd></div>"
             "</dl>"
             f'<p class="judge-card__summary">{html_escape(summary)}</p>'
             f"{dim_html}"
@@ -1862,10 +1860,10 @@ def write_summary_html(
                 f'<div class="browser__row-head">'
                 f'<span class="browser__row-id">{html_escape(iid)}</span>'
                 f'<span class="chip chip--status chip--status-{status_tone}">'
-                f'{html_escape(status_label)}</span>'
+                f"{html_escape(status_label)}</span>"
                 "</div>"
                 f'<div class="browser__row-meta">'
-                f'<span>{html_escape(_coerce_str(inst.get("instance_repo")) or "—")}</span>'
+                f"<span>{html_escape(_coerce_str(inst.get('instance_repo')) or '—')}</span>"
                 f'<span class="browser__row-bar"><span style="width:{share * 100:.0f}%"></span></span>'
                 "</div>"
                 "</button>"
@@ -1885,7 +1883,7 @@ def write_summary_html(
                     f'aria-selected="{"true" if sidx == 0 else "false"}">'
                     f'<span class="solver-tab__name">{html_escape(solver_id)}</span>'
                     f'<span class="chip chip--status chip--status-{chip_tone}">'
-                    f'{html_escape(chip_label)}</span>'
+                    f"{html_escape(chip_label)}</span>"
                     "</button>"
                 )
                 duration_display = _format_duration_ms(solver.get("duration_ms"))
@@ -1914,7 +1912,7 @@ def write_summary_html(
                 tab_panels.append(
                     '<div class="solver-panel" '
                     f'data-attempt-panel="{idx}-{sidx}" '
-                    f'{"" if sidx == 0 else "hidden"}>'
+                    f"{'' if sidx == 0 else 'hidden'}>"
                     '<dl class="attempt-meta">'
                     f"{meta_html}"
                     "</dl>"
@@ -1935,12 +1933,13 @@ def write_summary_html(
                 if inst.get("problem_statement_truncated")
                 else ""
             )
-            problem_body = html_escape(
-                _coerce_str(inst.get("problem_statement"))
-            ) or "<em>No problem statement was recorded for this instance.</em>"
+            problem_body = (
+                html_escape(_coerce_str(inst.get("problem_statement")))
+                or "<em>No problem statement was recorded for this instance.</em>"
+            )
             panels.append(
                 f'<section class="browser__panel" data-browser-panel="{idx}" '
-                f'{"" if idx == 0 else "hidden"}>'
+                f"{'' if idx == 0 else 'hidden'}>"
                 '<header class="browser__panel-head">'
                 f'<div class="browser__panel-id">{html_escape(iid)}</div>'
                 f'<div class="browser__panel-repo">{html_escape(_coerce_str(inst.get("instance_repo")) or "—")}</div>'
@@ -1979,7 +1978,7 @@ def write_summary_html(
             f"{truncated_note}"
             '<div class="browser">'
             f'<aside class="browser__rail" role="tablist" aria-label="Instances">'
-            f'{"".join(rail_items)}</aside>'
+            f"{''.join(rail_items)}</aside>"
             f'<div class="browser__panels">{"".join(panels)}</div>'
             "</div></section>"
         )

@@ -406,16 +406,17 @@ def test_run_diff_judge_defaults_to_codex_cli_provider(tmp_path: Path) -> None:
     }
     command_output = json.dumps({"output_text": json.dumps(judge_payload)}) + "\n"
 
-    with patch(
-        "repogauge.runner.diff_judge.run_command",
-        return_value=CommandResult(
-            command=["codex"],
-            returncode=0,
-            stdout=command_output,
-            stderr="",
-        ),
-    ) as mock_run_command, patch(
-        "repogauge.runner.diff_judge.Path.cwd", return_value=tmp_path
+    with (
+        patch(
+            "repogauge.runner.diff_judge.run_command",
+            return_value=CommandResult(
+                command=["codex"],
+                returncode=0,
+                stdout=command_output,
+                stderr="",
+            ),
+        ) as mock_run_command,
+        patch("repogauge.runner.diff_judge.Path.cwd", return_value=tmp_path),
     ):
         result = run_diff_judge(
             joined_rows=joined_rows,
