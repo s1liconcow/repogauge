@@ -7,6 +7,10 @@ from repogauge.config import RepoProfile
 from repogauge.lang import DetectionResult
 from repogauge.lang import FileRoleRules
 from repogauge.lang import detect_language
+from repogauge.lang import find_adapter
+from repogauge.lang.javascript import JavaScriptAdapter
+from repogauge.lang.go import GoAdapter
+from repogauge.lang.rust import RustAdapter
 from repogauge.validation import EnvPlan
 from repogauge.manifest import Manifest
 from repogauge.export.specs import AdapterConfig
@@ -46,3 +50,6 @@ def test_contract_imports():
     assert DetectionResult(language="unknown", confidence=0.0, signals=[])
     assert FileRoleRules(set(), [], set(), set(), set())
     assert callable(detect_language)
+    assert isinstance(find_adapter("javascript"), JavaScriptAdapter)
+    assert isinstance(find_adapter("go"), GoAdapter)
+    assert isinstance(find_adapter("rust"), RustAdapter)

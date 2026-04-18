@@ -11,6 +11,7 @@ from repogauge.validation.junit_parser import (
     OUTCOME_FAIL,
     OUTCOME_PASS,
     OUTCOME_SKIP,
+    parse_junit_xml_content,
     parse_junit_xml,
 )
 
@@ -175,3 +176,33 @@ class TestParseJunitXml:
         assert (
             results["tests/unit/test_file_only.py::test_file_variant"] == OUTCOME_PASS
         )
+
+    def test_js_style_preserves_classname_and_describe_chain(self) -> None:
+        results = parse_junit_xml_content(
+            textwrap.dedent(
+                """\
+                <?xml version="1.0" encoding="utf-8"?>
+                <testsuite>
+                  <testcase classname="src/foo.test.ts" name="math > adds values"/>
+                </testsuite>
+                """
+            ),
+            style="js",
+        )
+
+        assert results == {"src/foo.test.ts::math > adds values": OUTCOME_PASS}
+
+    def test_java_style_uses_classname_method_form(self) -> None:
+        results = parse_junit_xml_content(
+            textwrap.dedent(
+                """\
+                <?xml version="1.0" encoding="utf-8"?>
+                <testsuite>
+                  <testcase classname="com.example.FooTest" name="testBar"/>
+                </testsuite>
+                """
+            ),
+            style="java",
+        )
+
+        assert results == {"com.example.FooTest::testBar": OUTCOME_PASS}

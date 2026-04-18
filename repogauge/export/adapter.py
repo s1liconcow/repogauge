@@ -64,9 +64,14 @@ def build_adapter_spec(
         "docker_specs": {"python_version": python_version},
         "module_name": _safe_module_name(repo_name),
     }
-
     adapter = find_adapter(language)
-    template_vars = adapter.harness_template_vars(spec)
+    template_context = dict(spec)
+    for key in ("language_hints", "test_runner_hints"):
+        value = environment_plan.get(key)
+        if isinstance(value, Mapping):
+            template_context[key] = dict(value)
+
+    template_vars = adapter.harness_template_vars(template_context)
     if not isinstance(template_vars, Mapping):
         raise TypeError("language adapter harness_template_vars() must return a mapping")
 

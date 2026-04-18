@@ -11,6 +11,7 @@ from repogauge.parsers.junit import (
     parse_repogauge_junit,
     parse_repogauge_test_output,
 )
+from repogauge.lang.javascript import parse_js_junit
 from repogauge.validation.junit_parser import (
     JUnitParseError,
     OUTCOME_FAIL,
@@ -157,6 +158,28 @@ def test_parse_repogauge_test_output_dispatches_by_parser_name(tmp_path: Path) -
 def test_parse_repogauge_test_output_rejects_unknown_parser_name() -> None:
     with pytest.raises(KeyError, match="unknown test parser"):
         parse_repogauge_test_output("ignored", parser_name="unknown")
+
+
+def test_parse_repogauge_test_output_dispatches_javascript_junit_parser() -> None:
+    parsed = parse_repogauge_test_output(
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <testsuite>
+          <testcase classname="src/foo.test.ts" name="math > adds values"/>
+        </testsuite>
+        """,
+        parser_name="junit_js",
+    )
+
+    assert parse_js_junit(
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <testsuite>
+          <testcase classname="src/foo.test.ts" name="math > adds values"/>
+        </testsuite>
+        """
+    ) == parsed
+    assert parsed == {"src/foo.test.ts::math > adds values": OUTCOME_PASS}
 
 
 def test_importing_bridge_module_does_not_eagerly_import_swebench_parser() -> None:

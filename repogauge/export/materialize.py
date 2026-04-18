@@ -88,10 +88,12 @@ def _resolve_base_commit(repo_root: Path, commit: str, row: Dict[str, Any]) -> s
 
 
 def _extract_candidate_metadata(
-    row: Dict[str, Any], patch: str, base_commit: str
+    row: Dict[str, Any], patch: str, base_commit: str, repo_root: Path
 ) -> Dict[str, Any]:
     metadata = dict(row.get("metadata", {}))
-    split_prod, split_test, split_meta = split_prod_and_test(patch)
+    split_prod, split_test, split_meta = split_prod_and_test(
+        patch, repo_root=repo_root
+    )
     metadata.update(
         {
             "materialization": {
@@ -219,7 +221,9 @@ def _materialize_candidate(
         )
 
     try:
-        prod_patch, test_patch, split_meta = split_prod_and_test(patch)
+        prod_patch, test_patch, split_meta = split_prod_and_test(
+            patch, repo_root=repo_root
+        )
     except PatchSplitError as exc:
         return None, MaterializedItem(
             candidate_id=candidate_id,
@@ -261,7 +265,9 @@ def _materialize_candidate(
             metadata={"reason": "test split is empty", "split_meta": split_meta},
         )
 
-    materialized_metadata = _extract_candidate_metadata(row, patch, base_commit)
+    materialized_metadata = _extract_candidate_metadata(
+        row, patch, base_commit, repo_root
+    )
     problem_statement, statement_source, statement_ref = synthesize_problem_statement(
         row=row,
         patch=patch,

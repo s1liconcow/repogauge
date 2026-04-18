@@ -1377,6 +1377,19 @@ def _run_command(namespace: argparse.Namespace) -> int:
                             profile_candidate.read_text(encoding="utf-8")
                         )
                         adapter_env_plan = profile_data.get("environment_plan", {})
+                        if isinstance(adapter_env_plan, dict):
+                            language_hints = profile_data.get("language_hints")
+                            test_runner_hints = profile_data.get("test_runner_hints")
+                            if isinstance(language_hints, dict):
+                                adapter_env_plan = {
+                                    **adapter_env_plan,
+                                    "language_hints": language_hints,
+                                }
+                            if isinstance(test_runner_hints, dict):
+                                adapter_env_plan = {
+                                    **adapter_env_plan,
+                                    "test_runner_hints": test_runner_hints,
+                                }
                     except Exception:
                         pass
                     break

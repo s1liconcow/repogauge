@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
+import re
 import shlex
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
 from repogauge.mining.signature import REPO_VERSION_UNKNOWN
-from repogauge.parsers.junit import parse_repogauge_junit
+from repogauge.parsers.junit import register_parser
+from repogauge.validation.junit_parser import parse_junit_xml, parse_junit_xml_content
 from repogauge.validation.env_detect import EnvPlan
 
 from . import DetectionResult, FileRoleRules
 
-_DEFAULT_MAVEN_INSTALL_CMD = "mvn -q -DskipTests compile"
-_DEFAULT_MAVEN_TEST_CMD = "mvn -q test"
-_DEFAULT_GRADLE_INSTALL_CMD = "./gradlew --no-daemon classes"
-_DEFAULT_GRADLE_TEST_CMD = "./gradlew --no-daemon test"
+_DEFAULT_JAVA_VERSION = "17"
+_DEFAULT_FRAMEWORK = "junit5"
+_DEFAULT_MAVEN_INSTALL_CMD = "mvn -B -DskipTests install"
+_DEFAULT_MAVEN_TEST_CMD = "mvn -B test"
+_DEFAULT_GRADLE_INSTALL_CMD = "./gradlew assemble"
+_DEFAULT_GRADLE_INSTALL_CMD_FALLBACK = "gradle assemble"
+_DEFAULT_GRADLE_TEST_CMD = "./gradlew test"
+_DEFAULT_GRADLE_TEST_CMD_FALLBACK = "gradle test"
 
 
 def _sorted_unique(values: Any) -> list[str]:
@@ -37,6 +44,54 @@ def _safe_read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def _report_from_payload(report: object) -> tuple[str | None, list[Path]]:
+    if isinstance(report, Path):
+        if "*" in report.name:
+            return None, sorted(report.parent.glob(report.name))
+        return None, [report]
+    if isinstance(report, (bytes, bytearray)):
+        return report.decode("utf-8"), []
+    if isinstance(report, str):
+        text = report.strip()
+        if not text:
+            return "", []
+        if "\n" not in text and "\r" not in text:
+            candidate = Path(text)
+            if candidate.exists():
+                return None, [candidate]
+            if "*" in candidate.name and candidate.parent.exists():
+                return None, sorted(candidate.parent.glob(candidate.name))
+        return report, []
+    if isinstance(report, dict):
+        for key in (
+            "junit_xml",
+            "junit_xml_path",
+            "junit_xml_file",
+            "output",
+            "log",
+            "result",
+            "stdout",
+            "stderr",
+            "raw",
+        ):
+            value = report.get(key)
+            if value is None:
+                continue
+            return _report_from_payload(value)
+    raise TypeError(f"unsupported report payload for parser: {type(report).__name__}")
+
+
+def parse_java_junit(report: object, test_spec: object | None = None) -> dict[str, str]:
+    del test_spec
+    xml_text, xml_paths = _report_from_payload(report)
+    if xml_paths:
+        merged: dict[str, str] = {}
+        for xml_path in xml_paths:
+            merged.update(parse_junit_xml(xml_path, style="java"))
+        return merged
+    return parse_junit_xml_content(xml_text or "", style="java")
 
 
 def _has_root_file(repo_root: Path, name: str) -> bool:
@@ -93,10 +148,153 @@ def _detect_test_paths(repo_root: Path) -> list[str]:
     return _sorted_unique(paths)
 
 
-def _default_install_commands(build_tool: str) -> list[str]:
+def _gradle_commands(repo_root: Path) -> tuple[list[str], str, list[dict[str, str]]]:
+    warnings: list[dict[str, str]] = []
+    wrapper = repo_root / "gradlew"
+    if wrapper.exists() and not wrapper.stat().st_mode & 0o111:
+        warnings.append(
+            {
+                "type": "gradle_wrapper_not_executable",
+                "message": "gradlew is not executable; falling back to system gradle",
+            }
+        )
+        return (
+            [_DEFAULT_GRADLE_INSTALL_CMD_FALLBACK],
+            _DEFAULT_GRADLE_TEST_CMD_FALLBACK,
+            warnings,
+        )
+    if wrapper.exists():
+        return ([_DEFAULT_GRADLE_INSTALL_CMD], _DEFAULT_GRADLE_TEST_CMD, warnings)
+    return (
+        [_DEFAULT_GRADLE_INSTALL_CMD_FALLBACK],
+        _DEFAULT_GRADLE_TEST_CMD_FALLBACK,
+        warnings,
+    )
+
+
+def _default_install_commands(build_tool: str, repo_root: Path) -> tuple[list[str], str, list[dict[str, str]]]:
     if build_tool == "gradle":
-        return [_DEFAULT_GRADLE_INSTALL_CMD]
-    return [_DEFAULT_MAVEN_INSTALL_CMD]
+        install, test_cmd, warnings = _gradle_commands(repo_root)
+        return install, test_cmd, warnings
+    return ([_DEFAULT_MAVEN_INSTALL_CMD], _DEFAULT_MAVEN_TEST_CMD, [])
+
+
+def _property_interpolate(value: str, properties: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        return properties.get(key, match.group(0))
+
+    return re.sub(r"\$\{([^}]+)\}", replace, value)
+
+
+def _element_text(element: ET.Element | None) -> str:
+    if element is None or element.text is None:
+        return ""
+    return element.text.strip()
+
+
+def _pom_child(parent: ET.Element, child: str) -> ET.Element | None:
+    for element in parent:
+        if element.tag.rsplit("}", 1)[-1] == child:
+            return element
+    return None
+
+
+def _parse_maven_metadata(repo_root: Path) -> dict[str, Any]:
+    pom = repo_root / "pom.xml"
+    raw = _safe_read_text(pom)
+    if not raw.strip():
+        return {}
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return {}
+
+    properties: dict[str, str] = {}
+    properties_el = _pom_child(root, "properties")
+    if properties_el is not None:
+        for child in properties_el:
+            key = child.tag.rsplit("}", 1)[-1]
+            value = _element_text(child)
+            if key and value:
+                properties[key] = value
+
+    parent_el = _pom_child(root, "parent")
+    group_id = _element_text(_pom_child(root, "groupId")) or _element_text(
+        _pom_child(parent_el, "groupId") if parent_el is not None else None
+    )
+    artifact_id = _element_text(_pom_child(root, "artifactId"))
+    version = _element_text(_pom_child(root, "version")) or _element_text(
+        _pom_child(parent_el, "version") if parent_el is not None else None
+    )
+    group_id = _property_interpolate(group_id, properties)
+    artifact_id = _property_interpolate(artifact_id, properties)
+    version = _property_interpolate(version, properties)
+
+    runtime_candidates = [
+        properties.get("maven.compiler.release", ""),
+        properties.get("maven.compiler.source", ""),
+        properties.get("java.version", ""),
+    ]
+    runtime_version = next(
+        (value for value in runtime_candidates if value.strip()),
+        _DEFAULT_JAVA_VERSION,
+    )
+    runtime_version = _property_interpolate(runtime_version, properties) or _DEFAULT_JAVA_VERSION
+
+    dependencies = raw.lower()
+    framework = _DEFAULT_FRAMEWORK
+    if "testng" in dependencies:
+        framework = "testng"
+    elif "junit:junit" in dependencies:
+        framework = "junit4"
+    elif "junit-jupiter" in dependencies:
+        framework = "junit5"
+
+    return {
+        "name": f"{group_id}:{artifact_id}".strip(":") if artifact_id else "",
+        "version": version or REPO_VERSION_UNKNOWN,
+        "runtime_version": runtime_version,
+        "framework": framework,
+    }
+
+
+def _parse_gradle_metadata(repo_root: Path) -> dict[str, Any]:
+    build_file = repo_root / "build.gradle"
+    if not build_file.exists():
+        build_file = repo_root / "build.gradle.kts"
+    raw = _safe_read_text(build_file)
+    lowered = raw.lower()
+
+    runtime_version = _DEFAULT_JAVA_VERSION
+    for pattern in (
+        r"sourceCompatibility\s*=\s*['\"](\d+)['\"]",
+        r"JavaVersion\.VERSION_(\d+)",
+    ):
+        match = re.search(pattern, raw)
+        if match:
+            runtime_version = match.group(1)
+            break
+
+    version = REPO_VERSION_UNKNOWN
+    match = re.search(r"(?m)^\s*version\s*=\s*['\"]([^'\"]+)['\"]", raw)
+    if match and match.group(1).strip():
+        version = match.group(1).strip()
+
+    framework = _DEFAULT_FRAMEWORK
+    if "usetestng()" in lowered or "testng" in lowered:
+        framework = "testng"
+    elif "usejunit()" in lowered or "junit:junit" in lowered:
+        framework = "junit4"
+    elif "usejunitplatform()" in lowered or "junit-jupiter" in lowered:
+        framework = "junit5"
+
+    return {
+        "name": repo_root.name,
+        "version": version,
+        "runtime_version": runtime_version,
+        "framework": framework,
+    }
 
 
 def _default_test_command(build_tool: str) -> str:
@@ -157,23 +355,30 @@ def _read_dependency_signature(repo_root: Path, profile: dict[str, Any]) -> list
 def build_env_plan(profile: Any) -> EnvPlan:
     payload = _coerce_mapping(profile)
     language_hints = _coerce_mapping(payload.get("language_hints"))
-    test_hints = _coerce_mapping(payload.get("test_runner_hints"))
 
     build_tool_hint = str(language_hints.get("build_tool") or "").strip().lower()
     has_build_tool_hint = build_tool_hint in {"maven", "gradle"}
     build_tool = build_tool_hint if has_build_tool_hint else "maven"
 
     kotlin_present = bool(language_hints.get("kotlin_present"))
-    test_commands = _coerce_list(
-        test_hints.get("commands") or language_hints.get("test_commands")
-    )
+    test_hints = _coerce_mapping(payload.get("test_runner_hints"))
+    test_commands = _coerce_list(test_hints.get("commands") or language_hints.get("test_commands"))
     install_hints = _coerce_list(payload.get("install_hints"))
     if not install_hints:
-        install_hints = _default_install_commands(build_tool)
+        if build_tool == "gradle":
+            install_hints = [_DEFAULT_GRADLE_INSTALL_CMD]
+        else:
+            install_hints = [_DEFAULT_MAVEN_INSTALL_CMD]
 
     test_cmd_base = test_commands[0] if test_commands else _default_test_command(
         build_tool
     )
+    framework = str(language_hints.get("framework") or _DEFAULT_FRAMEWORK).strip().lower()
+    runtime_version = str(
+        payload.get("language_version")
+        or language_hints.get("runtime_version")
+        or _DEFAULT_JAVA_VERSION
+    ).strip() or _DEFAULT_JAVA_VERSION
 
     provenance = [
         f"build_tool:{build_tool}" if has_build_tool_hint else "build_tool:default"
@@ -187,13 +392,13 @@ def build_env_plan(profile: Any) -> EnvPlan:
 
     return EnvPlan(
         language="java",
-        runtime_version="",
+        runtime_version=runtime_version,
         python_version="",
         pre_install=[],
         install=install_hints,
         build=[],
         test_cmd_base=test_cmd_base,
-        strategy_name=f"{build_tool}:{_test_label(test_cmd_base)}",
+        strategy_name=f"{build_tool}:{framework}",
         confidence=0.9 if build_tool else 0.5,
         provenance=provenance,
     )
@@ -215,6 +420,7 @@ class JavaAdapter:
     def inspect(self, repo_root: Path) -> dict[str, Any]:
         build_tool, signals, confidence = _detect_build_tool(repo_root)
         kotlin_present = _detect_kotlin_present(repo_root)
+        warnings: list[dict[str, str]] = []
         has_maven = "pom.xml" in signals
         has_gradle = any(name in signals for name in ("build.gradle", "build.gradle.kts"))
         build_tools: list[str] = []
@@ -222,9 +428,18 @@ class JavaAdapter:
             build_tools.append("maven")
         if has_gradle:
             build_tools.append("gradle")
-        test_commands = [_default_test_command(build_tool or "maven")]
-        install_hints = _default_install_commands(build_tool or "maven")
-        warnings: list[dict[str, str]] = []
+        if build_tool == "maven":
+            metadata = _parse_maven_metadata(repo_root)
+        else:
+            metadata = _parse_gradle_metadata(repo_root)
+        install_hints, test_cmd, command_warnings = _default_install_commands(
+            build_tool or "maven",
+            repo_root,
+        )
+        warnings.extend(command_warnings)
+        runtime_version = str(metadata.get("runtime_version") or _DEFAULT_JAVA_VERSION)
+        framework = str(metadata.get("framework") or _DEFAULT_FRAMEWORK)
+        test_commands = [test_cmd]
         if confidence <= 0.0:
             warnings.append(
                 {
@@ -246,13 +461,16 @@ class JavaAdapter:
             "signals": signals,
             "package_managers": [build_tool] if build_tool else [],
             "package_style": build_tool or "unknown",
+            "runtime_version": runtime_version,
+            "versions": [runtime_version],
+            "framework": framework,
             "install_hints": install_hints,
             "test_commands": test_commands,
         }
         return {
             "language": "java",
-            "language_version": "",
-            "repo_version": REPO_VERSION_UNKNOWN,
+            "language_version": runtime_version,
+            "repo_version": str(metadata.get("version") or REPO_VERSION_UNKNOWN),
             "language_hints": language_hints,
             "install_hints": install_hints,
             "test_runner_hints": {"commands": test_commands, "signals": []},
@@ -266,7 +484,7 @@ class JavaAdapter:
     def parse_test_output(
         self, report: object, test_spec: object | None
     ) -> dict[str, str]:
-        return parse_repogauge_junit(report, test_spec)
+        return parse_java_junit(report, test_spec)
 
     def file_role_rules(self) -> FileRoleRules:
         return FileRoleRules(
@@ -275,9 +493,9 @@ class JavaAdapter:
                 "*Test.java",
                 "*Tests.java",
                 "*IT.java",
+                "*IntegrationTest.java",
                 "*Test.kt",
                 "*Tests.kt",
-                "*IT.kt",
             ],
             test_dir_names={"test", "tests"},
             config_build_filenames={
@@ -287,38 +505,23 @@ class JavaAdapter:
                 "settings.gradle",
                 "settings.gradle.kts",
                 "gradle.properties",
-                "gradle-wrapper.properties",
                 "gradlew",
                 "gradlew.bat",
-                "mvnw",
-                "mvnw.cmd",
+                "checkstyle.xml",
+                "spotbugs.xml",
             },
             vendor_dir_names={
-                "__pycache__",
-                ".mypy_cache",
-                ".pytest_cache",
-                "site-packages",
-                "vendor",
-                ".venv",
-                "venv",
-                ".eggs",
                 "build",
                 "target",
                 ".gradle",
-                ".m2",
                 "out",
-            },
-            test_support_filenames={
-                "junit-platform.properties",
-                "surefire.properties",
-                "testng.xml",
             },
         )
 
     def harness_template_vars(self, spec: dict[str, Any]) -> dict[str, Any]:
         return {
-            "parser_import": "repogauge.parsers.junit.parse_repogauge_junit",
-            "parser_name": "junit",
+            "parser_import": "repogauge.lang.java.parse_java_junit",
+            "parser_name": "junit_java",
             "ext": "java",
             "install_str_join": " && ",
         }
@@ -356,13 +559,17 @@ class JavaAdapter:
         return [parts] if parts else [shlex.split(_DEFAULT_MAVEN_TEST_CMD)]
 
     def test_report_filename(self) -> str | None:
-        return None
+        return "TEST-results.xml"
 
     def test_report_glob(self) -> str | None:
-        return None
+        return "**/TEST-*.xml"
+
+
+register_parser("junit_java", parse_java_junit)
 
 
 __all__ = [
     "JavaAdapter",
     "build_env_plan",
+    "parse_java_junit",
 ]

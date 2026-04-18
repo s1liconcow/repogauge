@@ -2,10 +2,10 @@
 
 **Stop picking coding agents on vibes. Benchmark them on your own codebase.**
 
-RepoGauge turns any Python repository into a SWE-bench-style evaluation suite
-and runs AI coding agents against it locally. You get real pass/fail numbers
-and real dollar costs — not a third-party leaderboard on someone else's
-problems.
+RepoGauge turns a supported repository into a SWE-bench-style evaluation suite
+and runs AI coding agents against it locally. Today that includes Python, Go,
+JavaScript/TypeScript, Java, and Rust. You get real pass/fail numbers and real
+dollar costs — not a third-party leaderboard on someone else's problems.
 
 ## Why this exists
 
@@ -69,7 +69,8 @@ uv run repogauge mine /path/to/your/repo --out ./out/mine --llm-mode off
 ```
 
 Scans the default branch for bugfix-shaped commits using deterministic
-heuristics (no LLM required) and writes `candidates.jsonl`.
+heuristics (no LLM required), auto-detects the repository's primary language,
+and writes `candidates.jsonl`.
 
 ### 2. Review candidates
 
@@ -212,14 +213,15 @@ reruns skip work that hasn't changed.
 
 **v1 is:**
 
-- Python-only task mining and evaluation.
+- Supported-language task mining and evaluation across Python, Go,
+  JavaScript/TypeScript, Java, and Rust.
 - SWE-bench-compatible dataset export with auto-generated harness adapters.
 - Matrix-driven multi-solver runs with per-attempt cost/token telemetry.
 - Cost- and quality-aware analysis and router training.
+- `mine` and `eval` work with `--llm-mode off` across the supported languages.
 
 **v1 is not:**
 
-- Multi-language (yet).
 - Multi-commit PR reconstruction.
 - Synthetic test generation.
 - A hosted service, a leaderboard, or a database-backed orchestrator.
@@ -227,13 +229,12 @@ reruns skip work that hasn't changed.
 
 ## Roadmap
 
-Planned follow-on work after the Python-first v1 includes:
+Planned follow-on work after the current multi-language v1 includes:
 
 - Broader coding-agent coverage, including adapters for more agent CLIs and
   providers such as Opencode, Gemini, Pi, and similar tools.
-- Multi-language benchmarking so the same workflow can evaluate repositories
-  in Go, JavaScript/TypeScript, Rust, Java, and other major engineering
-  stacks instead of only Python.
+- Broader language coverage beyond the current Python, Go,
+  JavaScript/TypeScript, Java, and Rust support.
 - A managed option for teams that want continuous benchmark runs without
   babysitting local pipelines, so regressions and cost shifts can be tracked
   over time with less operational overhead.

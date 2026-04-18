@@ -113,6 +113,12 @@ def _extract_decision_band(row: dict[str, Any]) -> str:
 
 
 def _has_test_change(row: dict[str, Any]) -> bool:
+    metadata = row.get("metadata", {})
+    if isinstance(metadata, dict):
+        try:
+            return int(metadata.get("n_test_files", 0) or 0) > 0
+        except (TypeError, ValueError):
+            pass
     files = row.get("files_touched")
     if isinstance(files, list):
         roles = classify_files([str(value) for value in files])

@@ -96,8 +96,11 @@ def test_detect_language_uses_lexicographic_tie_break_and_sorted_iteration(
 
     assert [adapter.name() for adapter in iter_adapters()] == [
         "alpha",
+        "go",
         "java",
+        "javascript",
         "python",
+        "rust",
         "zeta",
     ]
     assert isinstance(FakeAdapter("alpha", DetectionResult("alpha", 1.0, [])), LanguageAdapter)
@@ -132,3 +135,31 @@ def test_register_adapter_rejects_duplicates() -> None:
 def test_find_adapter_unknown_raises_key_error() -> None:
     with pytest.raises(KeyError, match="unknown language adapter: 'missing'"):
         find_adapter("missing")
+
+
+def test_registry_starts_without_fake_adapters() -> None:
+    names = {adapter.name() for adapter in iter_adapters()}
+    assert "fake" not in names
+    assert {"go", "java", "javascript", "python", "rust"}.issubset(names)
+
+
+def test_find_adapter_returns_javascript_adapter() -> None:
+    from repogauge.lang.javascript import JavaScriptAdapter
+
+    adapter = find_adapter("javascript")
+
+    assert isinstance(adapter, JavaScriptAdapter)
+    assert adapter.name() == "javascript"
+
+
+def test_find_adapter_returns_go_and_rust_adapters() -> None:
+    from repogauge.lang.go import GoAdapter
+    from repogauge.lang.rust import RustAdapter
+
+    go_adapter = find_adapter("go")
+    rust_adapter = find_adapter("rust")
+
+    assert isinstance(go_adapter, GoAdapter)
+    assert go_adapter.name() == "go"
+    assert isinstance(rust_adapter, RustAdapter)
+    assert rust_adapter.name() == "rust"

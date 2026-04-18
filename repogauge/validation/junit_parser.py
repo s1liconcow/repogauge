@@ -30,7 +30,7 @@ class JUnitParseError(ValueError):
     """Raised when the JUnit XML cannot be parsed."""
 
 
-def _split_classname(classname: str) -> tuple[str, str]:
+def _split_pytest_classname(classname: str) -> tuple[str, str]:
     """Split ``tests.unit.test_foo.TestClass`` into (path, class_chain).
 
     pytest's JUnit classname encodes both the module path and the class
@@ -64,7 +64,7 @@ def _normalize_file_path(file_path: str) -> str:
     return normalized
 
 
-def _canonical_id(classname: str, name: str, file_path: str = "") -> str:
+def _canonical_pytest_id(classname: str, name: str, file_path: str = "") -> str:
     """Build a canonical pytest node ID from JUnit classname + test name.
 
     Returns one of::
@@ -78,12 +78,45 @@ def _canonical_id(classname: str, name: str, file_path: str = "") -> str:
         if file_path:
             return f"{file_path}::{name}"
         return name
-    path, class_chain = _split_classname(classname)
+    path, class_chain = _split_pytest_classname(classname)
     if not path:
         return f"{class_chain}::{name}" if class_chain else name
     if class_chain:
         return f"{path}::{class_chain}::{name}"
     return f"{path}::{name}"
+
+
+def canonicalize_test_id(
+    classname: str,
+    name: str,
+    *,
+    file_path: str = "",
+    style: str = "pytest",
+) -> str:
+    """Build a canonical test id for the requested JUnit producer style."""
+    normalized_style = style.strip().lower() or "pytest"
+    normalized_name = name.strip()
+    normalized_classname = classname.strip().replace("\\", "/")
+
+    if normalized_style == "pytest":
+        return _canonical_pytest_id(
+            normalized_classname,
+            normalized_name,
+            _normalize_file_path(file_path) if file_path else "",
+        )
+
+    if normalized_style == "js":
+        if normalized_classname:
+            return f"{normalized_classname}::{normalized_name}"
+        normalized_file = _normalize_file_path(file_path) if file_path else ""
+        return f"{normalized_file}::{normalized_name}" if normalized_file else normalized_name
+
+    if normalized_style == "java":
+        if normalized_classname:
+            return f"{normalized_classname}::{normalized_name}"
+        return normalized_name
+
+    raise ValueError(f"unknown junit canonicalization style: {style!r}")
 
 
 def _outcome_of(testcase: ET.Element) -> str:
@@ -102,7 +135,7 @@ def _outcome_of(testcase: ET.Element) -> str:
     return OUTCOME_PASS
 
 
-def parse_junit_xml_content(xml_text: str) -> Dict[str, str]:
+def parse_junit_xml_content(xml_text: str, *, style: str = "pytest") -> Dict[str, str]:
     """Parse JUnit XML text and return ``{test_id: outcome}``.
 
     Outcomes are one of: ``"pass"``, ``"fail"``, ``"error"``, ``"skip"``.
@@ -128,17 +161,21 @@ def parse_junit_xml_content(xml_text: str) -> Dict[str, str]:
         for testcase in suite.findall("testcase"):
             classname = (testcase.get("classname") or "").strip()
             file_path = (testcase.get("file") or "").strip()
-            normalized_file_path = _normalize_file_path(file_path) if file_path else ""
             name = (testcase.get("name") or "").strip()
             if not name:
                 continue
-            test_id = _canonical_id(classname, name, normalized_file_path)
+            test_id = canonicalize_test_id(
+                classname,
+                name,
+                file_path=file_path,
+                style=style,
+            )
             results[test_id] = _outcome_of(testcase)
 
     return results
 
 
-def parse_junit_xml(xml_path: Path) -> Dict[str, str]:
+def parse_junit_xml(xml_path: Path, *, style: str = "pytest") -> Dict[str, str]:
     """Parse a pytest JUnit XML file and return ``{test_id: outcome}``.
 
     Outcomes are one of: ``"pass"``, ``"fail"``, ``"error"``, ``"skip"``.
@@ -154,6 +191,6 @@ def parse_junit_xml(xml_path: Path) -> Dict[str, str]:
         raise JUnitParseError(f"JUnit XML is empty: {xml_path}")
 
     try:
-        return parse_junit_xml_content(text)
+        return parse_junit_xml_content(text, style=style)
     except JUnitParseError as exc:
         raise JUnitParseError(f"malformed JUnit XML at {xml_path}: {exc}") from exc

@@ -57,8 +57,9 @@ def _parse_diff_header(line: str) -> Optional[tuple[str, str]]:
     return (_normalize_token(tokens[2]), _normalize_token(tokens[3]))
 
 
-def _role_for_path(path: str) -> str:
-    return classify_file(path).role
+def _role_for_path(path: str, *, repo_root: Path | None = None) -> str:
+    target = (repo_root / path) if repo_root is not None else path
+    return classify_file(target).role
 
 
 def _is_test_bucket(path: str, role: str) -> bool:
@@ -66,9 +67,11 @@ def _is_test_bucket(path: str, role: str) -> bool:
     return role == "test" or role == "test_support" or name in _TEST_HELPER_FILES
 
 
-def _is_test_file_boundary_split(a_path: str, b_path: str) -> bool:
-    a_role = _role_for_path(a_path)
-    b_role = _role_for_path(b_path)
+def _is_test_file_boundary_split(
+    a_path: str, b_path: str, *, repo_root: Path | None = None
+) -> bool:
+    a_role = _role_for_path(a_path, repo_root=repo_root)
+    b_role = _role_for_path(b_path, repo_root=repo_root)
     return _is_test_bucket(a_path, a_role) != _is_test_bucket(b_path, b_role)
 
 
@@ -95,7 +98,9 @@ def _bucket_for_file(path: str, role: str, include_test_support: bool) -> str:
     return "prod"
 
 
-def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
+def _split_diff_files(
+    diff: str, *, repo_root: Path | None = None
+) -> Tuple[List[_FilePatchChunk], List[str]]:
     chunks: List[_FilePatchChunk] = []
     touched_paths: List[str] = []
     current_lines: List[str] = []
@@ -112,7 +117,9 @@ def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
                 if (
                     rename_from
                     and rename_to
-                    and _is_test_file_boundary_split(from_path, to_path)
+                    and _is_test_file_boundary_split(
+                        from_path, to_path, repo_root=repo_root
+                    )
                 ):
                     raise PatchSplitError(
                         "rename across production/test boundary is not supported in MVP"
@@ -121,7 +128,7 @@ def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
                 destination = to_path or b_path or a_path
                 if destination == "/dev/null" and a_path != "/dev/null":
                     destination = a_path
-                role = _role_for_path(destination)
+                role = _role_for_path(destination, repo_root=repo_root)
                 chunks.append(
                     _FilePatchChunk(
                         path=destination, raw_lines=current_lines, role=role
@@ -145,7 +152,7 @@ def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
         if (
             rename_from
             and rename_to
-            and _is_test_file_boundary_split(from_path, to_path)
+            and _is_test_file_boundary_split(from_path, to_path, repo_root=repo_root)
         ):
             raise PatchSplitError(
                 "rename across production/test boundary is not supported in MVP"
@@ -154,7 +161,7 @@ def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
         destination = to_path or b_path or a_path
         if destination == "/dev/null" and a_path != "/dev/null":
             destination = a_path
-        role = _role_for_path(destination)
+        role = _role_for_path(destination, repo_root=repo_root)
         chunks.append(
             _FilePatchChunk(path=destination, raw_lines=current_lines, role=role)
         )
@@ -164,8 +171,10 @@ def _split_diff_files(diff: str) -> Tuple[List[_FilePatchChunk], List[str]]:
     return chunks, touched_paths
 
 
-def split_prod_and_test(diff: str) -> Tuple[str, str, Dict[str, List[str]]]:
-    file_chunks, touched_paths = _split_diff_files(diff)
+def split_prod_and_test(
+    diff: str, *, repo_root: Path | None = None
+) -> Tuple[str, str, Dict[str, List[str]]]:
+    file_chunks, touched_paths = _split_diff_files(diff, repo_root=repo_root)
     has_test_file = any(chunk.role == "test" for chunk in file_chunks)
 
     prod_lines: List[str] = []

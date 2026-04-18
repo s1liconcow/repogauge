@@ -121,8 +121,11 @@ def test_detect_language_uses_lexicographic_tie_break(tmp_path: Path) -> None:
 
     assert [adapter.name() for adapter in iter_adapters()] == [
         "alpha",
+        "go",
         "java",
+        "javascript",
         "python",
+        "rust",
         "zeta",
     ]
 
@@ -134,6 +137,15 @@ def test_find_adapter_returns_python_adapter() -> None:
     assert adapter.name() == "python"
 
 
+def test_find_adapter_returns_javascript_adapter() -> None:
+    from repogauge.lang.javascript import JavaScriptAdapter
+
+    adapter = find_adapter("javascript")
+
+    assert isinstance(adapter, JavaScriptAdapter)
+    assert adapter.name() == "javascript"
+
+
 def test_find_adapter_returns_java_adapter() -> None:
     from repogauge.lang.java import JavaAdapter
 
@@ -141,6 +153,19 @@ def test_find_adapter_returns_java_adapter() -> None:
 
     assert isinstance(adapter, JavaAdapter)
     assert adapter.name() == "java"
+
+
+def test_find_adapter_returns_go_and_rust_adapters() -> None:
+    from repogauge.lang.go import GoAdapter
+    from repogauge.lang.rust import RustAdapter
+
+    go_adapter = find_adapter("go")
+    rust_adapter = find_adapter("rust")
+
+    assert isinstance(go_adapter, GoAdapter)
+    assert go_adapter.name() == "go"
+    assert isinstance(rust_adapter, RustAdapter)
+    assert rust_adapter.name() == "rust"
 
 
 def test_find_adapter_unknown_raises_key_error() -> None:
@@ -151,4 +176,4 @@ def test_find_adapter_unknown_raises_key_error() -> None:
 def test_registry_starts_without_fake_adapters() -> None:
     names = {adapter.name() for adapter in iter_adapters()}
     assert "fake" not in names
-    assert {"java", "python"}.issubset(names)
+    assert {"go", "java", "javascript", "python", "rust"}.issubset(names)

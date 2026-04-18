@@ -205,15 +205,29 @@ def _run_test(
         _test_command_attempts(test_cmd_base, adapter=active_adapter)
     ):
         test_cmd = list(base_cmd)
-        report_path_to_read = test_report_path
+        report_input: object = test_report_path
         if active_adapter.name() == "python":
             test_cmd, report_path_to_read = _normalize_junit_output_flag(
                 test_cmd, test_report_path
             )
+            report_input = report_path_to_read
+        else:
+            report_glob_getter = getattr(active_adapter, "test_report_glob", None)
+            report_filename_getter = getattr(active_adapter, "test_report_filename", None)
+            report_glob = report_glob_getter() if callable(report_glob_getter) else None
+            report_filename = (
+                report_filename_getter() if callable(report_filename_getter) else None
+            )
+            if report_glob:
+                report_input = worktree / report_glob
+            elif report_filename:
+                report_input = worktree / report_filename
+            else:
+                report_input = None
 
-        if report_path_to_read.exists():
+        if isinstance(report_input, Path) and report_input.exists():
             try:
-                report_path_to_read.unlink()
+                report_input.unlink()
             except OSError:
                 pass
 
@@ -237,9 +251,8 @@ def _run_test(
         }
 
         try:
-            outcomes = active_adapter.parse_test_output(
-                report_path_to_read, test_spec
-            )
+            parse_input = report_input if report_input is not None else raw
+            outcomes = active_adapter.parse_test_output(parse_input, test_spec)
         except JUnitParseError as exc:
             last_parse_error = str(exc)
             attempt_entry.update(

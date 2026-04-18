@@ -2,8 +2,9 @@
 
 ## What RepoGauge is
 
-RepoGauge is a local, Python-first CLI for turning a single repository into SWE-bench-style
-benchmark artifacts that can be evaluated by the official SWE-bench harness.
+RepoGauge is a local, language-aware CLI for turning a single repository into
+SWE-bench-style benchmark artifacts that can be evaluated by the official
+SWE-bench harness.
 
 The current product scope is intentionally narrow in v1:
 
@@ -16,7 +17,6 @@ The current product scope is intentionally narrow in v1:
 ## Core architectural principles
 
 ### Local-first and scoped
-- Python-only in v1.
 - Repository contents are expected to remain local by default.
 - Deterministic heuristics and local validation drive correctness.
 
@@ -29,13 +29,21 @@ The current product scope is intentionally narrow in v1:
 - `FAIL_TO_PASS` and `PASS_TO_PASS` are evidence outputs of deterministic validation, not model suggestion.
 - LLMs (if used) can propose only; they do not determine final export validity.
 
+### Language adapter registry
+RepoGauge routes language-specific detection, inspection, parsing, harness
+export, and validation behavior through the `LanguageAdapter` registry in
+`repogauge/lang/__init__.py`. The registry keeps the CLI and export pipeline
+language-aware without scattering per-language conditionals across the rest of
+the codebase. See
+[ADR-0002](docs/ADRs/0002-language-adapter-registry.md) and
+`docs/language_adapters.md` for the detailed contract and rollout notes.
+
 ### Resumability and observability
 - Long-running commands should emit step-level manifests and persisted logs.
 - Artifacts should be machine-readable and explainable without source-code access.
 
 ## Non-goals
 
-- multi-language support
 - multi-commit PR reconstruction
 - synthetic test generation
 - remote-only or hosted service workflows

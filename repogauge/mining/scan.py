@@ -176,8 +176,8 @@ def _extract_changed_paths_and_hunks(
     return files_touched, n_hunks, has_rename_only, changed_lines
 
 
-def _classify_file_counts(files_touched: list[str]) -> dict[str, int]:
-    roles = classify_files(files_touched)
+def _classify_file_counts(repo_root: Path, files_touched: list[str]) -> dict[str, int]:
+    roles = classify_files([repo_root / path for path in files_touched])
     counts = Counter()
     for classification in roles.values():
         counts[classification.role] += 1
@@ -212,7 +212,7 @@ def _build_scan_row(
         )
     )
     files_touched = sorted(set(files_touched))
-    file_counts = _classify_file_counts(files_touched)
+    file_counts = _classify_file_counts(repo_root, files_touched)
     diff = (
         extract_commit_diff(
             repo_root, left=str(parents[0]) if parents else commit, right=commit

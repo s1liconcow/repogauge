@@ -103,13 +103,24 @@ def _register_builtin_adapters() -> None:
     global _BUILTINS_REGISTERED
     if _BUILTINS_REGISTERED:
         return
-    from .python import PythonAdapter
+    from .go import GoAdapter
     from .java import JavaAdapter
+    from .javascript import JavaScriptAdapter
+    from .python import PythonAdapter
+    from .rust import RustAdapter
 
+    if not any(_adapter_name(existing) == "go" for existing in _REGISTERED_ADAPTERS):
+        _store_adapter(GoAdapter())
     if not any(_adapter_name(existing) == "python" for existing in _REGISTERED_ADAPTERS):
         _store_adapter(PythonAdapter())
     if not any(_adapter_name(existing) == "java" for existing in _REGISTERED_ADAPTERS):
         _store_adapter(JavaAdapter())
+    if not any(
+        _adapter_name(existing) == "javascript" for existing in _REGISTERED_ADAPTERS
+    ):
+        _store_adapter(JavaScriptAdapter())
+    if not any(_adapter_name(existing) == "rust" for existing in _REGISTERED_ADAPTERS):
+        _store_adapter(RustAdapter())
     _BUILTINS_REGISTERED = True
 
 

@@ -314,10 +314,21 @@ def classify_file(
             return FileRoleClassification(
                 path=str(path_obj), role="test", reason="test filename convention"
             )
+        if suffix in test_merged.prod_extensions:
+            return FileRoleClassification(
+                path=str(path_obj),
+                role="test",
+                reason="test source file under language-specific test directory",
+            )
         return FileRoleClassification(
             path=str(path_obj),
             role="test_support",
             reason="test-related path outside conventional test naming",
+        )
+
+    if _matches_any_pattern(filename, test_merged.test_filename_patterns):
+        return FileRoleClassification(
+            path=str(path_obj), role="test", reason="test filename convention"
         )
 
     if suffix in merged.prod_extensions:
