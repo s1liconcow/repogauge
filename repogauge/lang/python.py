@@ -11,9 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from repogauge.mining.signature import REPO_VERSION_UNKNOWN
-from repogauge.mining.signature import _to_pkg_label
-from repogauge.mining.signature import _to_python_label
-from repogauge.mining.signature import _to_test_label
 from repogauge.validation.env_detect import EnvPlan
 from repogauge.parsers.junit import parse_repogauge_junit
 
@@ -42,6 +39,24 @@ def _coerce_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         return _sorted_unique(value)
     return []
+
+
+def _to_test_label(commands: list[str]) -> str:
+    if not commands:
+        return "testunknown"
+    return "+".join(commands)
+
+
+def _to_pkg_label(managers: list[str]) -> str:
+    if not managers:
+        return "pkgunknown"
+    return "+".join(managers)
+
+
+def _to_python_label(versions: list[str]) -> str:
+    if not versions:
+        return "pyunknown"
+    return "_".join(f"py{v.replace('.', '')}" for v in versions)
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:
@@ -184,6 +199,73 @@ def _safe_read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def _normalize_dependency_lines(raw: str) -> list[str]:
+    lines: list[str] = []
+    for raw_line in raw.splitlines():
+        value = raw_line.strip()
+        if not value or value.startswith("#"):
+            continue
+        value = value.split("#", 1)[0].strip()
+        if value:
+            lines.append(value)
+    return lines
+
+
+def _read_requirements_signature(repo_root: Path, profile: dict[str, Any]) -> list[str]:
+    if not repo_root.exists():
+        if isinstance(profile.get("package_style"), str):
+            return _sorted_unique([str(profile.get("package_style"))])
+        return []
+
+    requirements: list[str] = []
+    for candidate in sorted(
+        (
+            repo_root / "requirements.txt",
+            repo_root / "requirements-dev.txt",
+            repo_root / "dev-requirements.txt",
+        )
+    ):
+        if not candidate.exists():
+            continue
+        try:
+            normalized_lines = _normalize_dependency_lines(
+                candidate.read_text(encoding="utf-8")
+            )
+            requirements.append("\n".join(_sorted_unique(normalized_lines)))
+        except OSError:
+            requirements.append("")
+    pyproject = repo_root / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            normalized_lines = _normalize_dependency_lines(
+                pyproject.read_text(encoding="utf-8")
+            )
+            requirements.append("\n".join(_sorted_unique(normalized_lines)))
+        except OSError:
+            requirements.append("")
+    setup_cfg = repo_root / "setup.cfg"
+    if setup_cfg.exists():
+        try:
+            normalized_lines = _normalize_dependency_lines(
+                setup_cfg.read_text(encoding="utf-8")
+            )
+            requirements.append("\n".join(_sorted_unique(normalized_lines)))
+        except OSError:
+            requirements.append("")
+    setup_py = repo_root / "setup.py"
+    if setup_py.exists():
+        try:
+            normalized_lines = _normalize_dependency_lines(
+                setup_py.read_text(encoding="utf-8")
+            )
+            requirements.append("\n".join(_sorted_unique(normalized_lines)))
+        except OSError:
+            requirements.append("")
+    if not requirements and isinstance(profile.get("package_style"), str):
+        requirements.append(profile["package_style"])
+    return _sorted_unique(requirements)
 
 
 def _extract_toml_value(path: Path, sections: list[str], key: str) -> str | None:
@@ -650,7 +732,7 @@ class PythonAdapter:
     def dependency_signature_inputs(
         self, repo_root: Path, profile: dict[str, Any]
     ) -> list[str]:
-        return _detect_package_and_install_hints(repo_root)[1]
+        return _read_requirements_signature(repo_root, profile)
 
     def env_overrides(self, worktree: Path) -> dict[str, str]:
         return {"PYTHONPATH": str(worktree)}

@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from repogauge.lang import find_adapter
+
 
 REPO_VERSION_UNKNOWN = "repover_unknown"
 
@@ -15,109 +17,32 @@ def _as_sorted_unique(values: Iterable[str]) -> list[str]:
     return sorted({str(v).strip() for v in values if str(v).strip()})
 
 
-def _to_test_label(commands: list[str]) -> str:
-    if not commands:
-        return "testunknown"
-    return "+".join(commands)
-
-
-def _to_pkg_label(managers: list[str]) -> str:
-    if not managers:
-        return "pkgunknown"
-    return "+".join(managers)
-
-
-def _to_python_label(versions: list[str]) -> str:
-    if not versions:
-        return "pyunknown"
-    return "_".join(f"py{v.replace('.', '')}" for v in versions)
-
-
 def _dependency_hash(parts: dict[str, Any]) -> str:
     payload = json.dumps(parts, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return digest[:16]
 
 
-def _normalize_dependency_lines(raw: str) -> list[str]:
-    lines: list[str] = []
-    for raw_line in raw.splitlines():
-        value = raw_line.strip()
-        if not value or value.startswith("#"):
-            continue
-        value = value.split("#", 1)[0].strip()
-        if value:
-            lines.append(value)
-    return lines
-
-
-def _read_requirements_signature(repo_root: Path, profile: dict[str, Any]) -> list[str]:
-    if not repo_root.exists():
-        if isinstance(profile.get("package_style"), str):
-            return _as_sorted_unique([str(profile.get("package_style"))])
-        return []
-
-    requirements: list[str] = []
-    for candidate in sorted(
-        (
-            repo_root / "requirements.txt",
-            repo_root / "requirements-dev.txt",
-            repo_root / "dev-requirements.txt",
-        )
-    ):
-        if not candidate.exists():
-            continue
-        try:
-            normalized_lines = _normalize_dependency_lines(
-                candidate.read_text(encoding="utf-8")
-            )
-            requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
-        except OSError:
-            requirements.append("")
-    pyproject = repo_root / "pyproject.toml"
-    if pyproject.exists():
-        try:
-            normalized_lines = _normalize_dependency_lines(
-                pyproject.read_text(encoding="utf-8")
-            )
-            requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
-        except OSError:
-            requirements.append("")
-    setup_cfg = repo_root / "setup.cfg"
-    if setup_cfg.exists():
-        try:
-            normalized_lines = _normalize_dependency_lines(
-                setup_cfg.read_text(encoding="utf-8")
-            )
-            requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
-        except OSError:
-            requirements.append("")
-    setup_py = repo_root / "setup.py"
-    if setup_py.exists():
-        try:
-            normalized_lines = _normalize_dependency_lines(
-                setup_py.read_text(encoding="utf-8")
-            )
-            requirements.append("\n".join(_as_sorted_unique(normalized_lines)))
-        except OSError:
-            requirements.append("")
-    if not requirements and isinstance(profile.get("package_style"), str):
-        requirements.append(profile["package_style"])
-    return _as_sorted_unique(requirements)
-
-
 def build_environment_signature(profile: dict[str, Any]) -> dict[str, Any]:
     repo_root = Path(profile.get("repo_root", "")).resolve()
+    language_name = str(profile.get("language", "python")).strip() or "python"
+    adapter = find_adapter(language_name)
     python_hints = profile.get("python_hints", {}) or {}
+    language_hints = profile.get("language_hints", {}) or {}
     test_runner_hints = profile.get("test_runner_hints", {}) or {}
 
-    python_versions = _as_sorted_unique(python_hints.get("versions", []))
-    package_managers = _as_sorted_unique(python_hints.get("package_managers", []))
-    install_cmds = _as_sorted_unique(profile.get("install_hints", []))
-    test_commands = _as_sorted_unique(test_runner_hints.get("commands", []))
-    package_style = (
-        str(python_hints.get("package_style", "unknown")).strip() or "unknown"
+    hint_source = language_hints or python_hints
+    python_versions = _as_sorted_unique(hint_source.get("versions", []))
+    package_managers = _as_sorted_unique(hint_source.get("package_managers", []))
+    install_cmds = _as_sorted_unique(
+        profile.get("install_hints", []) or hint_source.get("install_hints", [])
     )
+    test_commands = _as_sorted_unique(
+        test_runner_hints.get("commands", []) or hint_source.get("test_commands", [])
+    )
+    package_style = str(
+        hint_source.get("package_style", profile.get("package_style", "unknown"))
+    ).strip() or "unknown"
     repo_name = str(profile.get("repo_name", "")).strip()
     repo_version = str(profile.get("repo_version", "")).strip() or REPO_VERSION_UNKNOWN
 
@@ -126,13 +51,23 @@ def build_environment_signature(profile: dict[str, Any]) -> dict[str, Any]:
         "install_cmds": install_cmds,
         "test_commands": test_commands,
         "package_style": package_style,
-        "requirements": _read_requirements_signature(repo_root, profile),
+        "requirements": adapter.dependency_signature_inputs(repo_root, profile),
     }
     fingerprint = _dependency_hash(dependency_payload)
 
-    python_label = _to_python_label(python_versions)
-    test_label = _to_test_label(test_commands)
-    package_label = _to_pkg_label(package_managers)
+    signature_labels = adapter.signature_labels(profile)
+    runtime_label = (
+        str(signature_labels.get("runtime_label", "pyunknown")).strip()
+        or "pyunknown"
+    )
+    test_label = (
+        str(signature_labels.get("test_label", "testunknown")).strip()
+        or "testunknown"
+    )
+    package_label = (
+        str(signature_labels.get("package_label", "pkgunknown")).strip()
+        or "pkgunknown"
+    )
 
     return {
         "repo_name": repo_name,
@@ -143,8 +78,8 @@ def build_environment_signature(profile: dict[str, Any]) -> dict[str, Any]:
         "install_cmds": install_cmds,
         "test_commands": test_commands,
         "dependency_signature": fingerprint,
-        "signature": f"{repo_version}__{python_label}__{test_label}__{package_label}__reqhash_{fingerprint}",
-        "version": f"{repo_version}__{python_label}__{test_label}__{package_label}__reqhash_{fingerprint}",
+        "signature": f"{repo_version}__{runtime_label}__{test_label}__{package_label}__reqhash_{fingerprint}",
+        "version": f"{repo_version}__{runtime_label}__{test_label}__{package_label}__reqhash_{fingerprint}",
     }
 
 

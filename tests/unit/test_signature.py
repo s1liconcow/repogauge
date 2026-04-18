@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from repogauge.config import RepoProfile
+from repogauge.lang import find_adapter
 from repogauge.mining.signature import REPO_VERSION_UNKNOWN, build_environment_signature
 
 
@@ -20,6 +22,20 @@ def _base_profile(repo_root: Path) -> dict:
             "signals": [],
         },
     }
+
+
+def _repo_profile_fixture(repo_root: Path) -> RepoProfile:
+    return RepoProfile(
+        repo="owner/repo",
+        default_branch="main",
+        source_path=str(repo_root),
+        language="python",
+        language_version="3.11",
+        python_version="3.11",
+        package_manager="poetry",
+        install_cmds=["poetry install"],
+        test_cmds=["pytest"],
+    )
 
 
 def test_environment_signature_is_deterministic(tmp_path: Path) -> None:
@@ -84,3 +100,39 @@ def test_environment_signature_normalizes_requirement_content(tmp_path: Path) ->
 
     assert first["dependency_signature"] == second["dependency_signature"]
     assert first["version"] == second["version"]
+
+
+def test_environment_signature_matches_python_repo_profile_fixture(
+    tmp_path: Path,
+) -> None:
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("requests==2.31.0\n", encoding="utf-8")
+
+    repo_profile = _repo_profile_fixture(tmp_path)
+    profile = _base_profile(tmp_path)
+    profile["repo_name"] = repo_profile.repo
+    profile["language"] = repo_profile.language
+    profile["language_version"] = repo_profile.language_version
+    profile["python_hints"]["versions"] = [repo_profile.python_version or ""]
+    profile["python_hints"]["package_managers"] = [repo_profile.package_manager or ""]
+    profile["language_hints"] = dict(profile["python_hints"])
+    profile["install_hints"] = list(repo_profile.install_cmds)
+    profile["test_runner_hints"]["commands"] = list(repo_profile.test_cmds)
+
+    adapter = find_adapter("python")
+    assert adapter.signature_labels(profile) == {
+        "runtime_label": "py311",
+        "test_label": "pytest",
+        "package_label": "poetry",
+    }
+    assert adapter.dependency_signature_inputs(tmp_path, profile) == [
+        "requests==2.31.0"
+    ]
+
+    result = build_environment_signature(profile)
+    assert (
+        result["version"]
+        == "1.2.3__py311__pytest__poetry__reqhash_"
+        + result["dependency_signature"]
+    )
+    assert result["version"].endswith(result["dependency_signature"])
