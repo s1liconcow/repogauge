@@ -658,7 +658,11 @@ class PythonAdapter:
     def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
         base = test_cmd_base.strip() or _DEFAULT_TEST_CMD
         attempts = [shlex.split(base)]
-        if attempts[0] and attempts[0][0] == "pytest":
+        if attempts[0]:
+            command_name = Path(attempts[0][0]).name.lower()
+        else:
+            command_name = ""
+        if command_name in {"pytest", "pytest.exe"}:
             attempts.append([sys.executable, "-m", "pytest", *attempts[0][1:]])
         return attempts
 

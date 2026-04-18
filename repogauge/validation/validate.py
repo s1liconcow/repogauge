@@ -15,27 +15,26 @@ From those runs:
 The evaluator writes one ValidationRow per instance to validation.jsonl.
 
 This is a local, harness-free implementation.  It uses git worktrees for
-isolation and runs pytest directly via the current Python interpreter.
-``PYTHONPATH`` is set to the worktree root so editable installs are not required.
+isolation and runs tests through the active language adapter.
+Python currently uses the current interpreter and workspace-relative imports
+so editable installs are not required.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from repogauge.exec import run_command
+from repogauge.lang import LanguageAdapter, find_adapter
 from repogauge.utils.git import CommandPatchError, apply_patch_text, create_worktree
 from repogauge.validation.junit_parser import (
     JUnitParseError,
     OUTCOME_PASS,
-    parse_junit_xml,
 )
 from repogauge.validation.evidence import (
     normalize_failure_reason,
@@ -76,16 +75,24 @@ def _resolve_dataset(path: Path) -> Tuple[Path, Path]:
     return dataset, predictions
 
 
-def _resolve_test_cmd(test_cmd_base: str) -> List[str]:
-    """Split *test_cmd_base* into argv, replacing bare 'python' tokens with sys.executable."""
-    parts = (
-        shlex.split(test_cmd_base)
-        if test_cmd_base.strip()
-        else ["python", "-m", "pytest"]
-    )
-    if parts and re.match(r"^python3?(\.\d+)?$", parts[0]):
-        parts[0] = sys.executable
-    return parts
+def _resolve_adapter(
+    adapter: LanguageAdapter | None = None,
+    *,
+    language: str | None = None,
+) -> LanguageAdapter:
+    if adapter is not None:
+        return adapter
+
+    candidate = "python"
+    if isinstance(language, str):
+        normalized = language.strip().lower()
+        if normalized:
+            candidate = normalized
+
+    try:
+        return find_adapter(candidate)
+    except KeyError:
+        return find_adapter("python")
 
 
 def _normalize_junit_output_flag(
@@ -117,12 +124,17 @@ def _normalize_junit_output_flag(
     return cmd, junit_output
 
 
-class PytestExecutionError(RuntimeError):
-    """Raised when deterministic pytest attempts fail to produce parseable output."""
+class TestExecutionError(RuntimeError):
+    """Raised when deterministic test attempts fail to produce parseable output."""
+
+    __test__ = False
 
     def __init__(self, message: str, attempts: List[Dict[str, Any]]) -> None:
         super().__init__(message)
         self.attempts = attempts
+
+
+PytestExecutionError = TestExecutionError
 
 
 def _bundle_payload(outcome: Dict[str, Any]) -> Dict[str, Any]:
@@ -141,34 +153,38 @@ def _bundle_payload(outcome: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _test_command_attempts(
+    test_cmd_base: str, *, adapter: LanguageAdapter
+) -> List[List[str]]:
+    """Return deterministic command attempts for the active test runner."""
+    attempts = [
+        list(attempt) for attempt in adapter.test_command_attempts(test_cmd_base)
+    ]
+    return attempts or [shlex.split(test_cmd_base)]
+
+
 def _pytest_command_attempts(test_cmd_base: str) -> List[List[str]]:
-    """Return deterministic command attempts for a pytest-style base command."""
-    primary = _resolve_test_cmd(test_cmd_base)
-    attempts = [primary]
-
-    if not primary:
-        return attempts
-
-    # A common recovery path when `pytest` is not on PATH: call it through
-    # the current interpreter as ``python -m pytest``.
-    command_name = Path(primary[0]).name.lower()
-    if command_name in {"pytest", "pytest.exe"}:
-        corrected = [sys.executable, "-m", "pytest"] + primary[1:]
-        if corrected not in attempts:
-            attempts.append(corrected)
-
-    return attempts
+    """Back-compat wrapper for the Python adapter's command attempts."""
+    adapter = _resolve_adapter(language="python")
+    return _test_command_attempts(test_cmd_base, adapter=adapter)
 
 
-def _run_pytest(
+def _test_report_path(temp_root: Path, label: str, adapter: LanguageAdapter) -> Path:
+    report_filename = adapter.test_report_filename() or "junit.xml"
+    return temp_root / f"{label}_{Path(report_filename).name}"
+
+
+def _run_test(
     worktree: Path,
     *,
     test_files: List[str],
-    junit_xml: Path,
+    test_report_path: Path,
     timeout_seconds: int = 120,
-    test_cmd_base: str = "python -m pytest",
+    test_cmd_base: str = "",
+    adapter: LanguageAdapter | None = None,
+    test_spec: object | None = None,
 ) -> Tuple[Dict[str, str], str, List[Dict[str, Any]]]:
-    """Run pytest in *worktree* with deterministic command retries.
+    """Run tests in *worktree* with deterministic command retries.
 
     Returns:
         - ``results_dict`` maps test_id -> outcome string
@@ -179,23 +195,33 @@ def _run_pytest(
     ``raw_output`` is the combined stdout+stderr for log purposes.
     ``test_cmd_base`` is taken from the adapter spec when available.
     """
-    env = {**os.environ, "PYTHONPATH": str(worktree)}
+    active_adapter = _resolve_adapter(adapter)
+    env = {**os.environ, **active_adapter.env_overrides(worktree)}
     attempts: List[Dict[str, Any]] = []
     raw = ""
     last_parse_error: str | None = None
 
-    for index, base_cmd in enumerate(_pytest_command_attempts(test_cmd_base)):
-        pytest_cmd, junit_xml_to_read = _normalize_junit_output_flag(
-            base_cmd, junit_xml
-        )
+    for index, base_cmd in enumerate(
+        _test_command_attempts(test_cmd_base, adapter=active_adapter)
+    ):
+        test_cmd = list(base_cmd)
+        report_path_to_read = test_report_path
+        if active_adapter.name() == "python":
+            test_cmd, report_path_to_read = _normalize_junit_output_flag(
+                test_cmd, test_report_path
+            )
 
-        if junit_xml_to_read.exists():
+        if report_path_to_read.exists():
             try:
-                junit_xml_to_read.unlink()
+                report_path_to_read.unlink()
             except OSError:
                 pass
 
-        cmd = pytest_cmd + ["--tb=no", "-q"] + (test_files if test_files else [])
+        cmd = list(test_cmd)
+        if active_adapter.name() == "python":
+            cmd += ["--tb=no", "-q"]
+        if test_files:
+            cmd += test_files
         result = run_command(
             cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
         )
@@ -211,7 +237,9 @@ def _run_pytest(
         }
 
         try:
-            outcomes = parse_junit_xml(junit_xml_to_read)
+            outcomes = active_adapter.parse_test_output(
+                report_path_to_read, test_spec
+            )
         except JUnitParseError as exc:
             last_parse_error = str(exc)
             attempt_entry.update(
@@ -235,8 +263,27 @@ def _run_pytest(
         )
 
     raise PytestExecutionError(
-        f"pytest execution produced no parseable output for {test_files}",
+        f"test execution produced no parseable output for {test_files}",
         attempts,
+    )
+
+
+def _run_pytest(
+    worktree: Path,
+    *,
+    test_files: List[str],
+    junit_xml: Path,
+    timeout_seconds: int = 120,
+    test_cmd_base: str = "python -m pytest",
+) -> Tuple[Dict[str, str], str, List[Dict[str, Any]]]:
+    """Back-compat wrapper around :func:`_run_test`."""
+    return _run_test(
+        worktree,
+        test_files=test_files,
+        test_report_path=junit_xml,
+        timeout_seconds=timeout_seconds,
+        test_cmd_base=test_cmd_base,
+        adapter=_resolve_adapter(language="python"),
     )
 
 
@@ -295,7 +342,8 @@ def _run_validation_pass(
     pred_patch: str,
     test_files: List[str],
     timeout_seconds: int,
-    test_cmd_base: str,
+    test_cmd_base: str = "",
+    adapter: LanguageAdapter | None = None,
     apply_test_patch: bool = False,
     apply_pred_patch: bool = False,
 ) -> Dict[str, Any]:
@@ -305,6 +353,7 @@ def _run_validation_pass(
     log = ""
     attempts: List[Dict[str, Any]] = []
     failure_code: str | None = None
+    active_adapter = _resolve_adapter(adapter)
 
     try:
         wt = create_worktree(repo_root, ref=base_commit)
@@ -313,13 +362,15 @@ def _run_validation_pass(
         if pred_patch.strip():
             apply_patch_text(wt.path, pred_patch)
 
-        xml_path = temp_root / f"junit_{label}.xml"
-        outcomes, log, attempts = _run_pytest(
+        test_report_path = _test_report_path(temp_root, label, active_adapter)
+        outcomes, log, attempts = _run_test(
             wt.path,
             test_files=test_files,
-            junit_xml=xml_path,
+            test_report_path=test_report_path,
             timeout_seconds=timeout_seconds,
             test_cmd_base=test_cmd_base,
+            adapter=active_adapter,
+            test_spec=test_files or None,
         )
     except Exception as exc:
         if isinstance(exc, CommandPatchError):
@@ -488,21 +539,27 @@ def _eval_instance(
     declared_ftp: List[str],
     declared_ptp: List[str],
     timeout_seconds: int,
-    test_cmd_base: str = "python -m pytest",
+    test_cmd_base: str = "",
+    adapter: LanguageAdapter | None = None,
     out_root: Path | None = None,
     instance_id: str | None = None,
     environment_strategy: str = "default",
 ) -> Dict[str, Any]:
     """Run validation passes for one instance. Returns a result dict."""
+    active_adapter = _resolve_adapter(adapter)
     targeted_test_cmd, targeted_test_inputs = build_targeted_test_plan(
         test_cmd_base, test_patch
     )
     test_inputs = targeted_test_inputs
     target_cmd_tokens = targeted_test_cmd.split()
-    is_pytest = "pytest" in target_cmd_tokens or (
-        target_cmd_tokens[:2] == ["python", "-m"]
-        and len(target_cmd_tokens) > 2
-        and target_cmd_tokens[2] == "pytest"
+    is_python_adapter = active_adapter.name() == "python"
+    is_pytest = is_python_adapter and (
+        "pytest" in target_cmd_tokens
+        or (
+            target_cmd_tokens[:2] == ["python", "-m"]
+            and len(target_cmd_tokens) > 2
+            and target_cmd_tokens[2] == "pytest"
+        )
     )
     if is_pytest:
         test_strategy = "targeted_pytest" if test_inputs else "full_pytest"
@@ -522,6 +579,7 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            adapter=active_adapter,
             apply_test_patch=False,
             apply_pred_patch=False,
         )
@@ -567,6 +625,7 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            adapter=active_adapter,
             apply_test_patch=True,
             apply_pred_patch=False,
         )
@@ -613,6 +672,7 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            adapter=active_adapter,
             apply_test_patch=True,
             apply_pred_patch=True,
         )
@@ -660,6 +720,7 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            adapter=active_adapter,
             apply_test_patch=True,
             apply_pred_patch=False,
         )
@@ -673,6 +734,7 @@ def _eval_instance(
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
+            adapter=active_adapter,
             apply_test_patch=True,
             apply_pred_patch=True,
         )
@@ -846,7 +908,7 @@ def run_eval(
         predictions_path:  Path to ``predictions.gold.jsonl`` or custom predictions.
         out_root:          Directory where ``validation.jsonl`` is written.
         repo_root:         Git repo root; inferred from dataset_path if omitted.
-        timeout_seconds:   Per-instance pytest timeout.
+        timeout_seconds:   Per-instance test timeout.
         adapter_spec:      Adapter spec dict from ``generate_adapter``; provides
                            ``test_cmd_base`` and other harness settings.
 
@@ -858,7 +920,14 @@ def run_eval(
         repo_root = _normalize_repo_root(dataset_path)
 
     environment_strategy = (adapter_spec or {}).get("strategy_name", "default")
-    test_cmd_base = (adapter_spec or {}).get("test_cmd_base", "python -m pytest")
+    test_cmd_base = (adapter_spec or {}).get("test_cmd_base", "")
+    active_adapter = _resolve_adapter(
+        language=(
+            adapter_spec or {}
+        ).get("language")
+        if isinstance(adapter_spec, dict)
+        else None
+    )
 
     dataset_rows = _read_jsonl(dataset_path)
     pred_rows = _read_jsonl(predictions_path)
@@ -902,6 +971,7 @@ def run_eval(
             declared_ptp=ds.get("PASS_TO_PASS") or [],
             timeout_seconds=timeout_seconds,
             test_cmd_base=test_cmd_base,
+            adapter=active_adapter,
             out_root=out_root,
             instance_id=iid,
             environment_strategy=environment_strategy,

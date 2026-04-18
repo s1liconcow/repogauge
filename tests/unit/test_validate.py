@@ -7,10 +7,14 @@ from unittest.mock import patch
 import pytest
 from repogauge.exec import CommandResult
 from repogauge.validation.validate import (
+    PytestExecutionError,
+    TestExecutionError,
     run_eval,
     _eval_instance,
     _pytest_command_attempts,
     _run_pytest,
+    _run_test,
+    _test_command_attempts,
 )
 
 
@@ -71,6 +75,80 @@ def test_run_pytest_falls_back_when_junit_xml_missing(tmp_path: Path) -> None:
     assert len(attempts) == 2
     assert attempts[0]["status"] == "parse_error"
     assert attempts[1]["status"] == "success"
+
+
+def test_test_command_attempts_defers_to_adapter() -> None:
+    class Adapter:
+        def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+            return [["go", "test", "./..."], ["go", "test", "./...", "-run", "Foo"]]
+
+    attempts = _test_command_attempts("ignored", adapter=Adapter())
+
+    assert attempts == [["go", "test", "./..."], ["go", "test", "./...", "-run", "Foo"]]
+
+
+def test_run_test_uses_adapter_env_and_parser(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: dict[str, object] = {}
+
+    class Adapter:
+        def name(self) -> str:
+            return "go"
+
+        def env_overrides(self, worktree: Path) -> dict[str, str]:
+            observed["worktree"] = worktree
+            return {"WORKTREE": str(worktree), "ADAPTER_FLAG": "1"}
+
+        def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+            observed["test_cmd_base"] = test_cmd_base
+            return [["go", "test", "./..."]]
+
+        def parse_test_output(
+            self, report: object, test_spec: object | None
+        ) -> dict[str, str]:
+            observed["report"] = report
+            observed["test_spec"] = test_spec
+            assert isinstance(report, Path)
+            assert report.name == "go-report.json"
+            return {"pkg.Test": "pass"}
+
+        def test_report_filename(self) -> str | None:
+            return "go-report.json"
+
+    def fake_run_command(cmd, *, cwd=None, env=None, timeout_seconds=None):  # noqa: ARG001
+        observed["cmd"] = cmd
+        observed["cwd"] = cwd
+        observed["env"] = env
+        return CommandResult(command=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.run_command", fake_run_command
+    )
+
+    outcomes, raw, attempts = _run_test(
+        tmp_path,
+        test_files=[],
+        test_report_path=tmp_path / "go-report.json",
+        timeout_seconds=5,
+        test_cmd_base="go test ./...",
+        adapter=Adapter(),
+        test_spec={"suite": "go"},
+    )
+
+    assert outcomes == {"pkg.Test": "pass"}
+    assert raw == "[stdout]\n\n[stderr]\n"
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "success"
+    assert observed["cmd"] == ["go", "test", "./..."]
+    assert observed["cwd"] == str(tmp_path)
+    assert observed["env"]["WORKTREE"] == str(tmp_path)
+    assert observed["env"]["ADAPTER_FLAG"] == "1"
+    assert observed["test_spec"] == {"suite": "go"}
+
+
+def test_pytest_execution_error_alias_is_preserved() -> None:
+    assert PytestExecutionError is TestExecutionError
 
 
 def test_eval_instance_executes_four_passes_in_order(
