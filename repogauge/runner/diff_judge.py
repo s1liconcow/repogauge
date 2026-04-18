@@ -12,12 +12,15 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from repogauge.config import DiffJudgeRow
+from repogauge.exec import run_command
 from repogauge.llm import LlmModelSpec
 from repogauge.runner.adapters import (
     SolverAdapterError,
+    _codex_cli_env,
     _coerce_mapping,
     _extract_text_candidates,
     _parse_usage_cost_with_source,
+    _parse_json_lines,
     _post_json,
 )
 
@@ -60,12 +63,19 @@ LOCAL_ONLY_PROVIDERS = {
     "builtin",
     "built-in",
     "internal",
+    "codex",
+    "codex-cli",
 }
 _OPENAI_RESPONSES_PROVIDERS = {"openai", "openai-responses"}
 _OPENAI_COMPATIBLE_PROVIDERS = {
     "openai-compatible",
     "openai_compatible",
-    *LOCAL_ONLY_PROVIDERS,
+    "local",
+    "local-only",
+    "offline",
+    "builtin",
+    "built-in",
+    "internal",
 }
 _ANTHROPIC_PROVIDERS = {"anthropic", "anthropic-api", "claude"}
 _LABEL_BY_DELTA = {
@@ -87,13 +97,15 @@ class DiffJudgeRunResult:
 
 
 def _normalize_provider(value: Any) -> str:
-    candidate = str(value or "local").strip().lower().replace("_", "-")
-    return candidate or "local"
+    candidate = str(value or "codex").strip().lower().replace("_", "-")
+    return candidate or "codex"
 
 
 def _default_model_name(provider: str) -> str:
     if provider in _ANTHROPIC_PROVIDERS:
         return "claude-sonnet-4.6"
+    if provider in {"codex", "codex-cli"}:
+        return "gpt-5.4"
     if provider in LOCAL_ONLY_PROVIDERS:
         return "local-judge"
     if provider in _OPENAI_COMPATIBLE_PROVIDERS:
@@ -102,6 +114,8 @@ def _default_model_name(provider: str) -> str:
 
 
 def _provider_family(provider: str) -> str:
+    if provider in {"codex", "codex-cli"}:
+        return "codex_cli"
     if provider in _ANTHROPIC_PROVIDERS:
         return "anthropic"
     if provider in _OPENAI_RESPONSES_PROVIDERS:
@@ -344,6 +358,10 @@ def _judge_prompt(prompt_payload: Mapping[str, Any]) -> str:
 
 def _extract_response_text(provider: str, payload: Mapping[str, Any]) -> str:
     family = _provider_family(provider)
+    if family == "codex_cli":
+        output_text = _coerce_text(payload.get("output_text")).strip()
+        if output_text:
+            return output_text
     if family == "anthropic":
         text_candidates = _extract_text_candidates(payload)
         return "\n".join(text_candidates).strip()
@@ -365,6 +383,15 @@ def _extract_response_text(provider: str, payload: Mapping[str, Any]) -> str:
     return "\n".join(text_candidates).strip()
 
 
+def _codex_cli_output_text(raw_output: str) -> str:
+    parsed = _parse_json_lines(raw_output)
+    for event in reversed(parsed):
+        for candidate in reversed(_extract_text_candidates(event)):
+            if _extract_json_object(candidate) is not None:
+                return candidate.strip()
+    return raw_output.strip()
+
+
 def _invoke_model(
     *,
     model: LlmModelSpec,
@@ -372,6 +399,7 @@ def _invoke_model(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, dict[str, Any], str]:
     provider = _normalize_provider(model.provider)
     family = _provider_family(provider)
+    request_payload: dict[str, Any]
     if family == "anthropic":
         base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
@@ -394,6 +422,55 @@ def _invoke_model(
             ),
             field_name="response",
         )
+    elif family == "codex_cli":
+        command = [
+            "codex",
+            "--ask-for-approval",
+            "never",
+            "exec",
+            "-c",
+            "notify=[]",
+            "-c",
+            "mcp_servers={}",
+            "--json",
+            "--color",
+            "never",
+            "--sandbox",
+            "danger-full-access",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--model",
+            model.model_name,
+        ]
+        request_payload = {
+            "command": command,
+            "provider_family": family,
+            "model": model.model_name,
+        }
+        home_root = Path.cwd() / ".repogauge" / "judge-codex-home"
+        command_env = _codex_cli_env(home_root)
+        command_result = run_command(
+            command,
+            cwd=str(Path.cwd()),
+            env=command_env,
+            input_text=prompt,
+            timeout_seconds=120,
+        )
+        if command_result.timed_out:
+            raise SolverAdapterError(
+                f"codex exec timed out: {command_result.stderr or 'timed out'}"
+            )
+        if not command_result.success:
+            raise SolverAdapterError(
+                command_result.stderr
+                or command_result.stdout
+                or "codex exec failed"
+            )
+        raw_output = command_result.stdout or ""
+        response_payload = {
+            "raw_output": raw_output,
+            "output_text": _codex_cli_output_text(raw_output),
+        }
     elif family == "openai_responses":
         base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         api_key = os.getenv("OPENAI_API_KEY", "").strip()

@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
+from repogauge.exec import CommandResult
 from repogauge.runner.diff_judge import (
+    _normalize_provider,
     build_diff_judge_report,
     run_diff_judge,
     validate_llm_judge_policy,
@@ -16,6 +18,15 @@ from repogauge.runner.diff_judge import (
 def test_validate_llm_judge_policy_rejects_remote_provider_in_local_only_mode() -> None:
     with pytest.raises(ValueError, match="requires --llm-mode allow_remote"):
         validate_llm_judge_policy(llm_mode="local_only", provider="openai")
+
+
+def test_validate_llm_judge_policy_allows_codex_in_local_only_mode() -> None:
+    validate_llm_judge_policy(llm_mode="local_only", provider="codex")
+
+
+def test_normalize_provider_defaults_to_codex() -> None:
+    assert _normalize_provider(None) == "codex"
+    assert _normalize_provider("") == "codex"
 
 
 def test_run_diff_judge_writes_rows_and_reuses_cache(tmp_path: Path) -> None:
@@ -129,6 +140,95 @@ def test_run_diff_judge_writes_rows_and_reuses_cache(tmp_path: Path) -> None:
         )
     assert mock_cached_invoke.call_count == 0
     assert cached.rows[0]["metadata"]["cache_hit"] is True
+
+
+def test_run_diff_judge_defaults_to_codex_cli_provider(tmp_path: Path) -> None:
+    joined_rows = [
+        {
+            "attempt_id": "run:inst-1:solver-a:1:attempt-1",
+            "job_id": "run:inst-1:solver-a:1",
+            "instance_id": "inst-1",
+            "solver_id": "solver-a",
+            "resolved": True,
+            "harness_outcome": "resolved",
+            "attempt_state": "succeeded",
+            "model_patch": "diff --git a/src.py b/src.py\n+print('candidate')\n",
+        }
+    ]
+    dataset_rows = {
+        "inst-1": {
+            "instance_id": "inst-1",
+            "problem_statement": "Fix the parser regression.",
+            "patch": "diff --git a/src.py b/src.py\n+print('gold')\n",
+            "test_patch": "diff --git a/test_src.py b/test_src.py\n+assert True\n",
+        }
+    }
+    judge_payload = {
+        "summary": "Candidate is cleaner than gold.",
+        "confidence": 0.85,
+        "dimensions": [
+            {
+                "name": "task_fit",
+                "delta": 1,
+                "label": "better",
+                "rationale": "Solves the same task.",
+            },
+            {
+                "name": "correctness_safety",
+                "delta": 1,
+                "label": "better",
+                "rationale": "Lower regression risk.",
+            },
+            {
+                "name": "maintainability",
+                "delta": 1,
+                "label": "better",
+                "rationale": "Simpler code path.",
+            },
+            {
+                "name": "test_quality",
+                "delta": 0,
+                "label": "same",
+                "rationale": "Comparable tests.",
+            },
+            {
+                "name": "change_focus",
+                "delta": 1,
+                "label": "better",
+                "rationale": "More focused diff.",
+            },
+        ],
+    }
+    command_output = json.dumps({"output_text": json.dumps(judge_payload)}) + "\n"
+
+    with patch(
+        "repogauge.runner.diff_judge.run_command",
+        return_value=CommandResult(
+            command=["codex"],
+            returncode=0,
+            stdout=command_output,
+            stderr="",
+        ),
+    ) as mock_run_command:
+        result = run_diff_judge(
+            joined_rows=joined_rows,
+            dataset_rows=dataset_rows,
+            out_root=tmp_path,
+            llm_mode="local_only",
+            model_name=None,
+            provider=None,
+        )
+
+    call = mock_run_command.call_args
+    assert call is not None
+    command = call.args[0]
+    assert command[:4] == ["codex", "--ask-for-approval", "never", "exec"]
+    assert "--model" in command
+    assert command[command.index("--model") + 1] == "gpt-5.4"
+    assert result.model["provider"] == "codex"
+    assert result.model["model_name"] == "gpt-5.4"
+    assert result.rows[0]["overall_label"] == "better"
+    assert result.rows[0]["metadata"]["judge_status"] == "scored"
 
 
 def test_build_diff_judge_report_uses_latest_attempt_per_job() -> None:
