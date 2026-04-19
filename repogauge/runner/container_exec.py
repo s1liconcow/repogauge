@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shlex
@@ -14,13 +16,17 @@ from pathlib import Path
 from typing import Mapping
 
 from repogauge.exec import CommandResult
+from swebench.harness.constants import BASE_IMAGE_BUILD_DIR, DEFAULT_DOCKER_SPECS
 from swebench.harness.constants import DOCKER_USER, DOCKER_WORKDIR
+from swebench.harness.constants import ENV_IMAGE_BUILD_DIR
 from swebench.harness.docker_build import (
+    build_image,
     build_env_images,
     close_logger,
     setup_logger,
 )
 from swebench.harness.docker_utils import cleanup_container
+from swebench.harness.dockerfiles import get_dockerfile_base, get_dockerfile_env
 from swebench.harness.test_spec.test_spec import make_test_spec
 
 
@@ -169,6 +175,79 @@ def _local_repo_setup_commands(test_spec) -> tuple[str, ...]:
     return (
         f"git config --global --add safe.directory {shlex.quote(DOCKER_WORKDIR)} || true",
         *commands,
+    )
+
+
+def _resolve_image_from_adapter_spec(
+    *,
+    attempt_id: str,
+    attempt_root: Path,
+    instance_row: Mapping[str, object],
+    adapter_spec: Mapping[str, object],
+    client,
+) -> _ResolvedContainerSpec:
+    import docker.errors as docker_errors  # type: ignore[import]
+
+    repo = str(adapter_spec.get("repo") or instance_row.get("repo") or "").strip()
+    language = str(adapter_spec.get("language") or "python").strip().lower() or "python"
+    docker_specs = dict(adapter_spec.get("docker_specs") or {})
+    run_args = docker_specs.get("run_args", {})
+    cap_add = (
+        tuple(run_args.get("cap_add", []))
+        if isinstance(run_args, Mapping)
+        else ()
+    )
+    arch = "x86_64"
+    platform = _default_platform_for_arch(arch)
+    base_image_key, env_image_key = _local_eval_image_keys(
+        repo=repo or language,
+        language=language,
+        docker_specs=docker_specs,
+        arch=arch,
+    )
+
+    logger = setup_logger(attempt_id, attempt_root / "container_image.log", mode="a")
+    try:
+        merged_specs = {**DEFAULT_DOCKER_SPECS, **docker_specs}
+        try:
+            client.images.get(base_image_key)
+        except docker_errors.ImageNotFound:
+            build_image(
+                image_name=base_image_key,
+                setup_scripts={},
+                dockerfile=get_dockerfile_base(platform, arch, language, **merged_specs),
+                platform=platform,
+                client=client,
+                build_dir=BASE_IMAGE_BUILD_DIR / base_image_key.replace(":", "__"),
+                nocache=False,
+            )
+
+        try:
+            client.images.get(env_image_key)
+        except docker_errors.ImageNotFound:
+            build_image(
+                image_name=env_image_key,
+                setup_scripts={"setup_env.sh": "#!/bin/bash\nset -euxo pipefail\n"},
+                dockerfile=get_dockerfile_env(
+                    platform,
+                    arch,
+                    language,
+                    base_image_key,
+                    **merged_specs,
+                ),
+                platform=platform,
+                client=client,
+                build_dir=ENV_IMAGE_BUILD_DIR / env_image_key.replace(":", "__"),
+                nocache=False,
+            )
+    finally:
+        close_logger(logger)
+
+    return _ResolvedContainerSpec(
+        image=env_image_key,
+        platform=platform,
+        cap_add=cap_add,
+        setup_commands=_adapter_setup_commands(adapter_spec),
     )
 
 
@@ -352,15 +431,70 @@ def _containerize_environment(
     *,
     environment: Mapping[str, str] | None,
     attempt_root: Path,
+    workspace_path: Path | None = None,
 ) -> dict[str, str]:
     command_env = dict(environment or {})
     host_attempt_root = str(attempt_root.resolve())
+    host_workspace = str(workspace_path.resolve()) if workspace_path is not None else None
     for key, value in list(command_env.items()):
+        if host_workspace is not None and value.startswith(host_workspace):
+            command_env[key] = f"{DOCKER_WORKDIR}{value.removeprefix(host_workspace)}"
+            continue
         if value.startswith(host_attempt_root):
             command_env[key] = (
                 f"{_CONTAINER_ATTEMPT_ROOT}{value.removeprefix(host_attempt_root)}"
             )
     return command_env
+
+
+def _coerce_shell_commands(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple)):
+        commands: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                commands.append(text)
+        return commands
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _adapter_setup_commands(adapter_spec: Mapping[str, object]) -> tuple[str, ...]:
+    commands: list[str] = [
+        f"git config --global --add safe.directory {shlex.quote(DOCKER_WORKDIR)} || true",
+        f"chmod -R 777 {shlex.quote(DOCKER_WORKDIR)} || true",
+        f"cd {shlex.quote(DOCKER_WORKDIR)}",
+    ]
+    for field in ("pre_install", "install", "build"):
+        commands.extend(_coerce_shell_commands(adapter_spec.get(field)))
+    return tuple(commands)
+
+
+def _default_platform_for_arch(arch: str) -> str:
+    if arch == "x86_64":
+        return "linux/x86_64"
+    if arch == "arm64":
+        return "linux/arm64/v8"
+    raise WorkspaceContainerError(f"unsupported architecture: {arch}")
+
+
+def _local_eval_image_keys(
+    *, repo: str, language: str, docker_specs: Mapping[str, object], arch: str
+) -> tuple[str, str]:
+    slug_seed = re.sub(r"[^a-z0-9]+", "-", f"{repo}-{language}".lower()).strip("-")
+    slug = slug_seed or "repo"
+    specs_json = json.dumps(dict(docker_specs), sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(specs_json.encode("utf-8")).hexdigest()
+    base_key = f"rg.local.base.{slug}.{arch}.{digest[:12]}:latest"
+    env_key = f"rg.local.env.{slug}.{arch}.{digest[:22]}:latest"
+    return base_key, env_key
 
 
 def _is_codex_command(command: list[str]) -> bool:
@@ -492,6 +626,134 @@ def _run_workspace_setup_in_container(
     )
 
 
+def _workspace_command_shell(command: list[str], *, stdout_path: str, stderr_path: str) -> str:
+    prep_steps = [
+        f"if [ -e {shlex.quote(DOCKER_WORKDIR)} ]; then chmod -R a+rwX {shlex.quote(DOCKER_WORKDIR)}; fi"
+    ]
+    return (
+        "{ "
+        + " && ".join(prep_steps)
+        + f" && cd {shlex.quote(DOCKER_WORKDIR)}"
+        + " && "
+        + shlex.join(command)
+        + "; status=$?; "
+        + " && ".join(prep_steps)
+        + "; exit $status; }"
+        + f" > {shlex.quote(stdout_path)}"
+        + f" 2> {shlex.quote(stderr_path)}"
+    )
+
+
+def run_workspace_command_in_container(
+    *,
+    attempt_id: str,
+    workspace_path: Path,
+    command: list[str],
+    timeout_seconds: int,
+    container_host: str | None,
+    artifacts_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+    image_override: str | None = None,
+    instance_row: Mapping[str, object] | None = None,
+    adapter_spec: Mapping[str, object] | None = None,
+) -> CommandResult:
+    attempt_root = (artifacts_root or workspace_path.parent).resolve()
+    attempt_root.mkdir(parents=True, exist_ok=True)
+    stdout_path = attempt_root / "stdout.txt"
+    stderr_path = attempt_root / "stderr.txt"
+    for path in (stdout_path, stderr_path):
+        if path.exists():
+            path.unlink()
+
+    client = _docker_client(container_host=container_host)
+    container = None
+    logger = setup_logger(attempt_id, attempt_root / "container_run.log", mode="a")
+    try:
+        if adapter_spec is not None:
+            resolved = _resolve_image_from_adapter_spec(
+                attempt_id=attempt_id,
+                attempt_root=attempt_root,
+                instance_row=dict(instance_row or {}),
+                adapter_spec=adapter_spec,
+                client=client,
+            )
+        else:
+            if instance_row is None:
+                raise WorkspaceContainerError(
+                    "instance_row is required when adapter_spec is not provided"
+                )
+            resolved = _resolve_image(
+                attempt_id=attempt_id,
+                attempt_root=attempt_root,
+                instance_id=str(instance_row.get("instance_id", "")),
+                instance_row=instance_row,
+                image_override=image_override,
+                client=client,
+            )
+
+        container_name = _sanitize_container_name(f"repogauge-{attempt_id}-workspace")
+        try:
+            existing = client.containers.get(container_name)
+            existing.remove(force=True)
+        except Exception:
+            pass
+
+        create_kwargs = {
+            "image": resolved.image,
+            "name": container_name,
+            "user": DOCKER_USER,
+            "detach": True,
+            "command": "tail -f /dev/null",
+            "volumes": {
+                str(workspace_path): {"bind": DOCKER_WORKDIR, "mode": "rw"},
+                str(attempt_root): {"bind": _CONTAINER_ATTEMPT_ROOT, "mode": "rw"},
+            },
+            "environment": _containerize_environment(
+                environment=environment,
+                attempt_root=attempt_root,
+                workspace_path=workspace_path,
+            ),
+            "cap_add": list(resolved.cap_add),
+        }
+        if resolved.platform:
+            create_kwargs["platform"] = resolved.platform
+        container = client.containers.create(**create_kwargs)
+        container.start()
+
+        _run_workspace_setup_in_container(
+            attempt_root=attempt_root,
+            container=container,
+            image=resolved.image,
+            setup_commands=resolved.setup_commands,
+            timeout_seconds=timeout_seconds,
+        )
+
+        shell_cmd = _workspace_command_shell(
+            command,
+            stdout_path=_CONTAINER_STDOUT_PATH,
+            stderr_path=_CONTAINER_STDERR_PATH,
+        )
+        outcome = _exec_in_container(
+            container,
+            f"/bin/bash -lc {shlex.quote(shell_cmd)}",
+            timeout_seconds,
+        )
+        stdout = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
+        stderr = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
+        return CommandResult(
+            command=tuple(command),
+            returncode=outcome.exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=outcome.timed_out,
+            elapsed_ms=outcome.elapsed_ms,
+            cwd=str(workspace_path),
+        )
+    finally:
+        cleanup_container(client, container, logger)
+        close_logger(logger)
+
+
 def run_solver_command_in_container(
     *,
     attempt_id: str,
@@ -547,6 +809,7 @@ def run_solver_command_in_container(
             "environment": _containerize_environment(
                 environment=environment,
                 attempt_root=attempt_root,
+                workspace_path=workspace_path,
             ),
             "cap_add": list(resolved.cap_add),
         }

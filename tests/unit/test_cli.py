@@ -418,7 +418,16 @@ class TestCliSurface(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("repogauge.validation.validate.run_eval") as mock_eval:
+            @contextmanager
+            def fake_runtime(*, container_runtime: str, container_host: str | None):
+                self.assertEqual(container_runtime, "podman")
+                self.assertIsNone(container_host)
+                yield "unix:///tmp/podman.sock"
+
+            with (
+                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
+                patch("repogauge.validation.validate.run_eval") as mock_eval,
+            ):
                 mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
@@ -445,6 +454,10 @@ class TestCliSurface(unittest.TestCase):
 
             self.assertEqual(result, 0)
             mock_eval.assert_called_once()
+            self.assertEqual(
+                mock_eval.call_args.kwargs["container_host"],
+                "unix:///tmp/podman.sock",
+            )
 
     def test_eval_records_resolved_dataset_artifacts_in_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
@@ -1809,6 +1822,116 @@ solvers:
             self.assertEqual(
                 Path(mock_eval.call_args.kwargs["adapter_path"]),
                 adapter_path,
+            )
+
+    def test_analyze_local_eval_uses_container_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            run_root = root / "unit-run"
+            export_root = root / "export"
+            export_root.mkdir()
+            run_root.mkdir()
+
+            dataset_path = export_root / "dataset.resolved.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-1",
+                        "patch": "diff --git a/x b/x\n+print('ok')",
+                        "repo": "owner/repo",
+                        "version": "1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (export_root / "specs.json").write_text(
+                json.dumps(
+                    {
+                        "repo": "owner/repo",
+                        "version": "1",
+                        "language": "python",
+                        "docker_specs": {"python_version": "3.11"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            adapter_path = export_root / "adapter_owner_repo.py"
+            adapter_path.write_text('REPO = "owner/repo"\n', encoding="utf-8")
+            (run_root / "attempts.jsonl").write_text(
+                json.dumps(
+                    {
+                        "run_id": "unit-run",
+                        "solver_id": "solver-a",
+                        "instance_id": "inst-1",
+                        "duration_ms": 100,
+                        "cost": {"total_cost": 2.0},
+                        "attempt_state": "succeeded",
+                        "model_patch": "diff --git a/x b/x\n+print('ok')",
+                        "dataset_path": str(dataset_path),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            eval_out = run_root / "eval"
+            instance_results_path = eval_out / "instance_results.jsonl"
+
+            @contextmanager
+            def fake_runtime(*, container_runtime: str, container_host: str | None):
+                self.assertEqual(container_runtime, "podman")
+                self.assertIsNone(container_host)
+                yield "unix:///tmp/podman.sock"
+
+            with (
+                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
+                patch("repogauge.validation.validate.run_eval") as mock_eval,
+            ):
+
+                def _fake_eval(**kwargs):
+                    eval_out.mkdir(parents=True, exist_ok=True)
+                    instance_results_path.write_text(
+                        json.dumps(
+                            {
+                                "instance_id": "inst-1",
+                                "solver_id": "solver-a",
+                                "status": "resolved",
+                                "resolved": True,
+                                "harness_outcome": "resolved",
+                            }
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    return EvalRunSummary(
+                        validation_path=str(eval_out / "validation.jsonl"),
+                        total=1,
+                        resolved=1,
+                        not_resolved=0,
+                        error=0,
+                        skipped=0,
+                        resolve_rate=1.0,
+                        instance_results_path=str(instance_results_path),
+                        dataset_path=str(eval_out / "dataset.resolved.jsonl"),
+                        predictions_path=str(eval_out / "predictions.resolved.jsonl"),
+                    )
+
+                mock_eval.side_effect = _fake_eval
+                result = main(
+                    [
+                        "analyze",
+                        str(run_root),
+                        "--eval-engine",
+                        "local",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                mock_eval.call_args.kwargs["container_host"],
+                "unix:///tmp/podman.sock",
             )
 
     def test_analyze_merge_retries_prefers_retry_rows(self) -> None:

@@ -171,18 +171,24 @@ def test_resolve_host_tool_fallback_for_opencode(monkeypatch, tmp_path: Path) ->
 def test_containerize_environment_rewrites_attempt_root_paths(tmp_path: Path) -> None:
     attempt_root = tmp_path / "attempt-1"
     codex_home = attempt_root / "codex-home"
+    workspace = attempt_root / "workspace"
     command_env = _containerize_environment(
         environment={
             "HOME": str(codex_home),
             "CODEX_HOME": str(codex_home / ".codex"),
+            "PYTHONPATH": str(workspace),
+            "GOCACHE": str(workspace / ".gocache"),
             "PATH": "/usr/bin:/bin",
         },
         attempt_root=attempt_root,
+        workspace_path=workspace,
     )
 
     assert command_env == {
         "HOME": "/repogauge/codex-home",
         "CODEX_HOME": "/repogauge/codex-home/.codex",
+        "PYTHONPATH": "/testbed",
+        "GOCACHE": "/testbed/.gocache",
         "PATH": "/usr/bin:/bin",
     }
 

@@ -147,6 +147,132 @@ def test_run_test_uses_adapter_env_and_parser(
     assert observed["test_spec"] == {"suite": "go"}
 
 
+def test_run_test_uses_container_runtime_when_requested(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: dict[str, object] = {}
+
+    class Adapter:
+        def name(self) -> str:
+            return "go"
+
+        def env_overrides(self, worktree: Path) -> dict[str, str]:
+            return {"WORKTREE": str(worktree), "GOCACHE": str(worktree / ".gocache")}
+
+        def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+            observed["test_cmd_base"] = test_cmd_base
+            return [["go", "test", "./..."]]
+
+        def parse_test_output(
+            self, report: object, test_spec: object | None
+        ) -> dict[str, str]:
+            observed["report"] = report
+            observed["test_spec"] = test_spec
+            return {"pkg.Test": "pass"}
+
+        def test_report_filename(self) -> str | None:
+            return "go-report.json"
+
+    def fake_container_exec(**kwargs):
+        observed["kwargs"] = kwargs
+        return CommandResult(
+            command=kwargs["command"],
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.run_workspace_command_in_container",
+        fake_container_exec,
+    )
+
+    outcomes, raw, attempts = _run_test(
+        tmp_path,
+        test_files=[],
+        test_report_path=tmp_path / "go-report.json",
+        timeout_seconds=5,
+        test_cmd_base="go test ./...",
+        adapter=Adapter(),
+        test_spec={"suite": "go"},
+        attempt_id_prefix="eval-inst-b",
+        container_host="unix:///tmp/podman.sock",
+        adapter_spec={
+            "repo": "owner/repo",
+            "version": "1.0",
+            "language": "go",
+            "docker_specs": {"go_version": "1.22.12"},
+            "install": ["go mod download"],
+        },
+        instance_row={"instance_id": "inst-1", "repo": "owner/repo", "version": "1.0"},
+    )
+
+    assert outcomes == {"pkg.Test": "pass"}
+    assert raw == "[stdout]\nok\n[stderr]\n"
+    assert len(attempts) == 1
+    kwargs = observed["kwargs"]
+    assert kwargs["attempt_id"] == "eval-inst-b-attempt-1"
+    assert kwargs["container_host"] == "unix:///tmp/podman.sock"
+    assert kwargs["artifacts_root"] == tmp_path
+    assert kwargs["command"] == ["go", "test", "./..."]
+    assert kwargs["environment"]["WORKTREE"] == str(tmp_path)
+    assert kwargs["environment"]["GOCACHE"] == str(tmp_path / ".gocache")
+    assert kwargs["adapter_spec"]["language"] == "go"
+    assert observed["test_spec"] == {"suite": "go"}
+
+
+def test_run_test_python_container_uses_container_visible_report_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "outside-junit.xml"
+    observed: dict[str, object] = {}
+
+    def fake_container_exec(**kwargs):
+        observed["kwargs"] = kwargs
+        junit_arg = next(
+            part for part in kwargs["command"] if part.startswith("--junit-xml=")
+        )
+        assert junit_arg == "--junit-xml=/testbed/outside-junit.xml"
+        (tmp_path / "outside-junit.xml").write_text(
+            "<testsuite><testcase classname='tests.test_mod' name='ok' /></testsuite>",
+            encoding="utf-8",
+        )
+        return CommandResult(
+            command=kwargs["command"],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.run_workspace_command_in_container",
+        fake_container_exec,
+    )
+
+    outcomes, _, attempts = _run_test(
+        tmp_path,
+        test_files=[],
+        test_report_path=report_path,
+        timeout_seconds=5,
+        test_cmd_base="pytest",
+        adapter=None,
+        attempt_id_prefix="eval-inst-a",
+        container_host="unix:///tmp/podman.sock",
+        adapter_spec={
+            "repo": "owner/repo",
+            "version": "1.0",
+            "language": "python",
+            "docker_specs": {"python_version": "3.11"},
+            "install": [],
+        },
+        instance_row={"instance_id": "inst-1", "repo": "owner/repo", "version": "1.0"},
+    )
+
+    assert outcomes == {"tests/test_mod.py::ok": "pass"}
+    assert len(attempts) == 1
+    assert observed["kwargs"]["command"][:2] == ["pytest", "--junit-xml=/testbed/outside-junit.xml"]
+
+
 def test_pytest_execution_error_alias_is_preserved() -> None:
     assert PytestExecutionError is TestExecutionError
 

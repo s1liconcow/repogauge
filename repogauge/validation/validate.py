@@ -28,10 +28,11 @@ import shlex
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from repogauge.exec import run_command
 from repogauge.lang import LanguageAdapter, find_adapter
+from repogauge.runner.container_exec import run_workspace_command_in_container
 from repogauge.utils.git import CommandPatchError, apply_patch_text, create_worktree
 from repogauge.validation.junit_parser import (
     JUnitParseError,
@@ -43,6 +44,7 @@ from repogauge.validation.evidence import (
     write_validation_bundle,
 )
 from repogauge.validation.testsel import build_targeted_test_plan
+from swebench.harness.constants import DOCKER_WORKDIR
 
 
 _JUNIT_XML_FLAGS = ("--junit-xml", "--junitxml")
@@ -248,6 +250,61 @@ def _pytest_command_attempts(test_cmd_base: str) -> List[List[str]]:
     return _test_command_attempts(test_cmd_base, adapter=adapter)
 
 
+def _container_safe_command_attempts(
+    attempts: List[List[str]], *, adapter: LanguageAdapter
+) -> List[List[str]]:
+    if adapter.name() != "python":
+        return attempts
+
+    normalized: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for attempt in attempts:
+        if not attempt:
+            continue
+        command = list(attempt)
+        executable = Path(command[0]).name.lower()
+        if executable in {"pytest", "pytest.exe"}:
+            command[0] = "pytest"
+        elif executable.startswith("python"):
+            command[0] = "python"
+        key = tuple(command)
+        if key in seen:
+            continue
+        normalized.append(command)
+        seen.add(key)
+    return normalized or attempts
+
+
+def _container_visible_report_path(worktree: Path, report_path: Path) -> tuple[Path, Path]:
+    host_path = worktree / report_path.name
+    container_path = Path(DOCKER_WORKDIR) / host_path.relative_to(worktree)
+    return host_path, container_path
+
+
+def _default_container_adapter_spec(
+    *,
+    dataset_row: Mapping[str, Any] | None,
+    adapter: LanguageAdapter,
+    test_cmd_base: str,
+    environment_strategy: str,
+) -> Dict[str, Any]:
+    row = dict(dataset_row or {})
+    language = adapter.name()
+    return {
+        "repo": str(row.get("repo", "")).strip(),
+        "version": str(row.get("version", "0.0.0")).strip() or "0.0.0",
+        "language": language,
+        "runtime_version": "",
+        "python_version": "3.11" if language == "python" else "",
+        "pre_install": [],
+        "install": [],
+        "build": [],
+        "test_cmd_base": test_cmd_base,
+        "strategy_name": environment_strategy,
+        "docker_specs": {},
+    }
+
+
 def _test_report_path(temp_root: Path, label: str, adapter: LanguageAdapter) -> Path:
     report_filename = adapter.test_report_filename() or "junit.xml"
     return temp_root / f"{label}_{Path(report_filename).name}"
@@ -262,6 +319,11 @@ def _run_test(
     test_cmd_base: str = "",
     adapter: LanguageAdapter | None = None,
     test_spec: object | None = None,
+    attempt_id_prefix: str = "eval",
+    container_host: str | None = None,
+    adapter_spec: Mapping[str, Any] | None = None,
+    instance_row: Mapping[str, Any] | None = None,
+    environment_strategy: str = "default",
 ) -> Tuple[Dict[str, str], str, List[Dict[str, Any]]]:
     """Run tests in *worktree* with deterministic command retries.
 
@@ -279,17 +341,40 @@ def _run_test(
     attempts: List[Dict[str, Any]] = []
     raw = ""
     last_parse_error: str | None = None
+    containerized = container_host is not None
+    command_attempts = _test_command_attempts(test_cmd_base, adapter=active_adapter)
+    if containerized:
+        command_attempts = _container_safe_command_attempts(
+            command_attempts, adapter=active_adapter
+        )
+    effective_adapter_spec = (
+        dict(adapter_spec)
+        if isinstance(adapter_spec, Mapping)
+        else _default_container_adapter_spec(
+            dataset_row=instance_row,
+            adapter=active_adapter,
+            test_cmd_base=test_cmd_base,
+            environment_strategy=environment_strategy,
+        )
+    )
 
-    for index, base_cmd in enumerate(
-        _test_command_attempts(test_cmd_base, adapter=active_adapter)
-    ):
+    for index, base_cmd in enumerate(command_attempts):
         test_cmd = list(base_cmd)
         report_input: object = test_report_path
         if active_adapter.name() == "python":
-            test_cmd, report_path_to_read = _normalize_junit_output_flag(
-                test_cmd, test_report_path
-            )
-            report_input = report_path_to_read
+            if containerized:
+                host_report_path, container_report_path = _container_visible_report_path(
+                    worktree, test_report_path
+                )
+                test_cmd, _ = _normalize_junit_output_flag(
+                    test_cmd, container_report_path
+                )
+                report_input = host_report_path
+            else:
+                test_cmd, report_path_to_read = _normalize_junit_output_flag(
+                    test_cmd, test_report_path
+                )
+                report_input = report_path_to_read
         else:
             report_glob_getter = getattr(active_adapter, "test_report_glob", None)
             report_filename_getter = getattr(active_adapter, "test_report_filename", None)
@@ -315,9 +400,22 @@ def _run_test(
             cmd += ["--tb=no", "-q"]
         if test_files:
             cmd += test_files
-        result = run_command(
-            cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
-        )
+        if containerized:
+            result = run_workspace_command_in_container(
+                attempt_id=f"{attempt_id_prefix}-attempt-{index + 1}",
+                workspace_path=worktree,
+                command=cmd,
+                timeout_seconds=timeout_seconds,
+                container_host=container_host,
+                artifacts_root=test_report_path.parent,
+                environment=env,
+                adapter_spec=effective_adapter_spec,
+                instance_row=instance_row,
+            )
+        else:
+            result = run_command(
+                cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
+            )
         raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
 
         attempt_entry: Dict[str, Any] = {
@@ -436,6 +534,10 @@ def _run_validation_pass(
     timeout_seconds: int,
     test_cmd_base: str = "",
     adapter: LanguageAdapter | None = None,
+    instance_row: Mapping[str, Any] | None = None,
+    adapter_spec: Mapping[str, Any] | None = None,
+    container_host: str | None = None,
+    environment_strategy: str = "default",
     apply_test_patch: bool = False,
     apply_pred_patch: bool = False,
 ) -> Dict[str, Any]:
@@ -463,6 +565,13 @@ def _run_validation_pass(
             test_cmd_base=test_cmd_base,
             adapter=active_adapter,
             test_spec=test_files or None,
+            attempt_id_prefix=(
+                f"eval-{str((instance_row or {}).get('instance_id', 'instance')).strip() or 'instance'}-{label}"
+            ),
+            container_host=container_host,
+            adapter_spec=adapter_spec,
+            instance_row=instance_row,
+            environment_strategy=environment_strategy,
         )
     except Exception as exc:
         if isinstance(exc, CommandPatchError):
@@ -633,6 +742,9 @@ def _eval_instance(
     timeout_seconds: int,
     test_cmd_base: str = "",
     adapter: LanguageAdapter | None = None,
+    instance_row: Mapping[str, Any] | None = None,
+    adapter_spec: Mapping[str, Any] | None = None,
+    container_host: str | None = None,
     out_root: Path | None = None,
     instance_id: str | None = None,
     environment_strategy: str = "default",
@@ -672,6 +784,10 @@ def _eval_instance(
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
             adapter=active_adapter,
+            instance_row=instance_row,
+            adapter_spec=adapter_spec,
+            container_host=container_host,
+            environment_strategy=environment_strategy,
             apply_test_patch=False,
             apply_pred_patch=False,
         )
@@ -718,6 +834,10 @@ def _eval_instance(
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
             adapter=active_adapter,
+            instance_row=instance_row,
+            adapter_spec=adapter_spec,
+            container_host=container_host,
+            environment_strategy=environment_strategy,
             apply_test_patch=True,
             apply_pred_patch=False,
         )
@@ -765,6 +885,10 @@ def _eval_instance(
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
             adapter=active_adapter,
+            instance_row=instance_row,
+            adapter_spec=adapter_spec,
+            container_host=container_host,
+            environment_strategy=environment_strategy,
             apply_test_patch=True,
             apply_pred_patch=True,
         )
@@ -813,6 +937,10 @@ def _eval_instance(
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
             adapter=active_adapter,
+            instance_row=instance_row,
+            adapter_spec=adapter_spec,
+            container_host=container_host,
+            environment_strategy=environment_strategy,
             apply_test_patch=True,
             apply_pred_patch=False,
         )
@@ -827,6 +955,10 @@ def _eval_instance(
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
             adapter=active_adapter,
+            instance_row=instance_row,
+            adapter_spec=adapter_spec,
+            container_host=container_host,
+            environment_strategy=environment_strategy,
             apply_test_patch=True,
             apply_pred_patch=True,
         )
@@ -992,6 +1124,7 @@ def run_eval(
     repo_root: Optional[Path] = None,
     timeout_seconds: int = 120,
     adapter_spec: Optional[Dict[str, Any]] = None,
+    container_host: str | None = None,
 ) -> EvalRunSummary:
     """Evaluate predictions against a dataset and write ``validation.jsonl``.
 
@@ -1066,6 +1199,9 @@ def run_eval(
             timeout_seconds=timeout_seconds,
             test_cmd_base=test_cmd_base,
             adapter=active_adapter,
+            instance_row=ds,
+            adapter_spec=adapter_spec,
+            container_host=container_host,
             out_root=out_root,
             instance_id=iid,
             environment_strategy=environment_strategy,

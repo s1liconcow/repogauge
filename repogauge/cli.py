@@ -1709,6 +1709,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
             requested_engine = getattr(namespace, "engine", "harness")
             if _prefer_local_eval(dataset_path, requested_engine):
                 from repogauge.validation.validate import run_eval
+                from repogauge.runner.judge import _ensure_container_runtime
 
                 adapter_spec = None
                 if adapter_path is not None:
@@ -1718,13 +1719,19 @@ def _run_command(namespace: argparse.Namespace) -> int:
                             specs_path.read_text(encoding="utf-8")
                         )
                 print("repogauge eval: using local evaluator", file=sys.stderr)
-                eval_summary = run_eval(
-                    dataset_path=dataset_path,
-                    predictions_path=predictions_path,
-                    out_root=out_root,
-                    timeout_seconds=getattr(namespace, "timeout", 120),
-                    adapter_spec=adapter_spec,
+                runtime_context = _ensure_container_runtime(
+                    container_runtime=getattr(namespace, "container_runtime", "podman"),
+                    container_host=getattr(namespace, "container_host", None),
                 )
+                with runtime_context as resolved_container_host:
+                    eval_summary = run_eval(
+                        dataset_path=dataset_path,
+                        predictions_path=predictions_path,
+                        out_root=out_root,
+                        timeout_seconds=getattr(namespace, "timeout", 120),
+                        adapter_spec=adapter_spec,
+                        container_host=resolved_container_host,
+                    )
             else:
                 from repogauge.runner.judge import (
                     JudgeSchedulerConfig,
@@ -2073,6 +2080,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     try:
                         if _prefer_local_eval(dataset_path, eval_engine):
                             from repogauge.validation.validate import run_eval
+                            from repogauge.runner.judge import _ensure_container_runtime
 
                             adapter_spec = None
                             if adapter_path is not None:
@@ -2081,13 +2089,21 @@ def _run_command(namespace: argparse.Namespace) -> int:
                                     adapter_spec = json.loads(
                                         specs_path.read_text(encoding="utf-8")
                                     )
-                            eval_summary = run_eval(
-                                dataset_path=dataset_path,
-                                predictions_path=predictions_path,
-                                out_root=eval_out_root,
-                                timeout_seconds=getattr(namespace, "timeout", 120),
-                                adapter_spec=adapter_spec,
+                            runtime_context = _ensure_container_runtime(
+                                container_runtime=getattr(
+                                    namespace, "container_runtime", "podman"
+                                ),
+                                container_host=getattr(namespace, "container_host", None),
                             )
+                            with runtime_context as resolved_container_host:
+                                eval_summary = run_eval(
+                                    dataset_path=dataset_path,
+                                    predictions_path=predictions_path,
+                                    out_root=eval_out_root,
+                                    timeout_seconds=getattr(namespace, "timeout", 120),
+                                    adapter_spec=adapter_spec,
+                                    container_host=resolved_container_host,
+                                )
                         else:
                             from repogauge.runner.judge import (
                                 JudgeSchedulerConfig,
