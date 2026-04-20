@@ -1,6 +1,7 @@
 import unittest
 
 import json
+import sys
 from contextlib import contextmanager
 from io import StringIO
 from contextlib import redirect_stderr
@@ -458,6 +459,7 @@ class TestCliSurface(unittest.TestCase):
                 mock_eval.call_args.kwargs["container_host"],
                 "unix:///tmp/podman.sock",
             )
+            self.assertIs(mock_eval.call_args.kwargs["progress_stream"], sys.stderr)
 
     def test_eval_records_resolved_dataset_artifacts_in_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

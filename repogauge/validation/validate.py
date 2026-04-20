@@ -26,9 +26,10 @@ import json
 import os
 import shlex
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, TextIO, Tuple
 
 from repogauge.exec import run_command
 from repogauge.lang import LanguageAdapter, find_adapter
@@ -154,6 +155,15 @@ def _write_resolved_eval_artifacts(
         encoding="utf-8",
     )
     return dataset_path, predictions_path
+
+
+def _emit_eval_progress(
+    progress_stream: TextIO | None,
+    message: str,
+) -> None:
+    if progress_stream is None:
+        return
+    print(f"repogauge eval: {message}", file=progress_stream, flush=True)
 
 
 def _resolve_adapter(
@@ -337,7 +347,12 @@ def _run_test(
     ``test_cmd_base`` is taken from the adapter spec when available.
     """
     active_adapter = _resolve_adapter(adapter)
-    env = {**os.environ, **active_adapter.env_overrides(worktree)}
+    adapter_env = active_adapter.env_overrides(worktree)
+    env = (
+        dict(adapter_env)
+        if container_host is not None
+        else {**os.environ, **adapter_env}
+    )
     attempts: List[Dict[str, Any]] = []
     raw = ""
     last_parse_error: str | None = None
@@ -1125,6 +1140,7 @@ def run_eval(
     timeout_seconds: int = 120,
     adapter_spec: Optional[Dict[str, Any]] = None,
     container_host: str | None = None,
+    progress_stream: TextIO | None = None,
 ) -> EvalRunSummary:
     """Evaluate predictions against a dataset and write ``validation.jsonl``.
 
@@ -1157,6 +1173,7 @@ def run_eval(
     dataset_rows = _read_jsonl(dataset_path)
     pred_rows = _read_jsonl(predictions_path)
     pred_by_id = {r["instance_id"]: r for r in pred_rows}
+    total = len(dataset_rows)
 
     out_root.mkdir(parents=True, exist_ok=True)
     validation_path = out_root / "validation.jsonl"
@@ -1164,8 +1181,16 @@ def run_eval(
 
     results: List[Dict[str, Any]] = []
     resolved_count = error_count = skipped_count = 0
+    started_at = time.monotonic()
+    execution_mode = (
+        "via containers" if container_host is not None else "on host worktrees"
+    )
+    _emit_eval_progress(
+        progress_stream,
+        f"evaluating {total} instances locally {execution_mode}",
+    )
 
-    for ds in dataset_rows:
+    for index, ds in enumerate(dataset_rows, start=1):
         iid = ds["instance_id"]
         pred = pred_by_id.get(iid)
         if pred is None:
@@ -1186,6 +1211,16 @@ def run_eval(
                     "PASS_TO_PASS": ds.get("PASS_TO_PASS", []),
                     "metadata": {},
                 }
+            )
+            elapsed_s = time.monotonic() - started_at
+            _emit_eval_progress(
+                progress_stream,
+                (
+                    f"[{index}/{total}] {iid} skipped "
+                    f"(missing prediction) | resolved={resolved_count} "
+                    f"errors={error_count} skipped={skipped_count} "
+                    f"elapsed={elapsed_s:.1f}s"
+                ),
             )
             continue
 
@@ -1255,6 +1290,15 @@ def run_eval(
                 },
             }
         )
+        elapsed_s = time.monotonic() - started_at
+        _emit_eval_progress(
+            progress_stream,
+            (
+                f"[{index}/{total}] {iid} {outcome['status']} "
+                f"| resolved={resolved_count} errors={error_count} "
+                f"skipped={skipped_count} elapsed={elapsed_s:.1f}s"
+            ),
+        )
 
     payload = "".join(json.dumps(r, sort_keys=True) + "\n" for r in results)
     validation_path.write_text(payload, encoding="utf-8")
@@ -1266,7 +1310,6 @@ def run_eval(
         instance_rows=results,
     )
 
-    total = len(dataset_rows)
     return EvalRunSummary(
         validation_path=str(validation_path),
         total=total,

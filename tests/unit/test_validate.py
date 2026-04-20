@@ -1,6 +1,7 @@
 """Validation module regression tests."""
 
 import json
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -151,6 +152,9 @@ def test_run_test_uses_container_runtime_when_requested(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     observed: dict[str, object] = {}
+    monkeypatch.setenv("HOME", "/host/home")
+    monkeypatch.setenv("GOPATH", "/host/go")
+    monkeypatch.setenv("GOMODCACHE", "/host/go/pkg/mod")
 
     class Adapter:
         def name(self) -> str:
@@ -217,6 +221,9 @@ def test_run_test_uses_container_runtime_when_requested(
     assert kwargs["command"] == ["go", "test", "./..."]
     assert kwargs["environment"]["WORKTREE"] == str(tmp_path)
     assert kwargs["environment"]["GOCACHE"] == str(tmp_path / ".gocache")
+    assert "HOME" not in kwargs["environment"]
+    assert "GOPATH" not in kwargs["environment"]
+    assert "GOMODCACHE" not in kwargs["environment"]
     assert kwargs["adapter_spec"]["language"] == "go"
     assert observed["test_spec"] == {"suite": "go"}
 
@@ -1026,3 +1033,93 @@ def test_run_eval_writes_resolved_dataset_and_prediction_rows(
     assert resolved_datasets[0]["instance_id"] == "i-1"
     assert resolved_predictions[0]["instance_id"] == "i-1"
     assert resolved_predictions[0]["model_name_or_path"] == "gold"
+
+
+def test_run_eval_emits_progress_updates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dataset_path = tmp_path / "dataset.jsonl"
+    predictions_path = tmp_path / "predictions.jsonl"
+    out_root = tmp_path / "out"
+
+    dataset_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "instance_id": iid,
+                    "base_commit": "deadbeef",
+                    "problem_statement": "broken",
+                    "FAIL_TO_PASS": [],
+                    "PASS_TO_PASS": [],
+                    "test_patch": "",
+                    "patch": "",
+                    "version": "v1",
+                    "repo": "r",
+                }
+            )
+            for iid in ("i-1", "i-2")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    predictions_path.write_text(
+        json.dumps(
+            {
+                "instance_id": "i-1",
+                "model_name_or_path": "gold",
+                "model_patch": "diff --git a.py b.py\n+ok",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_eval_instance(**kwargs: object) -> dict[str, object]:
+        return {
+            "status": "resolved",
+            "reason": None,
+            "error": None,
+            "failure_code": None,
+            "environment_strategy": "default",
+            "test_strategy": "full_pytest",
+            "targeted_test_cmd": "python -m pytest",
+            "targeted_test_inputs": [],
+            "log_a": "",
+            "log_b": "",
+            "log_c": "",
+            "log_b_rerun": "",
+            "log_c_rerun": "",
+            "run_a": {},
+            "run_b": {},
+            "run_c": {},
+            "run_b_rerun": {},
+            "run_c_rerun": {},
+            "run_a_attempts": [],
+            "run_b_attempts": [],
+            "run_c_attempts": [],
+            "run_b_rerun_attempts": [],
+            "run_c_rerun_attempts": [],
+            "flake_runs": 0,
+            "FAIL_TO_PASS": [],
+            "PASS_TO_PASS": [],
+            "resolved": True,
+        }
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate._eval_instance", fake_eval_instance
+    )
+
+    progress = StringIO()
+    run_eval(
+        dataset_path=dataset_path,
+        predictions_path=predictions_path,
+        out_root=out_root,
+        repo_root=tmp_path,
+        container_host="unix:///tmp/podman.sock",
+        progress_stream=progress,
+    )
+
+    lines = [line for line in progress.getvalue().splitlines() if line.strip()]
+    assert lines[0] == "repogauge eval: evaluating 2 instances locally via containers"
+    assert any("[1/2] i-1 resolved" in line for line in lines)
+    assert any("[2/2] i-2 skipped (missing prediction)" in line for line in lines)

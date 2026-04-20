@@ -1731,6 +1731,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                         timeout_seconds=getattr(namespace, "timeout", 120),
                         adapter_spec=adapter_spec,
                         container_host=resolved_container_host,
+                        progress_stream=sys.stderr,
                     )
             else:
                 from repogauge.runner.judge import (
@@ -2103,6 +2104,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
                                     timeout_seconds=getattr(namespace, "timeout", 120),
                                     adapter_spec=adapter_spec,
                                     container_host=resolved_container_host,
+                                    progress_stream=sys.stderr,
                                 )
                         else:
                             from repogauge.runner.judge import (
