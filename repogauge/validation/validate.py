@@ -22,6 +22,7 @@ so editable installs are not required.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import shlex
@@ -33,7 +34,11 @@ from typing import Any, Dict, List, Mapping, Optional, TextIO, Tuple
 
 from repogauge.exec import run_command
 from repogauge.lang import LanguageAdapter, find_adapter
-from repogauge.runner.container_exec import run_workspace_command_in_container
+from repogauge.runner.container_exec import (
+    prepare_local_eval_image,
+    run_workspace_command_in_container,
+)
+from repogauge.runner.progress import CountedProgressReporter
 from repogauge.utils.git import CommandPatchError, apply_patch_text, create_worktree
 from repogauge.validation.junit_parser import (
     JUnitParseError,
@@ -164,6 +169,75 @@ def _emit_eval_progress(
     if progress_stream is None:
         return
     print(f"repogauge eval: {message}", file=progress_stream, flush=True)
+
+
+def _result_row_from_outcome(
+    *,
+    ds: Mapping[str, Any],
+    pred: Mapping[str, Any] | None,
+    outcome: Mapping[str, Any] | None,
+    environment_strategy: str,
+) -> Dict[str, Any]:
+    iid = str(ds["instance_id"])
+    if pred is None:
+        return {
+            "instance_id": iid,
+            "solver_id": "",
+            "status": "skipped",
+            "error": "no matching prediction",
+            "reason": "missing_prediction",
+            "resolved": False,
+            "targeted_test_cmd": "",
+            "targeted_test_inputs": [],
+            "environment_strategy": environment_strategy,
+            "test_strategy": "full_command",
+            "FAIL_TO_PASS": ds.get("FAIL_TO_PASS", []),
+            "PASS_TO_PASS": ds.get("PASS_TO_PASS", []),
+            "metadata": {},
+        }
+
+    assert outcome is not None
+    return {
+        "instance_id": iid,
+        "solver_id": str(
+            pred.get("solver_id") or pred.get("model_name_or_path") or ""
+        ).strip(),
+        "status": outcome["status"],
+        "reason": outcome["reason"],
+        "failure_code": outcome["failure_code"],
+        "error": outcome["error"],
+        "resolved": outcome["resolved"],
+        "environment_strategy": outcome["environment_strategy"],
+        "test_strategy": outcome["test_strategy"],
+        "targeted_test_cmd": outcome["targeted_test_cmd"],
+        "targeted_test_inputs": outcome["targeted_test_inputs"],
+        "FAIL_TO_PASS": outcome["FAIL_TO_PASS"],
+        "PASS_TO_PASS": outcome["PASS_TO_PASS"],
+        "metadata": {
+            "base_commit": ds["base_commit"],
+            "run_a": outcome["run_a"],
+            "run_b": outcome["run_b"],
+            "run_c": outcome["run_c"],
+            "run_b_rerun": outcome["run_b_rerun"],
+            "run_c_rerun": outcome["run_c_rerun"],
+            "run_a_count": len(outcome["run_a"]),
+            "run_b_count": len(outcome["run_b"]),
+            "run_c_count": len(outcome["run_c"]),
+            "run_b_rerun_count": len(outcome["run_b_rerun"]),
+            "run_c_rerun_count": len(outcome["run_c_rerun"]),
+            "flake_runs": outcome["flake_runs"],
+            "run_b_attempts": outcome["run_b_attempts"],
+            "run_c_attempts": outcome["run_c_attempts"],
+            "run_a_attempts": outcome["run_a_attempts"],
+            "run_b_rerun_attempts": outcome["run_b_rerun_attempts"],
+            "run_c_rerun_attempts": outcome["run_c_rerun_attempts"],
+            "log_b": tail(outcome["log_b"]),
+            "log_c": tail(outcome["log_c"]),
+            "log_b_rerun": tail(outcome["log_b_rerun"]),
+            "log_c_rerun": tail(outcome["log_c_rerun"]),
+            "validation_bundle": outcome.get("validation_bundle", {}),
+        },
+    }
 
 
 def _resolve_adapter(
@@ -1141,6 +1215,7 @@ def run_eval(
     adapter_spec: Optional[Dict[str, Any]] = None,
     container_host: str | None = None,
     progress_stream: TextIO | None = None,
+    jobs: int = 4,
 ) -> EvalRunSummary:
     """Evaluate predictions against a dataset and write ``validation.jsonl``.
 
@@ -1179,130 +1254,110 @@ def run_eval(
     validation_path = out_root / "validation.jsonl"
     instance_results_path = out_root / "instance_results.jsonl"
 
-    results: List[Dict[str, Any]] = []
+    results_by_index: Dict[int, Dict[str, Any]] = {}
     resolved_count = error_count = skipped_count = 0
     started_at = time.monotonic()
     execution_mode = (
         "via containers" if container_host is not None else "on host worktrees"
     )
-    _emit_eval_progress(
-        progress_stream,
-        f"evaluating {total} instances locally {execution_mode}",
+    progress = CountedProgressReporter(
+        prefix="repogauge eval",
+        total=total,
+        noun="evaluating instances",
+        stream=progress_stream,
     )
-
-    for index, ds in enumerate(dataset_rows, start=1):
-        iid = ds["instance_id"]
-        _emit_eval_progress(
-            progress_stream,
-            f"starting [{index}/{total}] {iid}",
-        )
-        pred = pred_by_id.get(iid)
-        if pred is None:
-            skipped_count += 1
-            results.append(
-                {
-                    "instance_id": iid,
-                    "solver_id": "",
-                    "status": "skipped",
-                    "error": "no matching prediction",
-                    "reason": "missing_prediction",
-                    "resolved": False,
-                    "targeted_test_cmd": "",
-                    "targeted_test_inputs": [],
-                    "environment_strategy": environment_strategy,
-                    "test_strategy": "full_command",
-                    "FAIL_TO_PASS": ds.get("FAIL_TO_PASS", []),
-                    "PASS_TO_PASS": ds.get("PASS_TO_PASS", []),
-                    "metadata": {},
-                }
+    try:
+        progress.start(f"evaluating {total} instances locally {execution_mode}")
+        if container_host is not None and adapter_spec is not None and dataset_rows:
+            progress.start("preparing reusable container image layers")
+            prepare_local_eval_image(
+                attempt_id="eval-image-prewarm",
+                attempt_root=out_root / "_image_prep",
+                instance_row=dataset_rows[0],
+                adapter_spec=adapter_spec,
+                container_host=container_host,
             )
-            elapsed_s = time.monotonic() - started_at
-            _emit_eval_progress(
-                progress_stream,
-                (
-                    f"[{index}/{total}] {iid} skipped "
-                    f"(missing prediction) | resolved={resolved_count} "
-                    f"errors={error_count} skipped={skipped_count} "
-                    f"elapsed={elapsed_s:.1f}s"
-                ),
+            progress.start("reused or built local evaluation image layers")
+
+        def _evaluate(ds: Dict[str, Any], pred: Dict[str, Any]) -> Dict[str, Any]:
+            return _eval_instance(
+                repo_root=repo_root,
+                base_commit=ds["base_commit"],
+                pred_patch=pred.get("model_patch", ""),
+                test_patch=ds.get("test_patch", ""),
+                declared_ftp=ds.get("FAIL_TO_PASS") or [],
+                declared_ptp=ds.get("PASS_TO_PASS") or [],
+                timeout_seconds=timeout_seconds,
+                test_cmd_base=test_cmd_base,
+                adapter=active_adapter,
+                instance_row=ds,
+                adapter_spec=adapter_spec,
+                container_host=container_host,
+                out_root=out_root,
+                instance_id=str(ds["instance_id"]),
+                environment_strategy=environment_strategy,
             )
-            continue
 
-        outcome = _eval_instance(
-            repo_root=repo_root,
-            base_commit=ds["base_commit"],
-            pred_patch=pred.get("model_patch", ""),
-            test_patch=ds.get("test_patch", ""),
-            declared_ftp=ds.get("FAIL_TO_PASS") or [],
-            declared_ptp=ds.get("PASS_TO_PASS") or [],
-            timeout_seconds=timeout_seconds,
-            test_cmd_base=test_cmd_base,
-            adapter=active_adapter,
-            instance_row=ds,
-            adapter_spec=adapter_spec,
-            container_host=container_host,
-            out_root=out_root,
-            instance_id=iid,
-            environment_strategy=environment_strategy,
+        future_map: Dict[Any, tuple[int, Dict[str, Any], Dict[str, Any]]] = {}
+        max_workers = max(1, jobs)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for index, ds in enumerate(dataset_rows, start=1):
+                iid = str(ds["instance_id"])
+                progress.start(f"starting [{index}/{total}] {iid}")
+                pred = pred_by_id.get(iid)
+                if pred is None:
+                    skipped_count += 1
+                    results_by_index[index] = _result_row_from_outcome(
+                        ds=ds,
+                        pred=None,
+                        outcome=None,
+                        environment_strategy=environment_strategy,
+                    )
+                    elapsed_s = time.monotonic() - started_at
+                    progress.advance(
+                        status="skipped",
+                        message=(
+                            f"[{index}/{total}] {iid} skipped (missing prediction) "
+                            f"| resolved={resolved_count} errors={error_count} "
+                            f"skipped={skipped_count} elapsed={elapsed_s:.1f}s"
+                        ),
+                    )
+                    continue
+                future = pool.submit(_evaluate, ds, pred)
+                future_map[future] = (index, ds, pred)
+
+            for future in as_completed(future_map):
+                index, ds, pred = future_map[future]
+                iid = str(ds["instance_id"])
+                outcome = future.result()
+                if outcome["status"] == "error":
+                    error_count += 1
+                elif outcome["resolved"]:
+                    resolved_count += 1
+                results_by_index[index] = _result_row_from_outcome(
+                    ds=ds,
+                    pred=pred,
+                    outcome=outcome,
+                    environment_strategy=environment_strategy,
+                )
+                elapsed_s = time.monotonic() - started_at
+                progress.advance(
+                    status=str(outcome["status"]),
+                    message=(
+                        f"[{index}/{total}] {iid} {outcome['status']} "
+                        f"| resolved={resolved_count} errors={error_count} "
+                        f"skipped={skipped_count} elapsed={elapsed_s:.1f}s"
+                    ),
+                )
+    finally:
+        progress.close(
+            summary=(
+                f"finished local eval: resolved={resolved_count} "
+                f"errors={error_count} skipped={skipped_count} total={total}"
+            )
         )
 
-        if outcome["status"] == "error":
-            error_count += 1
-        elif outcome["resolved"]:
-            resolved_count += 1
-
-        results.append(
-            {
-                "instance_id": iid,
-                "solver_id": str(
-                    pred.get("solver_id") or pred.get("model_name_or_path") or ""
-                ).strip(),
-                "status": outcome["status"],
-                "reason": outcome["reason"],
-                "failure_code": outcome["failure_code"],
-                "error": outcome["error"],
-                "resolved": outcome["resolved"],
-                "environment_strategy": outcome["environment_strategy"],
-                "test_strategy": outcome["test_strategy"],
-                "targeted_test_cmd": outcome["targeted_test_cmd"],
-                "targeted_test_inputs": outcome["targeted_test_inputs"],
-                "FAIL_TO_PASS": outcome["FAIL_TO_PASS"],
-                "PASS_TO_PASS": outcome["PASS_TO_PASS"],
-                "metadata": {
-                    "base_commit": ds["base_commit"],
-                    "run_a": outcome["run_a"],
-                    "run_b": outcome["run_b"],
-                    "run_c": outcome["run_c"],
-                    "run_b_rerun": outcome["run_b_rerun"],
-                    "run_c_rerun": outcome["run_c_rerun"],
-                    "run_a_count": len(outcome["run_a"]),
-                    "run_b_count": len(outcome["run_b"]),
-                    "run_c_count": len(outcome["run_c"]),
-                    "run_b_rerun_count": len(outcome["run_b_rerun"]),
-                    "run_c_rerun_count": len(outcome["run_c_rerun"]),
-                    "flake_runs": outcome["flake_runs"],
-                    "run_b_attempts": outcome["run_b_attempts"],
-                    "run_c_attempts": outcome["run_c_attempts"],
-                    "run_a_attempts": outcome["run_a_attempts"],
-                    "run_b_rerun_attempts": outcome["run_b_rerun_attempts"],
-                    "run_c_rerun_attempts": outcome["run_c_rerun_attempts"],
-                    "log_b": tail(outcome["log_b"]),
-                    "log_c": tail(outcome["log_c"]),
-                    "log_b_rerun": tail(outcome["log_b_rerun"]),
-                    "log_c_rerun": tail(outcome["log_c_rerun"]),
-                    "validation_bundle": outcome.get("validation_bundle", {}),
-                },
-            }
-        )
-        elapsed_s = time.monotonic() - started_at
-        _emit_eval_progress(
-            progress_stream,
-            (
-                f"[{index}/{total}] {iid} {outcome['status']} "
-                f"| resolved={resolved_count} errors={error_count} "
-                f"skipped={skipped_count} elapsed={elapsed_s:.1f}s"
-            ),
-        )
+    results = [results_by_index[index] for index in sorted(results_by_index)]
 
     payload = "".join(json.dumps(r, sort_keys=True) + "\n" for r in results)
     validation_path.write_text(payload, encoding="utf-8")

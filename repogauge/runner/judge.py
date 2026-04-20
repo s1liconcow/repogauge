@@ -11,7 +11,6 @@ from contextlib import contextmanager
 import importlib.util
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -28,6 +27,14 @@ from typing import (
     Mapping,
     MutableMapping,
     Optional,
+)
+
+from repogauge.runner.runtime import (
+    ContainerRuntimeError,
+    coerce_container_host as _resolve_container_host,
+    is_unix_socket_reachable as _runtime_is_unix_socket_reachable,
+    temporary_environment as _temporary_environment,
+    unix_socket_path as _runtime_unix_socket_path,
 )
 
 
@@ -75,72 +82,27 @@ class JudgeBatchResult:
     batch_key: str
 
 
-def _resolve_container_host(
-    *, container_runtime: str, container_host: str | None
-) -> str | None:
-    runtime = _coerce_text(container_runtime).lower() or "docker"
-    if runtime not in {"docker", "podman"}:
-        raise HarnessEvaluationError(
-            f"unsupported container runtime: {container_runtime}"
-        )
-
-    explicit = _coerce_text(container_host)
-    if explicit:
-        return explicit
-    if runtime == "podman":
-        return "unix:///tmp/podman.sock"
-    return None
-
-
-@contextmanager
-def _temporary_environment(overrides: Mapping[str, str | None]) -> Iterator[None]:
-    original: dict[str, str | None] = {}
-    try:
-        for key, value in overrides.items():
-            original[key] = os.environ.get(key)
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        yield
-    finally:
-        for key, value in original.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
 def _unix_socket_path(container_host: str | None) -> Path | None:
-    host = _coerce_text(container_host)
-    if not host.startswith("unix://"):
-        return None
-    return Path(host.removeprefix("unix://"))
+    return _runtime_unix_socket_path(container_host)
 
 
 def _is_unix_socket_reachable(socket_path: Path) -> bool:
-    if not socket_path.exists():
-        return False
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.settimeout(0.2)
-        sock.connect(str(socket_path))
-        return True
-    except OSError:
-        return False
-    finally:
-        sock.close()
+    return _runtime_is_unix_socket_reachable(socket_path)
 
 
 @contextmanager
 def _ensure_container_runtime(
     *, container_runtime: str, container_host: str | None
 ) -> Iterator[str | None]:
-    runtime = _coerce_text(container_runtime).lower() or "docker"
-    host = _resolve_container_host(
-        container_runtime=runtime,
-        container_host=container_host,
-    )
+    try:
+        runtime = _coerce_text(container_runtime).lower() or "docker"
+        host = _resolve_container_host(
+            container_runtime=runtime,
+            container_host=container_host,
+        )
+    except ContainerRuntimeError as exc:
+        raise HarnessEvaluationError(str(exc)) from exc
+
     if runtime != "podman":
         yield host
         return

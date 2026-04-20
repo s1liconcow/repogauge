@@ -3,11 +3,8 @@
 # Usage: scripts/gauge_sample.sh SAMPLE_PATH [--out DIR] [--max-commits N]
 #                                 [--decisions FILE] [--matrix PATH]
 #                                 [--run-llm-mode off|local_only|allow_remote]
-#                                 [--eval-workers N] [--eval-batch-size N]
-#                                 [--eval-max-parallel-batches N]
-#                                 [--eval-workers-per-batch N]
+#                                 [--jobs N]
 #                                 [--eval-timeout SECONDS]
-#                                 [--eval-engine harness|local|auto]
 #                                 [--eval-container-runtime docker|podman]
 #                                 [--eval-container-host URI]
 
@@ -31,12 +28,8 @@ Options:
                                      Default: examples/matrix.compare_cli.yaml
   --run-llm-mode MODE                off|local_only|allow_remote for run/analyze.
                                      Default: allow_remote
-  --eval-workers N                   Eval workers. Default: 4
-  --eval-batch-size N                Eval batch size. Default: 32
-  --eval-max-parallel-batches N      Eval max parallel batches. Default: 1
-  --eval-workers-per-batch N         Eval workers per batch. Default: 1
+  --jobs N                           Parallel jobs for eval/run/analyze. Default: 4
   --eval-timeout SECONDS             Eval timeout per instance. Default: 120
-  --eval-engine ENGINE               harness|local|auto. Default: local
   --eval-container-runtime RUNTIME   docker|podman. Default: podman
   --eval-container-host URI          Optional container host URI
 EOF
@@ -53,12 +46,8 @@ MAX_COMMITS=100
 DECISIONS_FILE=""
 MATRIX_PATH="$REPOGAUGE_ROOT/examples/matrix.compare_cli.yaml"
 RUN_LLM_MODE="allow_remote"
-EVAL_WORKERS=4
-EVAL_BATCH_SIZE=32
-EVAL_MAX_PARALLEL_BATCHES=1
-EVAL_WORKERS_PER_BATCH=1
+JOBS=4
 EVAL_TIMEOUT=120
-EVAL_ENGINE="local"
 EVAL_CONTAINER_RUNTIME="podman"
 EVAL_CONTAINER_HOST=""
 
@@ -69,12 +58,8 @@ while [[ $# -gt 0 ]]; do
         --decisions) DECISIONS_FILE="$2"; shift 2 ;;
         --matrix) MATRIX_PATH="$2"; shift 2 ;;
         --run-llm-mode) RUN_LLM_MODE="$2"; shift 2 ;;
-        --eval-workers) EVAL_WORKERS="$2"; shift 2 ;;
-        --eval-batch-size) EVAL_BATCH_SIZE="$2"; shift 2 ;;
-        --eval-max-parallel-batches) EVAL_MAX_PARALLEL_BATCHES="$2"; shift 2 ;;
-        --eval-workers-per-batch) EVAL_WORKERS_PER_BATCH="$2"; shift 2 ;;
+        --jobs) JOBS="$2"; shift 2 ;;
         --eval-timeout) EVAL_TIMEOUT="$2"; shift 2 ;;
-        --eval-engine) EVAL_ENGINE="$2"; shift 2 ;;
         --eval-container-runtime) EVAL_CONTAINER_RUNTIME="$2"; shift 2 ;;
         --eval-container-host) EVAL_CONTAINER_HOST="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
@@ -172,12 +157,8 @@ EVAL_ARGS=(
     eval "$EXPORT_OUT"
     --gold
     --out "$EVAL_OUT"
-    --workers "$EVAL_WORKERS"
-    --batch-size "$EVAL_BATCH_SIZE"
-    --max-parallel-batches "$EVAL_MAX_PARALLEL_BATCHES"
-    --workers-per-batch "$EVAL_WORKERS_PER_BATCH"
+    --jobs "$JOBS"
     --timeout "$EVAL_TIMEOUT"
-    --engine "$EVAL_ENGINE"
     --container-runtime "$EVAL_CONTAINER_RUNTIME"
     --llm-mode off
 )
@@ -191,6 +172,7 @@ RUN_ARGS=(
     run "$MATRIX_PATH"
     --dataset "$EVAL_OUT/dataset.resolved.jsonl"
     --out "$RUN_OUT"
+    --jobs "$JOBS"
     --llm-mode "$RUN_LLM_MODE"
     --container-runtime "$EVAL_CONTAINER_RUNTIME"
 )
@@ -219,7 +201,7 @@ if [[ -f "$ATTEMPTS_JSONL" || -f "$ATTEMPTS_PARQUET" ]]; then
     echo "==> analyze: evaluating solver patches and building reports"
     ANALYZE_ARGS=(
         analyze "$RUN_ROOT"
-        --eval-engine "$EVAL_ENGINE"
+        --jobs "$JOBS"
         --llm-mode "$RUN_LLM_MODE"
         --container-runtime "$EVAL_CONTAINER_RUNTIME"
     )

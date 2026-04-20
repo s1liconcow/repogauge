@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from repogauge.config import AttemptRow, JobRow
+from repogauge.runner.progress import CountedProgressReporter
 
 from .features import build_task_feature_bundle
 from .normalize_patch import PatchNormalizationError, normalize_solver_output
@@ -208,6 +209,9 @@ def _coerce_attempt_status(status: str) -> str:
 
 
 class _ProgressReporter:
+    def start(self, label: str) -> None:
+        """Record one job beginning execution."""
+
     def update(self, status: str) -> None:
         """Record one completed job."""
 
@@ -217,6 +221,38 @@ class _ProgressReporter:
 
 class _NullProgressReporter(_ProgressReporter):
     pass
+
+
+class _RichProgressReporter(_ProgressReporter):
+    def __init__(self, total: int) -> None:
+        self._reporter = CountedProgressReporter(
+            prefix="repogauge run",
+            total=total,
+            noun="solver jobs",
+            stream=sys.stderr,
+        )
+        self._reporter.start(f"executing {total} solver jobs")
+
+    def start(self, label: str) -> None:
+        self._reporter.start(f"starting {label}")
+
+    def update(self, status: str) -> None:
+        self._reporter.advance(
+            status=status,
+            message=(
+                "job completed "
+                f"status={_coerce_attempt_status(status)} "
+                f"ok={self._reporter.counts[SolverAttemptState.SUCCEEDED]} "
+                f"skipped={self._reporter.counts[SolverAttemptState.SKIPPED]} "
+                f"invalid={self._reporter.counts[SolverAttemptState.INVALID_PATCH]} "
+                f"failed={self._reporter.counts[SolverAttemptState.FAILED]} "
+                f"timed_out={self._reporter.counts[SolverAttemptState.TIMED_OUT]} "
+                f"budget={self._reporter.counts[SolverAttemptState.BUDGET_EXCEEDED]}"
+            ),
+        )
+
+    def close(self) -> None:
+        self._reporter.close(summary="finished solver execution")
 
 
 class _TqdmProgressReporter(_ProgressReporter):
@@ -265,7 +301,11 @@ class _TqdmProgressReporter(_ProgressReporter):
 
 
 def _create_progress_reporter(total: int) -> _ProgressReporter:
-    if total < 1 or tqdm is None:
+    if total < 1:
+        return _NullProgressReporter()
+    if hasattr(sys.stderr, "isatty") and sys.stderr.isatty():
+        return _RichProgressReporter(total)
+    if tqdm is None:
         return _NullProgressReporter()
     return _TqdmProgressReporter(total)
 
@@ -478,6 +518,9 @@ class SolverScheduler:
                         raise SolverSchedulerError(
                             f"no adapter for solver '{job.solver_id}'"
                         )
+                    progress_start = getattr(progress, "start", None)
+                    if callable(progress_start):
+                        progress_start(f"{job.solver_id} {job.instance_id}")
 
                     future = pool.submit(
                         self._execute_job,

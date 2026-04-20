@@ -10,12 +10,12 @@ import shlex
 import shutil
 import threading
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
 from repogauge.exec import CommandResult
+from repogauge.runner.runtime import docker_client
 from swebench.harness.constants import BASE_IMAGE_BUILD_DIR, DEFAULT_DOCKER_SPECS
 from swebench.harness.constants import DOCKER_USER, DOCKER_WORKDIR
 from swebench.harness.constants import ENV_IMAGE_BUILD_DIR
@@ -55,6 +55,8 @@ _CONTAINER_ENV_DROP_KEYS = frozenset(
     }
 )
 _CONTAINER_ENV_DROP_PREFIXES = ("CONDA_",)
+_IMAGE_PREP_LOCK = threading.Lock()
+_IMAGE_PREP_LOCKS: dict[str, threading.Lock] = {}
 
 
 class WorkspaceContainerError(RuntimeError):
@@ -89,31 +91,13 @@ def _sanitize_container_name(value: str) -> str:
     return normalized.lower()[:120]
 
 
-@contextmanager
-def _temporary_environment(overrides: Mapping[str, str | None]):
-    original: dict[str, str | None] = {}
-    try:
-        for key, value in overrides.items():
-            original[key] = os.environ.get(key)
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        yield
-    finally:
-        for key, value in original.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-def _docker_client(*, container_host: str | None):
-    import docker as docker_module  # type: ignore[import]
-
-    overrides = {"DOCKER_HOST": container_host} if container_host else {}
-    with _temporary_environment(overrides):
-        return docker_module.from_env()
+def _image_prep_lock(key: str) -> threading.Lock:
+    with _IMAGE_PREP_LOCK:
+        lock = _IMAGE_PREP_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _IMAGE_PREP_LOCKS[key] = lock
+        return lock
 
 
 def _resolve_image(
@@ -223,37 +207,41 @@ def _resolve_image_from_adapter_spec(
     logger = setup_logger(attempt_id, attempt_root / "container_image.log", mode="a")
     try:
         merged_specs = {**DEFAULT_DOCKER_SPECS, **docker_specs}
-        try:
-            client.images.get(base_image_key)
-        except docker_errors.ImageNotFound:
-            build_image(
-                image_name=base_image_key,
-                setup_scripts={},
-                dockerfile=get_dockerfile_base(platform, arch, language, **merged_specs),
-                platform=platform,
-                client=client,
-                build_dir=BASE_IMAGE_BUILD_DIR / base_image_key.replace(":", "__"),
-                nocache=False,
-            )
+        with _image_prep_lock(base_image_key):
+            try:
+                client.images.get(base_image_key)
+            except docker_errors.ImageNotFound:
+                build_image(
+                    image_name=base_image_key,
+                    setup_scripts={},
+                    dockerfile=get_dockerfile_base(
+                        platform, arch, language, **merged_specs
+                    ),
+                    platform=platform,
+                    client=client,
+                    build_dir=BASE_IMAGE_BUILD_DIR / base_image_key.replace(":", "__"),
+                    nocache=False,
+                )
 
-        try:
-            client.images.get(env_image_key)
-        except docker_errors.ImageNotFound:
-            build_image(
-                image_name=env_image_key,
-                setup_scripts={"setup_env.sh": "#!/bin/bash\nset -euxo pipefail\n"},
-                dockerfile=get_dockerfile_env(
-                    platform,
-                    arch,
-                    language,
-                    base_image_key,
-                    **merged_specs,
-                ),
-                platform=platform,
-                client=client,
-                build_dir=ENV_IMAGE_BUILD_DIR / env_image_key.replace(":", "__"),
-                nocache=False,
-            )
+        with _image_prep_lock(env_image_key):
+            try:
+                client.images.get(env_image_key)
+            except docker_errors.ImageNotFound:
+                build_image(
+                    image_name=env_image_key,
+                    setup_scripts={"setup_env.sh": "#!/bin/bash\nset -euxo pipefail\n"},
+                    dockerfile=get_dockerfile_env(
+                        platform,
+                        arch,
+                        language,
+                        base_image_key,
+                        **merged_specs,
+                    ),
+                    platform=platform,
+                    client=client,
+                    build_dir=ENV_IMAGE_BUILD_DIR / env_image_key.replace(":", "__"),
+                    nocache=False,
+                )
     finally:
         close_logger(logger)
 
@@ -263,6 +251,25 @@ def _resolve_image_from_adapter_spec(
         cap_add=cap_add,
         setup_commands=_adapter_setup_commands(adapter_spec),
     )
+
+
+def prepare_local_eval_image(
+    *,
+    attempt_id: str,
+    attempt_root: Path,
+    instance_row: Mapping[str, object],
+    adapter_spec: Mapping[str, object],
+    container_host: str | None,
+) -> str:
+    client = docker_client(container_host=container_host)
+    resolved = _resolve_image_from_adapter_spec(
+        attempt_id=attempt_id,
+        attempt_root=attempt_root,
+        instance_row=instance_row,
+        adapter_spec=adapter_spec,
+        client=client,
+    )
+    return resolved.image
 
 
 def _exec_in_container(
@@ -685,7 +692,7 @@ def run_workspace_command_in_container(
         if path.exists():
             path.unlink()
 
-    client = _docker_client(container_host=container_host)
+    client = docker_client(container_host=container_host)
     container = None
     logger = setup_logger(attempt_id, attempt_root / "container_run.log", mode="a")
     try:
@@ -795,7 +802,7 @@ def run_solver_command_in_container(
             path.unlink()
     prompt_path.write_text(prompt, encoding="utf-8")
 
-    client = _docker_client(container_host=container_host)
+    client = docker_client(container_host=container_host)
     container = None
     logger = setup_logger(attempt_id, attempt_root / "container_run.log", mode="a")
     try:

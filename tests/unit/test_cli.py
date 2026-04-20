@@ -9,7 +9,6 @@ from unittest.mock import Mock, patch
 import tempfile
 from pathlib import Path
 import yaml
-from repogauge.runner.judge import HarnessRunSummary
 from repogauge.runner.scheduler import SolverJobProgress, SolverScheduleResult
 from repogauge.validation.validate import EvalRunSummary
 
@@ -314,8 +313,8 @@ class TestCliSurface(unittest.TestCase):
             )
 
             out_root = Path(workspace) / "out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -323,7 +322,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                 )
                 result = main(
                     ["eval", str(dataset_path), "--gold", "--out", str(out_root)]
@@ -331,10 +329,7 @@ class TestCliSurface(unittest.TestCase):
 
             self.assertEqual(result, 0)
             mock_eval.assert_called_once()
-            self.assertTrue(
-                mock_eval.call_args.kwargs["gold_if_missing"],
-                "gold flag should enable missing-predictions generation",
-            )
+            self.assertEqual(mock_eval.call_args.kwargs["jobs"], 4)
 
     def test_eval_prefers_dataset_directory_files_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
@@ -367,8 +362,8 @@ class TestCliSurface(unittest.TestCase):
             )
 
             out_root = Path(workspace) / "out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -376,7 +371,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                 )
                 result = main(
                     ["eval", str(dataset_dir), "--gold", "--out", str(out_root)]
@@ -393,7 +387,7 @@ class TestCliSurface(unittest.TestCase):
                 predictions_path,
             )
 
-    def test_eval_local_engine_uses_in_tree_validator(self) -> None:
+    def test_eval_uses_shared_containerized_validator(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             repo = Path(workspace) / "repo"
             repo.mkdir()
@@ -419,16 +413,7 @@ class TestCliSurface(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            @contextmanager
-            def fake_runtime(*, container_runtime: str, container_host: str | None):
-                self.assertEqual(container_runtime, "podman")
-                self.assertIsNone(container_host)
-                yield "unix:///tmp/podman.sock"
-
-            with (
-                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
-                patch("repogauge.validation.validate.run_eval") as mock_eval,
-            ):
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
                 mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
@@ -446,8 +431,6 @@ class TestCliSurface(unittest.TestCase):
                         "eval",
                         str(dataset_path),
                         "--gold",
-                        "--engine",
-                        "local",
                         "--out",
                         str(out_root),
                     ]
@@ -455,11 +438,8 @@ class TestCliSurface(unittest.TestCase):
 
             self.assertEqual(result, 0)
             mock_eval.assert_called_once()
-            self.assertEqual(
-                mock_eval.call_args.kwargs["container_host"],
-                "unix:///tmp/podman.sock",
-            )
-            self.assertIs(mock_eval.call_args.kwargs["progress_stream"], sys.stderr)
+            self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "podman")
+            self.assertIsNone(mock_eval.call_args.kwargs["container_host"])
 
     def test_eval_records_resolved_dataset_artifacts_in_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
@@ -478,8 +458,8 @@ class TestCliSurface(unittest.TestCase):
             )
 
             out_root = Path(workspace) / "out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -487,7 +467,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                     dataset_path=str(out_root / "dataset.resolved.jsonl"),
                     predictions_path=str(out_root / "predictions.resolved.jsonl"),
                 )
@@ -558,8 +537,8 @@ class TestCliSurface(unittest.TestCase):
             )
 
             out_root = Path(workspace) / "out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -567,7 +546,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                 )
                 result = main(
                     ["eval", str(dataset_root), "--gold", "--out", str(out_root)]
@@ -603,7 +581,7 @@ class TestCliSurface(unittest.TestCase):
             result = main(["eval", str(dataset_path), "--out", str(out_root)])
             self.assertEqual(result, 1)
 
-    def test_eval_with_predictions_calls_harness_runner(self) -> None:
+    def test_eval_with_predictions_calls_shared_runner(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             dataset_path = Path(workspace) / "dataset.jsonl"
             dataset_path.write_text(
@@ -631,8 +609,8 @@ class TestCliSurface(unittest.TestCase):
                 encoding="utf-8",
             )
             out_root = Path(workspace) / "out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -640,7 +618,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                 )
                 result = main(
                     [
@@ -655,19 +632,11 @@ class TestCliSurface(unittest.TestCase):
 
             self.assertEqual(result, 0)
             mock_eval.assert_called_once()
-            self.assertFalse(
-                mock_eval.call_args.kwargs["gold_if_missing"],
-                "explicit predictions should disable gold generation",
-            )
-            self.assertEqual(mock_eval.call_args.kwargs["workers"], 4)
-            judge_config = mock_eval.call_args.kwargs["judge_config"]
-            self.assertEqual(judge_config.batch_size, 32)
-            self.assertEqual(judge_config.max_parallel_batches, 1)
-            self.assertEqual(judge_config.workers_per_batch, 1)
+            self.assertEqual(mock_eval.call_args.kwargs["jobs"], 4)
             self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "podman")
             self.assertIsNone(mock_eval.call_args.kwargs["container_host"])
 
-    def test_eval_parallelism_flags_override_defaults(self) -> None:
+    def test_eval_jobs_flag_overrides_default(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             dataset_path = Path(workspace) / "dataset.jsonl"
             dataset_path.write_text(
@@ -695,8 +664,8 @@ class TestCliSurface(unittest.TestCase):
                 encoding="utf-8",
             )
             out_root = Path(workspace) / "out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -704,7 +673,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                 )
                 result = main(
                     [
@@ -714,24 +682,14 @@ class TestCliSurface(unittest.TestCase):
                         str(predictions_path),
                         "--out",
                         str(out_root),
-                        "--workers",
+                        "--jobs",
                         "6",
-                        "--batch-size",
-                        "8",
-                        "--max-parallel-batches",
-                        "3",
-                        "--workers-per-batch",
-                        "2",
                     ]
                 )
 
             self.assertEqual(result, 0)
             mock_eval.assert_called_once()
-            self.assertEqual(mock_eval.call_args.kwargs["workers"], 6)
-            judge_config = mock_eval.call_args.kwargs["judge_config"]
-            self.assertEqual(judge_config.batch_size, 8)
-            self.assertEqual(judge_config.max_parallel_batches, 3)
-            self.assertEqual(judge_config.workers_per_batch, 2)
+            self.assertEqual(mock_eval.call_args.kwargs["jobs"], 6)
             self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "podman")
             self.assertIsNone(mock_eval.call_args.kwargs["container_host"])
 
@@ -763,8 +721,8 @@ class TestCliSurface(unittest.TestCase):
                 encoding="utf-8",
             )
             out_root = Path(workspace) / "out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -772,7 +730,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                 )
                 result = main(
                     [
@@ -827,8 +784,8 @@ class TestCliSurface(unittest.TestCase):
             out_root = Path(workspace) / "out"
             results_path = out_root / "results.json"
             instance_results_path = out_root / "instance_results.jsonl"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -836,7 +793,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                     results_path=str(results_path),
                     instance_results_path=str(instance_results_path),
                 )
@@ -899,8 +855,8 @@ class TestCliSurface(unittest.TestCase):
             )
 
             out_root = Path(workspace) / "eval_out"
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
-                mock_eval.return_value = HarnessRunSummary(
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.return_value = EvalRunSummary(
                     validation_path=str(out_root / "validation.jsonl"),
                     total=1,
                     resolved=1,
@@ -908,7 +864,6 @@ class TestCliSurface(unittest.TestCase):
                     error=0,
                     skipped=0,
                     resolve_rate=1.0,
-                    harness_output="official_swebench",
                 )
                 result = main(
                     [
@@ -1355,10 +1310,13 @@ solvers:
             runtime_active = False
 
             @contextmanager
-            def fake_runtime(*, container_runtime: str, container_host: str | None):
+            def fake_runtime(
+                *, container_runtime: str, container_host: str | None, log_prefix: str
+            ):
                 nonlocal runtime_active
                 self.assertEqual(container_runtime, "docker")
                 self.assertEqual(container_host, "unix:///tmp/docker.sock")
+                self.assertEqual(log_prefix, "repogauge run")
                 runtime_active = True
                 try:
                     yield "unix:///tmp/docker.sock"
@@ -1384,7 +1342,7 @@ solvers:
                 return fake_summary
 
             with (
-                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
+                patch("repogauge.cli.ensure_container_runtime", fake_runtime),
                 patch("repogauge.cli.build_solver_adapters") as mock_build_adapters,
                 patch("repogauge.cli.SolverScheduler.run") as mock_run,
             ):
@@ -1457,9 +1415,12 @@ solvers:
             )
 
             @contextmanager
-            def fake_runtime(*, container_runtime: str, container_host: str | None):
+            def fake_runtime(
+                *, container_runtime: str, container_host: str | None, log_prefix: str
+            ):
                 self.assertEqual(container_runtime, "podman")
                 self.assertIsNone(container_host)
+                self.assertEqual(log_prefix, "repogauge run")
                 yield "unix:///tmp/podman.sock"
 
             fake_adapter = unittest.mock.Mock()
@@ -1477,7 +1438,7 @@ solvers:
             )
 
             with (
-                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
+                patch("repogauge.cli.ensure_container_runtime", fake_runtime),
                 patch("repogauge.cli.build_solver_adapters") as mock_build_adapters,
                 patch("repogauge.cli.SolverScheduler.run") as mock_run,
             ):
@@ -1536,9 +1497,12 @@ solvers:
             )
 
             @contextmanager
-            def fake_runtime(*, container_runtime: str, container_host: str | None):
+            def fake_runtime(
+                *, container_runtime: str, container_host: str | None, log_prefix: str
+            ):
                 self.assertEqual(container_runtime, "podman")
                 self.assertIsNone(container_host)
+                self.assertEqual(log_prefix, "repogauge run")
                 yield "unix:///tmp/podman.sock"
 
             fake_adapter = unittest.mock.Mock()
@@ -1557,7 +1521,7 @@ solvers:
             fake_client = object()
 
             with (
-                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
+                patch("repogauge.cli.ensure_container_runtime", fake_runtime),
                 patch("docker.from_env", return_value=fake_client) as mock_from_env,
                 patch(
                     "swebench.harness.docker_build.build_env_images"
@@ -1788,7 +1752,7 @@ solvers:
             eval_out = run_root / "eval"
             instance_results_path = eval_out / "instance_results.jsonl"
 
-            with patch("repogauge.runner.judge.run_harness_evaluation") as mock_eval:
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
 
                 def _fake_eval(**kwargs):
                     eval_out.mkdir(parents=True, exist_ok=True)
@@ -1805,7 +1769,7 @@ solvers:
                         + "\n",
                         encoding="utf-8",
                     )
-                    return HarnessRunSummary(
+                    return EvalRunSummary(
                         validation_path=str(eval_out / "validation.jsonl"),
                         total=1,
                         resolved=1,
@@ -1813,7 +1777,6 @@ solvers:
                         error=0,
                         skipped=0,
                         resolve_rate=1.0,
-                        harness_output="official_swebench",
                         instance_results_path=str(instance_results_path),
                     )
 
@@ -1881,16 +1844,7 @@ solvers:
             eval_out = run_root / "eval"
             instance_results_path = eval_out / "instance_results.jsonl"
 
-            @contextmanager
-            def fake_runtime(*, container_runtime: str, container_host: str | None):
-                self.assertEqual(container_runtime, "podman")
-                self.assertIsNone(container_host)
-                yield "unix:///tmp/podman.sock"
-
-            with (
-                patch("repogauge.runner.judge._ensure_container_runtime", fake_runtime),
-                patch("repogauge.validation.validate.run_eval") as mock_eval,
-            ):
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
 
                 def _fake_eval(**kwargs):
                     eval_out.mkdir(parents=True, exist_ok=True)
@@ -1925,16 +1879,12 @@ solvers:
                     [
                         "analyze",
                         str(run_root),
-                        "--eval-engine",
-                        "local",
                     ]
                 )
 
             self.assertEqual(result, 0)
-            self.assertEqual(
-                mock_eval.call_args.kwargs["container_host"],
-                "unix:///tmp/podman.sock",
-            )
+            self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "podman")
+            self.assertIsNone(mock_eval.call_args.kwargs["container_host"])
 
     def test_analyze_merge_retries_prefers_retry_rows(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
