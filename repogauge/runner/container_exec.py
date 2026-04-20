@@ -46,6 +46,12 @@ _CONTAINER_ENV_DROP_KEYS = frozenset(
         "PATH",
         "PYTHONHOME",
         "VIRTUAL_ENV",
+        "GOROOT",
+        "GOPATH",
+        "GOMODCACHE",
+        "GOBIN",
+        "GOENV",
+        "GOTOOLDIR",
         "CONDA_DEFAULT_ENV",
         "CONDA_PREFIX",
         "CONDA_PROMPT_MODIFIER",
@@ -167,6 +173,8 @@ def _local_repo_setup_commands(test_spec) -> tuple[str, ...]:
             continue
         if command == "git remote remove origin":
             continue
+        if command == f"chmod -R 777 {DOCKER_WORKDIR}":
+            command = f"chmod -R a+rwX {DOCKER_WORKDIR}"
         commands.append(command)
     if not commands:
         return ()

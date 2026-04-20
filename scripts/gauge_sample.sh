@@ -4,6 +4,7 @@
 #                                 [--decisions FILE] [--matrix PATH]
 #                                 [--run-llm-mode off|local_only|allow_remote]
 #                                 [--jobs N]
+#                                 [--max-instances N]
 #                                 [--eval-timeout SECONDS]
 #                                 [--eval-container-runtime docker|podman]
 #                                 [--eval-container-host URI]
@@ -29,6 +30,8 @@ Options:
   --run-llm-mode MODE                off|local_only|allow_remote for run/analyze.
                                      Default: allow_remote
   --jobs N                           Parallel jobs for eval/run/analyze. Default: 4
+  --max-instances N                  Limit export/eval/run/analyze to the first N dataset rows.
+                                     Default: 1
   --eval-timeout SECONDS             Eval timeout per instance. Default: 120
   --eval-container-runtime RUNTIME   docker|podman. Default: podman
   --eval-container-host URI          Optional container host URI
@@ -47,6 +50,7 @@ DECISIONS_FILE=""
 MATRIX_PATH="$REPOGAUGE_ROOT/examples/matrix.compare_cli.yaml"
 RUN_LLM_MODE="allow_remote"
 JOBS=4
+MAX_INSTANCES=1
 EVAL_TIMEOUT=120
 EVAL_CONTAINER_RUNTIME="podman"
 EVAL_CONTAINER_HOST=""
@@ -59,6 +63,7 @@ while [[ $# -gt 0 ]]; do
         --matrix) MATRIX_PATH="$2"; shift 2 ;;
         --run-llm-mode) RUN_LLM_MODE="$2"; shift 2 ;;
         --jobs) JOBS="$2"; shift 2 ;;
+        --max-instances) MAX_INSTANCES="$2"; shift 2 ;;
         --eval-timeout) EVAL_TIMEOUT="$2"; shift 2 ;;
         --eval-container-runtime) EVAL_CONTAINER_RUNTIME="$2"; shift 2 ;;
         --eval-container-host) EVAL_CONTAINER_HOST="$2"; shift 2 ;;
@@ -124,6 +129,7 @@ fi
 MINE_OUT="$OUT_DIR_ABS/mine"
 REVIEW_OUT="$OUT_DIR_ABS/review"
 EXPORT_OUT="$OUT_DIR_ABS/export"
+SAMPLE_DATASET_DIR="$OUT_DIR_ABS/sample_dataset"
 EVAL_OUT="$OUT_DIR_ABS/eval"
 RUN_OUT="$OUT_DIR_ABS/run"
 ANALYZE_OUT="$RUN_OUT"
@@ -133,6 +139,7 @@ cd "$REPOGAUGE_ROOT"
 echo "==> sample repo: $SAMPLE_REPO_ROOT_ABS"
 echo "==> out: $OUT_DIR_ABS"
 echo "==> matrix: $MATRIX_PATH"
+echo "==> max instances: $MAX_INSTANCES"
 
 echo "==> mine: scanning up to $MAX_COMMITS commits"
 uv run repogauge mine "$SAMPLE_REPO_ROOT_ABS" \
@@ -152,9 +159,61 @@ uv run repogauge export "$REVIEW_OUT/reviewed.jsonl" \
     --out "$EXPORT_OUT" \
     --llm-mode off
 
+echo "==> sample: selecting first $MAX_INSTANCES exported instance(s)"
+mkdir -p "$SAMPLE_DATASET_DIR"
+SELECTED_COUNT="$(UV_CACHE_DIR="$UV_CACHE_DIR" uv run python - <<'PY' \
+    "$EXPORT_OUT/dataset/dataset.jsonl" \
+    "$EXPORT_OUT/dataset/predictions.gold.jsonl" \
+    "$SAMPLE_DATASET_DIR/dataset.jsonl" \
+    "$SAMPLE_DATASET_DIR/predictions.gold.jsonl" \
+    "$MAX_INSTANCES"
+import json
+import sys
+from pathlib import Path
+
+dataset_in = Path(sys.argv[1])
+predictions_in = Path(sys.argv[2])
+dataset_out = Path(sys.argv[3])
+predictions_out = Path(sys.argv[4])
+limit = max(1, int(sys.argv[5]))
+
+dataset_rows = []
+with dataset_in.open(encoding="utf-8") as stream:
+    for line in stream:
+        value = line.strip()
+        if not value:
+            continue
+        dataset_rows.append(json.loads(value))
+        if len(dataset_rows) >= limit:
+            break
+
+selected_ids = {str(row.get("instance_id", "")).strip() for row in dataset_rows}
+prediction_rows = []
+with predictions_in.open(encoding="utf-8") as stream:
+    for line in stream:
+        value = line.strip()
+        if not value:
+            continue
+        row = json.loads(value)
+        if str(row.get("instance_id", "")).strip() in selected_ids:
+            prediction_rows.append(row)
+
+dataset_out.write_text(
+    "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+    encoding="utf-8",
+)
+predictions_out.write_text(
+    "".join(json.dumps(row, sort_keys=True) + "\n" for row in prediction_rows),
+    encoding="utf-8",
+)
+print(len(dataset_rows))
+PY
+)"
+echo "==> sample: selected $SELECTED_COUNT instance(s)"
+
 echo "==> eval: running gold evaluation"
 EVAL_ARGS=(
-    eval "$EXPORT_OUT"
+    eval "$SAMPLE_DATASET_DIR"
     --gold
     --out "$EVAL_OUT"
     --jobs "$JOBS"
@@ -221,6 +280,8 @@ echo "  review/reviewed.jsonl"
 echo "  review/review.html"
 echo "  export/dataset/dataset.jsonl"
 echo "  export/dataset/predictions.gold.jsonl"
+echo "  sample_dataset/dataset.jsonl"
+echo "  sample_dataset/predictions.gold.jsonl"
 echo "  eval/dataset.resolved.jsonl"
 echo "  eval/validation.jsonl"
 if [[ -f "$ATTEMPTS_JSONL" ]]; then

@@ -9,6 +9,7 @@ import threading
 from repogauge.exec import run_command
 from repogauge.runner.planner import PlannedRunJob
 from repogauge.runner.scheduler import (
+    _RichProgressReporter,
     SolverAdapter,
     SolverAdapterRequest,
     SolverAdapterResult,
@@ -492,6 +493,35 @@ class SleepyAdapter(SolverAdapter):
         return result
 
 
+class _CaptureReporter:
+    def __init__(self, *, prefix: str, total: int, noun: str, stream=None) -> None:
+        self.prefix = prefix
+        self.total = total
+        self.noun = noun
+        self.stream = stream
+        self.counts: dict[str, int] = {}
+        self.started: list[str] = []
+        self.messages: list[str] = []
+        self.closed: list[str | None] = []
+
+    def start(self, message: str) -> None:
+        self.started.append(message)
+
+    def advance(
+        self,
+        *,
+        status: str,
+        message: str,
+        description: str | None = None,
+        kind: str | None = None,
+    ) -> None:
+        self.messages.append(message)
+        self.counts[status] = self.counts.get(status, 0) + 1
+
+    def close(self, *, summary: str | None = None) -> None:
+        self.closed.append(summary)
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -508,6 +538,31 @@ def _read_jsonl(path: Path) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def test_rich_progress_reporter_messages_include_current_completion(monkeypatch) -> None:
+    captured: list[_CaptureReporter] = []
+
+    def fake_reporter(*, prefix: str, total: int, noun: str, stream=None):
+        reporter = _CaptureReporter(
+            prefix=prefix,
+            total=total,
+            noun=noun,
+            stream=stream,
+        )
+        captured.append(reporter)
+        return reporter
+
+    monkeypatch.setattr("repogauge.runner.scheduler.CountedProgressReporter", fake_reporter)
+
+    reporter = _RichProgressReporter(total=3)
+    reporter.update(SolverAttemptState.FAILED)
+    reporter.update(SolverAttemptState.SUCCEEDED)
+
+    assert captured
+    messages = captured[0].messages
+    assert "failed=1" in messages[0]
+    assert "ok=1" in messages[1]
 
 
 def _create_repo(tmp_path: Path) -> tuple[Path, str]:

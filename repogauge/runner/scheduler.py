@@ -237,17 +237,19 @@ class _RichProgressReporter(_ProgressReporter):
         self._reporter.start(f"starting {label}")
 
     def update(self, status: str) -> None:
+        next_counts = dict(self._reporter.counts)
+        next_counts[status] = next_counts.get(status, 0) + 1
         self._reporter.advance(
             status=status,
             message=(
                 "job completed "
                 f"status={_coerce_attempt_status(status)} "
-                f"ok={self._reporter.counts[SolverAttemptState.SUCCEEDED]} "
-                f"skipped={self._reporter.counts[SolverAttemptState.SKIPPED]} "
-                f"invalid={self._reporter.counts[SolverAttemptState.INVALID_PATCH]} "
-                f"failed={self._reporter.counts[SolverAttemptState.FAILED]} "
-                f"timed_out={self._reporter.counts[SolverAttemptState.TIMED_OUT]} "
-                f"budget={self._reporter.counts[SolverAttemptState.BUDGET_EXCEEDED]}"
+                f"ok={next_counts.get(SolverAttemptState.SUCCEEDED, 0)} "
+                f"skipped={next_counts.get(SolverAttemptState.SKIPPED, 0)} "
+                f"invalid={next_counts.get(SolverAttemptState.INVALID_PATCH, 0)} "
+                f"failed={next_counts.get(SolverAttemptState.FAILED, 0)} "
+                f"timed_out={next_counts.get(SolverAttemptState.TIMED_OUT, 0)} "
+                f"budget={next_counts.get(SolverAttemptState.BUDGET_EXCEEDED, 0)}"
             ),
         )
 

@@ -69,7 +69,7 @@ def test_local_repo_setup_commands_strip_remote_clone_bootstrap() -> None:
 
     assert _local_repo_setup_commands(test_spec) == (
         "git config --global --add safe.directory /testbed || true",
-        "chmod -R 777 /testbed",
+        "chmod -R a+rwX /testbed",
         "cd /testbed",
         "pip install uv",
         "uv sync --active --all-groups",
@@ -178,6 +178,9 @@ def test_containerize_environment_rewrites_attempt_root_paths(tmp_path: Path) ->
             "CODEX_HOME": str(codex_home / ".codex"),
             "PYTHONPATH": str(workspace),
             "GOCACHE": str(workspace / ".gocache"),
+            "GOROOT": "/usr/lib/go",
+            "GOPATH": "/home/david/go",
+            "GOMODCACHE": "/home/david/go/pkg/mod",
             "PATH": "/usr/bin:/bin",
             "VIRTUAL_ENV": "/tmp/venv",
             "CONDA_PREFIX": "/tmp/conda",
