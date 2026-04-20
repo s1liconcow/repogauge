@@ -1070,6 +1070,87 @@ def test_scheduler_workspace_normalizes_from_model_patch_when_raw_output_is_json
     )
 
 
+def test_scheduler_strips_solver_edits_to_withheld_test_files(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_command(["git", "init", "-b", "main"], cwd=str(repo))
+    run_command(["git", "config", "user.name", "ci"], cwd=str(repo))
+    run_command(["git", "config", "user.email", "ci@example.com"], cwd=str(repo))
+    (repo / "src.py").write_text("print('before')\n", encoding="utf-8")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_src.py").write_text(
+        "def test_before():\n    assert True\n", encoding="utf-8"
+    )
+    run_command(["git", "add", "."], cwd=str(repo))
+    run_command(["git", "commit", "-m", "base"], cwd=str(repo))
+    commit = run_command(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip()
+
+    job = _job(job_id="run-1:i-1:solver-a:0", solver_id="solver-a")
+    scheduler = SolverScheduler(
+        config=SolverSchedulerConfig(
+            default_solver_budget=1,
+            source_repo_root=repo,
+            attempt_workspaces_root=tmp_path / "attempt_workspaces",
+            persist_attempts_to=tmp_path / "attempts.jsonl",
+        )
+    )
+    dataset_rows = {
+        "i-1": {
+            "instance_id": "i-1",
+            "repo": "sample/repo",
+            "base_commit": commit,
+            "version": "1.0.0",
+            "problem_statement": "Update the implementation only.",
+            "test_patch": (
+                "diff --git a/tests/test_src.py b/tests/test_src.py\n"
+                "--- a/tests/test_src.py\n"
+                "+++ b/tests/test_src.py\n"
+                "@@ -1,2 +1,2 @@\n"
+                "-def test_before():\n"
+                "-    assert True\n"
+                "+def test_after():\n"
+                "+    assert True\n"
+            ),
+        }
+    }
+    adapter = CanonicalPatchAdapter(
+        patch=(
+            "diff --git a/src.py b/src.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/src.py\n"
+            "+++ b/src.py\n"
+            "@@ -1 +1 @@\n"
+            "-print('before')\n"
+            "+print('after')\n"
+            "diff --git a/tests/test_src.py b/tests/test_src.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/tests/test_src.py\n"
+            "+++ b/tests/test_src.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-def test_before():\n"
+            "-    assert True\n"
+            "+def test_after():\n"
+            "+    assert True\n"
+        ),
+        raw_output="",
+    )
+
+    summary = scheduler.run(
+        [job],
+        adapters={"solver-a": adapter},
+        dataset_rows=dataset_rows,
+    )
+
+    assert summary.jobs[0].final_status == SolverAttemptState.SUCCEEDED
+    attempt_rows = _read_jsonl(tmp_path / "attempts.jsonl")
+    row = attempt_rows[0]
+    assert "diff --git a/src.py b/src.py" in row["model_patch"]
+    assert "tests/test_src.py" not in row["model_patch"]
+    assert row["metadata"]["withheld_test_patch_sanitized"] is True
+    assert row["metadata"]["withheld_test_paths_touched"] == ["tests/test_src.py"]
+    assert row["metadata"]["excluded_withheld_test_patch_path"]
+
+
 def test_scheduler_workspace_normalizes_from_workspace_when_output_is_summary_only(
     tmp_path: Path,
 ) -> None:

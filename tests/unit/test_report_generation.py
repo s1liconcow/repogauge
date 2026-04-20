@@ -285,3 +285,60 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert "solver-tab" in html
     assert "task_cluster" in html
     assert "Solver" in html
+
+
+def test_analysis_report_prefers_local_eval_reason_over_unknown(tmp_path: Path) -> None:
+    attempts = [
+        _attempt_row(
+            "solver-a",
+            "inst-1",
+            duration_ms=10,
+            cost=1.0,
+            problem_statement="Local eval reason should surface.",
+            model_patch="diff --git a/a.py b/a.py\n+print('x')\n",
+        )
+    ]
+    instance_results = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "status": "not_resolved",
+            "reason": "no_fail_to_pass",
+            "resolved": False,
+        }
+    ]
+
+    grouped_summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+    )
+    solver_summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+    )
+    report = build_analysis_report(
+        attempts=attempts,
+        instance_results=instance_results,
+        grouped_summaries=grouped_summaries,
+        solver_summaries=solver_summaries,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+        metadata={"run_root": "/tmp/run"},
+    )
+
+    assert report["failure_reason_breakdown"][0]["reason"] == "no_fail_to_pass"
+
+    html_path = tmp_path / "report.html"
+    write_summary_html(
+        html_path,
+        grouped_summaries,
+        group_by=("solver_id",),
+        metadata={"run_root": "/tmp/run"},
+        report=report,
+    )
+    html = html_path.read_text(encoding="utf-8")
+    assert "no_fail_to_pass" in html

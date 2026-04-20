@@ -37,6 +37,8 @@ class PatchNormalizationResult:
     raw_output_path: str
     patch: str
     patch_stats: PatchStats
+    excluded_paths: tuple[str, ...] = ()
+    excluded_patch_path: str | None = None
 
 
 _DIFF_HEADER_PREFIX = "diff --git "
@@ -292,6 +294,58 @@ def _extract_text_candidates(value: Any) -> list[str]:
     return candidates
 
 
+def _split_patch_by_file(patch: str) -> list[tuple[str, str]]:
+    chunks: list[tuple[str, str]] = []
+    current_lines: list[str] = []
+    current_path: str | None = None
+
+    for raw_line in patch.splitlines(keepends=True):
+        parsed = _parse_diff_header(raw_line)
+        if parsed:
+            if current_path is not None:
+                chunks.append((current_path, "".join(current_lines)))
+            a_path, b_path = parsed
+            current_lines = [raw_line]
+            current_path = b_path if b_path != "/dev/null" else a_path
+            continue
+        if current_lines:
+            current_lines.append(raw_line)
+
+    if current_path is not None:
+        chunks.append((current_path, "".join(current_lines)))
+
+    return chunks
+
+
+def exclude_patch_paths(
+    patch: str,
+    excluded_paths: Iterable[str],
+) -> tuple[str, str, tuple[str, ...]]:
+    excluded = {path.strip() for path in excluded_paths if str(path).strip()}
+    if not patch.strip() or not excluded:
+        return patch, "", ()
+
+    chunks = _split_patch_by_file(patch)
+    if not chunks:
+        return patch, "", ()
+
+    kept_chunks: list[str] = []
+    removed_chunks: list[str] = []
+    removed_paths: list[str] = []
+    for path, chunk in chunks:
+        if path in excluded:
+            removed_chunks.append(chunk)
+            if path not in removed_paths:
+                removed_paths.append(path)
+            continue
+        kept_chunks.append(chunk)
+
+    if not removed_paths:
+        return patch, "", ()
+
+    return "".join(kept_chunks), "".join(removed_chunks), tuple(removed_paths)
+
+
 def _safe_path_for_workspace(workspace: Path, path: str) -> Path:
     candidate = (workspace / path).resolve()
     workspace_resolved = workspace.resolve()
@@ -526,8 +580,78 @@ def _normalize_from_workspace_state(
     )
 
 
+def _write_excluded_patch(
+    attempt: AttemptWorkspace, excluded_patch: str
+) -> str | None:
+    if not excluded_patch.strip():
+        return None
+    path = attempt.attempt_root / "excluded_withheld_test.patch"
+    path.write_text(excluded_patch, encoding="utf-8")
+    return str(path)
+
+
+def _write_empty_normalized_patch(attempt: AttemptWorkspace) -> PatchNormalizationResult:
+    empty_stats = PatchStats(
+        files_touched=0,
+        files_added=0,
+        files_modified=0,
+        files_removed=0,
+        insertions=0,
+        deletions=0,
+    )
+    attempt.normalized_patch_path.write_text("", encoding="utf-8")
+    attempt.patch_stats_path.write_text(
+        json.dumps(asdict(empty_stats), sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return PatchNormalizationResult(
+        attempt_id=attempt.attempt_id,
+        normalized_patch_path=str(attempt.normalized_patch_path),
+        patch_stats_path=str(attempt.patch_stats_path),
+        raw_output_path=str(attempt.raw_output_path),
+        patch="",
+        patch_stats=empty_stats,
+    )
+
+
+def _exclude_withheld_test_paths(
+    result: PatchNormalizationResult,
+    *,
+    attempt: AttemptWorkspace,
+    excluded_paths: Iterable[str],
+) -> PatchNormalizationResult:
+    filtered_patch, excluded_patch, touched_paths = exclude_patch_paths(
+        result.patch, excluded_paths
+    )
+    if not touched_paths:
+        return result
+
+    excluded_patch_path = _write_excluded_patch(attempt, excluded_patch)
+    if filtered_patch.strip():
+        _restore_attempt_workspace(attempt)
+        _normalize_from_patch(attempt.workspace_path, filtered_patch)
+        filtered_result = _normalize_from_workspace_state(attempt)
+    else:
+        _restore_attempt_workspace(attempt)
+        filtered_result = _write_empty_normalized_patch(attempt)
+
+    return PatchNormalizationResult(
+        attempt_id=filtered_result.attempt_id,
+        normalized_patch_path=filtered_result.normalized_patch_path,
+        patch_stats_path=filtered_result.patch_stats_path,
+        raw_output_path=filtered_result.raw_output_path,
+        patch=filtered_result.patch,
+        patch_stats=filtered_result.patch_stats,
+        excluded_paths=touched_paths,
+        excluded_patch_path=excluded_patch_path,
+    )
+
+
 def normalize_solver_output(
-    raw_output: str, attempt: AttemptWorkspace
+    raw_output: str,
+    attempt: AttemptWorkspace,
+    *,
+    excluded_paths: Iterable[str] = (),
 ) -> PatchNormalizationResult:
     attempt.raw_output_path.write_text(_coerce_str(raw_output), encoding="utf-8")
     workspace_fallback: PatchNormalizationResult | None = None
@@ -543,23 +667,37 @@ def normalize_solver_output(
             _normalize_from_patch(attempt.workspace_path, patch)
         except PatchNormalizationError:
             if workspace_fallback is not None:
-                return workspace_fallback
+                return _exclude_withheld_test_paths(
+                    workspace_fallback,
+                    attempt=attempt,
+                    excluded_paths=excluded_paths,
+                )
             raise
     else:
         edits = _extract_edit_plan(raw_output)
         if not edits:
             if workspace_fallback is not None:
-                return workspace_fallback
+                return _exclude_withheld_test_paths(
+                    workspace_fallback,
+                    attempt=attempt,
+                    excluded_paths=excluded_paths,
+                )
             raise PatchNormalizationError("unrecognized solver output format")
         _restore_attempt_workspace(attempt)
         _normalize_from_file_edits(attempt.workspace_path, edits)
 
-    return _normalize_from_workspace_state(attempt)
+    result = _normalize_from_workspace_state(attempt)
+    return _exclude_withheld_test_paths(
+        result,
+        attempt=attempt,
+        excluded_paths=excluded_paths,
+    )
 
 
 __all__ = [
     "PatchNormalizationError",
     "PatchStats",
     "PatchNormalizationResult",
+    "exclude_patch_paths",
     "normalize_solver_output",
 ]

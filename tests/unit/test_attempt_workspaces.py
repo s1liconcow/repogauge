@@ -176,6 +176,53 @@ def test_normalize_solver_output_from_diff(tmp_path: Path) -> None:
         )
 
 
+def test_normalize_solver_output_excludes_withheld_test_paths(tmp_path: Path) -> None:
+    repo, commit = _create_repo(tmp_path)
+    test_file = repo / "tests" / "test_src.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_before():\n    assert True\n", encoding="utf-8")
+    run_command(["git", "add", "tests/test_src.py"], cwd=str(repo))
+    run_command(["git", "commit", "-m", "add test file"], cwd=str(repo))
+    commit = run_command(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip()
+    row = _attempt_row(commit)
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-exclude-tests",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        raw = (
+            "diff --git a/src.py b/src.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/src.py\n"
+            "+++ b/src.py\n"
+            "@@ -1 +1 @@\n"
+            "-print('before')\n"
+            "+print('after')\n"
+            "diff --git a/tests/test_src.py b/tests/test_src.py\n"
+            "index 1111111..2222222 100644\n"
+            "--- a/tests/test_src.py\n"
+            "+++ b/tests/test_src.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-def test_before():\n"
+            "-    assert True\n"
+            "+def test_after():\n"
+            "+    assert True\n"
+        )
+        result = normalize_solver_output(
+            raw,
+            attempt=attempt,
+            excluded_paths=("tests/test_src.py",),
+        )
+
+        assert "diff --git a/src.py b/src.py" in result.patch
+        assert "tests/test_src.py" not in result.patch
+        assert result.excluded_paths == ("tests/test_src.py",)
+        assert result.excluded_patch_path is not None
+
+
 def test_normalize_solver_output_from_file_edits(tmp_path: Path) -> None:
     repo, commit = _create_repo(tmp_path)
     row = _attempt_row(commit)

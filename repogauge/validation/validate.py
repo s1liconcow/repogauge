@@ -38,6 +38,7 @@ from repogauge.runner.container_exec import (
     prepare_local_eval_image,
     run_workspace_command_in_container,
 )
+from repogauge.runner.normalize_patch import exclude_patch_paths
 from repogauge.runner.progress import CountedProgressReporter
 from repogauge.utils.git import CommandPatchError, apply_patch_text, create_checkout
 from repogauge.validation.junit_parser import (
@@ -49,7 +50,7 @@ from repogauge.validation.evidence import (
     tail,
     write_validation_bundle,
 )
-from repogauge.validation.testsel import build_targeted_test_plan
+from repogauge.validation.testsel import build_targeted_test_plan, extract_patch_paths
 from swebench.harness.constants import DOCKER_WORKDIR
 
 
@@ -184,8 +185,10 @@ def _result_row_from_outcome(
             "instance_id": iid,
             "solver_id": "",
             "status": "skipped",
+            "harness_outcome": "skipped",
             "error": "no matching prediction",
             "reason": "missing_prediction",
+            "failure_reason": "missing_prediction",
             "resolved": False,
             "targeted_test_cmd": "",
             "targeted_test_inputs": [],
@@ -203,7 +206,9 @@ def _result_row_from_outcome(
             pred.get("solver_id") or pred.get("model_name_or_path") or ""
         ).strip(),
         "status": outcome["status"],
+        "harness_outcome": outcome["status"],
         "reason": outcome["reason"],
+        "failure_reason": outcome["reason"],
         "failure_code": outcome["failure_code"],
         "error": outcome["error"],
         "resolved": outcome["resolved"],
@@ -236,6 +241,13 @@ def _result_row_from_outcome(
             "log_b_rerun": tail(outcome["log_b_rerun"]),
             "log_c_rerun": tail(outcome["log_c_rerun"]),
             "validation_bundle": outcome.get("validation_bundle", {}),
+            "withheld_test_paths": outcome.get("withheld_test_paths", []),
+            "withheld_test_paths_touched": outcome.get(
+                "withheld_test_paths_touched", []
+            ),
+            "withheld_test_patch_sanitized": outcome.get(
+                "withheld_test_patch_sanitized", False
+            ),
         },
     }
 
@@ -762,6 +774,9 @@ def _build_eval_result(
     failure_code: str | None = None,
     test_strategy: str | None = None,
     environment_strategy: str = "default",
+    withheld_test_paths: List[str] | None = None,
+    withheld_test_paths_touched: List[str] | None = None,
+    withheld_test_patch_sanitized: bool = False,
 ) -> Dict[str, Any]:
     normalized_reason = reason
     if status != "resolved" and reason is not None:
@@ -797,6 +812,9 @@ def _build_eval_result(
         "FAIL_TO_PASS": FAIL_TO_PASS,
         "PASS_TO_PASS": PASS_TO_PASS,
         "resolved": resolved,
+        "withheld_test_paths": list(withheld_test_paths or []),
+        "withheld_test_paths_touched": list(withheld_test_paths_touched or []),
+        "withheld_test_patch_sanitized": withheld_test_patch_sanitized,
     }
 
 
@@ -842,6 +860,10 @@ def _eval_instance(
     active_adapter = _resolve_adapter(adapter)
     targeted_test_cmd, targeted_test_inputs = build_targeted_test_plan(
         test_cmd_base, test_patch
+    )
+    withheld_test_paths = extract_patch_paths(test_patch)
+    sanitized_pred_patch, _excluded_patch, withheld_test_paths_touched = (
+        exclude_patch_paths(pred_patch, withheld_test_paths)
     )
     test_inputs = targeted_test_inputs
     target_cmd_tokens = targeted_test_cmd.split()
@@ -906,6 +928,9 @@ def _eval_instance(
                     resolved=False,
                     test_strategy=test_strategy,
                     environment_strategy=environment_strategy,
+                    withheld_test_paths=withheld_test_paths,
+                    withheld_test_paths_touched=list(withheld_test_paths_touched),
+                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
                 ),
                 out_root=out_root,
                 instance_id=instance_id,
@@ -957,6 +982,9 @@ def _eval_instance(
                     resolved=False,
                     test_strategy=test_strategy,
                     environment_strategy=environment_strategy,
+                    withheld_test_paths=withheld_test_paths,
+                    withheld_test_paths_touched=list(withheld_test_paths_touched),
+                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
                 ),
                 out_root=out_root,
                 instance_id=instance_id,
@@ -969,7 +997,7 @@ def _eval_instance(
             repo_root=repo_root,
             base_commit=base_commit,
             test_patch=test_patch,
-            pred_patch=pred_patch,
+            pred_patch=sanitized_pred_patch,
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
@@ -1009,6 +1037,9 @@ def _eval_instance(
                     resolved=False,
                     test_strategy=test_strategy,
                     environment_strategy=environment_strategy,
+                    withheld_test_paths=withheld_test_paths,
+                    withheld_test_paths_touched=list(withheld_test_paths_touched),
+                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
                 ),
                 out_root=out_root,
                 instance_id=instance_id,
@@ -1039,7 +1070,7 @@ def _eval_instance(
             repo_root=repo_root,
             base_commit=base_commit,
             test_patch=test_patch,
-            pred_patch=pred_patch,
+            pred_patch=sanitized_pred_patch,
             test_files=test_inputs,
             timeout_seconds=timeout_seconds,
             test_cmd_base=targeted_test_cmd,
@@ -1096,6 +1127,9 @@ def _eval_instance(
                     resolved=False,
                     test_strategy=test_strategy,
                     environment_strategy=environment_strategy,
+                    withheld_test_paths=withheld_test_paths,
+                    withheld_test_paths_touched=list(withheld_test_paths_touched),
+                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
                 ),
                 out_root=out_root,
                 instance_id=instance_id,
@@ -1142,6 +1176,9 @@ def _eval_instance(
                     resolved=False,
                     test_strategy=test_strategy,
                     environment_strategy=environment_strategy,
+                    withheld_test_paths=withheld_test_paths,
+                    withheld_test_paths_touched=list(withheld_test_paths_touched),
+                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
                 ),
                 out_root=out_root,
                 instance_id=instance_id,
@@ -1194,6 +1231,9 @@ def _eval_instance(
             resolved=resolved,
             test_strategy=test_strategy,
             environment_strategy=environment_strategy,
+            withheld_test_paths=withheld_test_paths,
+            withheld_test_paths_touched=list(withheld_test_paths_touched),
+            withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
         ),
         out_root=out_root,
         instance_id=instance_id,

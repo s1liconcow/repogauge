@@ -17,6 +17,7 @@ from typing import Any, Iterable, Mapping
 
 from repogauge.config import AttemptRow, JobRow
 from repogauge.runner.progress import CountedProgressReporter
+from repogauge.validation.testsel import extract_patch_paths
 
 from .features import build_task_feature_bundle
 from .normalize_patch import PatchNormalizationError, normalize_solver_output
@@ -707,7 +708,11 @@ class SolverScheduler:
                 self._attempt_rows.append(normalized_payload)
 
     def _normalize_workspace_result(
-        self, *, result: SolverAdapterResult, attempt_workspace: Any
+        self,
+        *,
+        result: SolverAdapterResult,
+        attempt_workspace: Any,
+        dataset_row: Mapping[str, Any] | None = None,
     ) -> SolverAdapterResult:
         metadata = dict(result.metadata)
         metadata.update(
@@ -737,8 +742,15 @@ class SolverScheduler:
             )
 
         try:
+            excluded_paths = ()
+            if dataset_row is not None:
+                excluded_paths = tuple(
+                    extract_patch_paths(str(dataset_row.get("test_patch") or ""))
+                )
             normalized = normalize_solver_output(
-                result.model_patch or result.raw_output, attempt=attempt_workspace
+                result.model_patch or result.raw_output,
+                attempt=attempt_workspace,
+                excluded_paths=excluded_paths,
             )
         except PatchNormalizationError as exc:
             return SolverAdapterResult(
@@ -760,8 +772,15 @@ class SolverScheduler:
                 "normalized_patch_path": normalized.normalized_patch_path,
                 "patch_stats_path": normalized.patch_stats_path,
                 "patch_stats": asdict(normalized.patch_stats),
+                "withheld_test_paths": list(excluded_paths),
+                "withheld_test_paths_touched": list(normalized.excluded_paths),
+                "withheld_test_patch_sanitized": bool(normalized.excluded_paths),
             }
         )
+        if normalized.excluded_patch_path:
+            metadata["excluded_withheld_test_patch_path"] = (
+                normalized.excluded_patch_path
+            )
         return SolverAdapterResult(
             attempt_id=result.attempt_id,
             status=result.status,
@@ -988,6 +1007,7 @@ class SolverScheduler:
                         result = self._normalize_workspace_result(
                             result=result,
                             attempt_workspace=attempt_workspace,
+                            dataset_row=dataset_row,
                         )
             except Exception as exc:
                 if result is None:

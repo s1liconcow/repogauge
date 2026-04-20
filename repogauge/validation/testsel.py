@@ -28,10 +28,24 @@ def _dedupe(values: List[str]) -> List[str]:
     return out
 
 
-def _extract_patch_paths(test_patch: str) -> List[str]:
+def extract_patch_paths(test_patch: str) -> List[str]:
     """Extract candidate file paths from unified-diff headers."""
     paths: List[str] = []
     for line in test_patch.splitlines():
+        if line.startswith("diff --git "):
+            try:
+                tokens = shlex.split(line)
+            except ValueError:
+                tokens = []
+            if len(tokens) >= 4:
+                candidate = tokens[3]
+                if candidate.startswith("b/"):
+                    candidate = candidate[2:]
+                if candidate and candidate != "/dev/null" and not candidate.endswith(
+                    ".rej"
+                ):
+                    paths.append(candidate)
+            continue
         if not line.startswith("+++ b/"):
             continue
         path = line[6:].strip()
@@ -143,7 +157,7 @@ def _extract_test_node_ids(test_patch: str) -> List[str]:
 
 def build_targeted_test_inputs(test_patch: str) -> List[str]:
     """Build conservative pytest inputs from changed files in `test_patch`."""
-    changed = _extract_patch_paths(test_patch)
+    changed = extract_patch_paths(test_patch)
     if not changed:
         return []
 
@@ -177,6 +191,7 @@ def build_targeted_test_plan(
 
 
 __all__ = [
+    "extract_patch_paths",
     "build_targeted_test_inputs",
     "build_targeted_test_plan",
 ]

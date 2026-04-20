@@ -113,6 +113,24 @@ def test_join_attempt_rows_merges_solver_instance_rows_and_costs() -> None:
     assert joined[2]["harness_outcome"] == "passed"
 
 
+def test_join_attempt_rows_falls_back_to_local_eval_status_and_reason() -> None:
+    attempts = [_attempt_row("solver-a", "inst-1", duration_ms=25, cost=2.5)]
+    instance_results = [
+        {
+            "solver_id": "solver-a",
+            "instance_id": "inst-1",
+            "status": "not_resolved",
+            "reason": "no_fail_to_pass",
+            "resolved": False,
+        }
+    ]
+
+    joined = join_attempt_rows(attempts, instance_results)
+
+    assert joined[0]["harness_outcome"] == "not_resolved"
+    assert joined[0]["failure_reason"] == "no_fail_to_pass"
+
+
 def test_summarize_attempt_metrics_with_zero_resolutions() -> None:
     attempts = [
         _attempt_row("solver-a", "inst-1", duration_ms=17, cost=1.5),

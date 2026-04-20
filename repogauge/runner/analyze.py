@@ -598,14 +598,32 @@ def _build_pareto_frontier(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(frontier, key=_solver_cost_key)
 
 
+def _row_outcome_label(row: Mapping[str, Any]) -> str:
+    outcome = _coerce_str(row.get("harness_outcome"))
+    if outcome:
+        return outcome
+    outcome = _coerce_str(row.get("status"))
+    if outcome:
+        return outcome
+    return "unknown"
+
+
+def _row_failure_reason(row: Mapping[str, Any]) -> str:
+    reason = _coerce_str(row.get("failure_reason"))
+    if reason:
+        return reason
+    reason = _coerce_str(row.get("reason"))
+    return reason
+
+
 def _build_failure_breakdown(
     unresolved_rows: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     counts: Counter[str] = Counter()
     for row in unresolved_rows:
-        reason = _coerce_str(row.get("failure_reason"))
+        reason = _row_failure_reason(row)
         if not reason:
-            reason = _coerce_str(row.get("harness_outcome"))
+            reason = _row_outcome_label(row)
         if not reason:
             reason = "unknown"
         counts[reason] += 1
@@ -788,12 +806,13 @@ def _build_unresolved_samples(
     )
     samples: list[dict[str, Any]] = []
     for row in ordered[:limit]:
+        failure_reason = _row_failure_reason(row) or _row_outcome_label(row)
         samples.append(
             {
                 "instance_id": _coerce_str(row.get("instance_id")),
                 "solver_id": _solver_id_from_row(row),
-                "harness_outcome": _coerce_str(row.get("harness_outcome")),
-                "failure_reason": _coerce_str(row.get("failure_reason")),
+                "harness_outcome": _row_outcome_label(row),
+                "failure_reason": failure_reason,
                 "attempt_state": _coerce_str(row.get("attempt_state")),
                 "duration_ms": _coerce_non_negative_int(row.get("duration_ms")),
                 "attempt_cost_usd": row.get("attempt_cost_usd"),
@@ -892,8 +911,8 @@ def build_attempt_browser(
                 "attempt_id": _coerce_str(row.get("attempt_id")),
                 "attempt_state": _coerce_str(row.get("attempt_state")),
                 "resolved": bool(row.get("resolved")),
-                "harness_outcome": _coerce_str(row.get("harness_outcome")),
-                "failure_reason": _coerce_str(row.get("failure_reason")),
+                "harness_outcome": _row_outcome_label(row),
+                "failure_reason": _row_failure_reason(row),
                 "duration_ms": _coerce_non_negative_int(row.get("duration_ms")),
                 "attempt_cost_usd": row.get("attempt_cost_usd"),
                 "input_tokens": _coerce_non_negative_int(row.get("input_tokens")),
@@ -1711,7 +1730,7 @@ def write_summary_html(
             cards.append(
                 '<article class="incident-card">'
                 f'<div class="incident-card__top"><span class="chip">{html_escape(_coerce_str(row.get("solver_id")))}</span>'
-                f'<span class="chip chip--warning">{html_escape(_coerce_str(row.get("failure_reason") or row.get("harness_outcome") or "unknown"))}</span></div>'
+                f'<span class="chip chip--warning">{html_escape(_row_failure_reason(row) or _row_outcome_label(row))}</span></div>'
                 f"<h3>{html_escape(_coerce_str(row.get('instance_id')))}</h3>"
                 f"<p>{html_escape(_coerce_str(row.get('problem_statement'))[:260])}</p>"
                 '<dl class="incident-card__meta">'
@@ -1891,9 +1910,9 @@ def write_summary_html(
                 token_display = _format_compact_number(solver.get("total_tokens"))
                 tool_calls_display = _format_integer(solver.get("tool_calls"))
                 patch_length_display = _format_integer(solver.get("model_patch_length"))
-                harness = _coerce_str(solver.get("harness_outcome")) or "unknown"
+                harness = _row_outcome_label(solver)
                 attempt_state = _coerce_str(solver.get("attempt_state")) or "unknown"
-                failure_reason = _coerce_str(solver.get("failure_reason"))
+                failure_reason = _row_failure_reason(solver)
                 meta_rows = [
                     ("Harness", harness),
                     ("Attempt State", attempt_state),
@@ -3562,7 +3581,7 @@ def join_attempt_rows(
         attempt_instance = _coerce_str(attempt.get("instance_id"))
         key = (attempt_solver, attempt_instance)
         eval_row = eval_by_key.get(key, {})
-        outcome = _coerce_str(eval_row.get("harness_outcome", "unknown"))
+        outcome = _row_outcome_label(eval_row)
         resolved = _coerce_bool(
             eval_row.get("resolved", outcome.lower() in {"passed", "resolved"})
         )
@@ -3572,7 +3591,7 @@ def join_attempt_rows(
             {
                 "resolved": resolved,
                 "harness_outcome": outcome,
-                "failure_reason": eval_row.get("failure_reason"),
+                "failure_reason": _row_failure_reason(eval_row),
                 "eval_metadata": eval_row.get("metadata", {}),
             }
         )

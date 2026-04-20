@@ -348,6 +348,60 @@ def test_eval_instance_executes_four_passes_in_order(
     assert outcome["flake_runs"] == 2
 
 
+def test_eval_instance_strips_prediction_edits_to_withheld_test_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed_pred_patches: dict[str, str] = {}
+
+    def fake_build_targeted_test_plan(
+        test_cmd: str, test_patch: str
+    ) -> tuple[str, list[str]]:
+        return ("python -m pytest", ["tests/test_eval.py"])
+
+    def fake_run_validation_pass(*, label: str, pred_patch: str, **kwargs: object):
+        observed_pred_patches[label] = pred_patch
+        outcome = {"tests/test_eval.py::regression": "pass"}
+        if label in {"b", "b_rerun"}:
+            outcome = {"tests/test_eval.py::regression": "fail"}
+        return {
+            "status": "passed",
+            "error": None,
+            "outcomes": outcome,
+            "log": "",
+            "attempts": [],
+        }
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.build_targeted_test_plan",
+        fake_build_targeted_test_plan,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_validation_pass", fake_run_validation_pass
+    )
+
+    outcome = _eval_instance(
+        repo_root=tmp_path,
+        base_commit="deadbeef",
+        pred_patch=(
+            "diff --git a/src.py b/src.py\n"
+            "+ok\n"
+            "diff --git a/tests/test_eval.py b/tests/test_eval.py\n"
+            "+bad\n"
+        ),
+        test_patch="diff --git a/tests/test_eval.py b/tests/test_eval.py\n+ok\n",
+        declared_ftp=[],
+        declared_ptp=[],
+        timeout_seconds=120,
+        test_cmd_base="pytest --config",
+    )
+
+    assert "tests/test_eval.py" not in observed_pred_patches["c"]
+    assert "tests/test_eval.py" not in observed_pred_patches["c_rerun"]
+    assert "diff --git a/src.py b/src.py" in observed_pred_patches["c"]
+    assert outcome["withheld_test_patch_sanitized"] is True
+    assert outcome["withheld_test_paths_touched"] == ["tests/test_eval.py"]
+
+
 def test_eval_instance_marks_flaky_when_reruns_differ(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
