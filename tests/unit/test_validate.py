@@ -1121,5 +1121,7 @@ def test_run_eval_emits_progress_updates(
 
     lines = [line for line in progress.getvalue().splitlines() if line.strip()]
     assert lines[0] == "repogauge eval: evaluating 2 instances locally via containers"
+    assert "repogauge eval: starting [1/2] i-1" in lines
     assert any("[1/2] i-1 resolved" in line for line in lines)
+    assert "repogauge eval: starting [2/2] i-2" in lines
     assert any("[2/2] i-2 skipped (missing prediction)" in line for line in lines)

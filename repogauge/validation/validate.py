@@ -1192,6 +1192,10 @@ def run_eval(
 
     for index, ds in enumerate(dataset_rows, start=1):
         iid = ds["instance_id"]
+        _emit_eval_progress(
+            progress_stream,
+            f"starting [{index}/{total}] {iid}",
+        )
         pred = pred_by_id.get(iid)
         if pred is None:
             skipped_count += 1
