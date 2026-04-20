@@ -528,8 +528,6 @@ def _build_prompt(
                 "Focus your patch on production code or non-test support files needed to satisfy the held-out tests.",
             ]
         )
-    if row.get("patch"):
-        prompt.append(f"Reference patch:\n{row['patch']}")
     if row.get("test_patch"):
         prompt.append(f"Test patch:\n{row['test_patch']}")
     if row.get("FAIL_TO_PASS"):

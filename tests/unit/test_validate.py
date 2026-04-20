@@ -1089,6 +1089,127 @@ def test_run_eval_writes_resolved_dataset_and_prediction_rows(
     assert resolved_predictions[0]["model_name_or_path"] == "gold"
 
 
+def test_run_eval_preserves_multiple_predictions_per_instance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dataset_path = tmp_path / "dataset.jsonl"
+    predictions_path = tmp_path / "predictions.jsonl"
+    out_root = tmp_path / "out"
+
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "instance_id": "i-1",
+                "base_commit": "deadbeef",
+                "problem_statement": "broken",
+                "FAIL_TO_PASS": [],
+                "PASS_TO_PASS": [],
+                "test_patch": "",
+                "patch": "",
+                "version": "v1",
+                "repo": "r",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    predictions_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "instance_id": "i-1",
+                        "solver_id": "solver-a",
+                        "model_name_or_path": "solver-a",
+                        "model_patch": "diff --git a.py b.py\n+one\n",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "instance_id": "i-1",
+                        "solver_id": "solver-b",
+                        "model_name_or_path": "solver-b",
+                        "model_patch": "diff --git a.py b.py\n+two\n",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    seen_solver_ids: list[str] = []
+
+    def fake_eval_instance(**kwargs: object) -> dict[str, object]:
+        pred_patch = str(kwargs["pred_patch"])
+        solver_id = "solver-a" if "+one" in pred_patch else "solver-b"
+        seen_solver_ids.append(solver_id)
+        return {
+            "status": "resolved",
+            "reason": None,
+            "error": None,
+            "failure_code": None,
+            "environment_strategy": "default",
+            "test_strategy": "full_pytest",
+            "targeted_test_cmd": "python -m pytest",
+            "targeted_test_inputs": [],
+            "log_a": "",
+            "log_b": "",
+            "log_c": "",
+            "log_b_rerun": "",
+            "log_c_rerun": "",
+            "run_a": {},
+            "run_b": {},
+            "run_c": {},
+            "run_b_rerun": {},
+            "run_c_rerun": {},
+            "run_a_attempts": [],
+            "run_b_attempts": [],
+            "run_c_attempts": [],
+            "run_b_rerun_attempts": [],
+            "run_c_rerun_attempts": [],
+            "flake_runs": 0,
+            "FAIL_TO_PASS": [],
+            "PASS_TO_PASS": [],
+            "resolved": True,
+        }
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate._eval_instance", fake_eval_instance
+    )
+
+    summary = run_eval(
+        dataset_path=dataset_path,
+        predictions_path=predictions_path,
+        out_root=out_root,
+        repo_root=tmp_path,
+    )
+
+    output_rows = [
+        json.loads(line)
+        for line in (out_root / "validation.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    resolved_predictions = [
+        json.loads(line)
+        for line in (out_root / "predictions.resolved.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+
+    assert summary.total == 2
+    assert summary.resolved == 2
+    assert seen_solver_ids == ["solver-a", "solver-b"]
+    assert [row["solver_id"] for row in output_rows] == ["solver-a", "solver-b"]
+    assert [row["solver_id"] for row in resolved_predictions] == [
+        "solver-a",
+        "solver-b",
+    ]
+
+
 def test_run_eval_emits_progress_updates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

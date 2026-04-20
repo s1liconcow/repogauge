@@ -12,7 +12,8 @@ From those runs:
   PASS_TO_PASS  = tests that passed in both B and C
   resolved      = all of FAIL_TO_PASS pass in C (or, if FAIL_TO_PASS is empty, any test passes)
 
-The evaluator writes one ValidationRow per instance to validation.jsonl.
+The evaluator writes one ValidationRow per evaluated prediction to
+validation.jsonl.
 
 This is a local, harness-free implementation.  It uses git worktrees for
 isolation and runs tests through the active language adapter.
@@ -1295,8 +1296,28 @@ def run_eval(
 
     dataset_rows = _read_jsonl(dataset_path)
     pred_rows = _read_jsonl(predictions_path)
-    pred_by_id = {r["instance_id"]: r for r in pred_rows}
-    total = len(dataset_rows)
+    dataset_by_id = {
+        str(row.get("instance_id", "")).strip(): row
+        for row in dataset_rows
+        if str(row.get("instance_id", "")).strip()
+    }
+
+    eval_items: List[tuple[Dict[str, Any], Dict[str, Any] | None]] = []
+    covered_instance_ids: set[str] = set()
+    for pred in pred_rows:
+        instance_id = str(pred.get("instance_id", "")).strip()
+        dataset_row = dataset_by_id.get(instance_id)
+        if dataset_row is None:
+            continue
+        eval_items.append((dataset_row, pred))
+        covered_instance_ids.add(instance_id)
+    for dataset_row in dataset_rows:
+        instance_id = str(dataset_row.get("instance_id", "")).strip()
+        if instance_id in covered_instance_ids:
+            continue
+        eval_items.append((dataset_row, None))
+
+    total = len(eval_items)
 
     out_root.mkdir(parents=True, exist_ok=True)
     validation_path = out_root / "validation.jsonl"
@@ -1349,10 +1370,9 @@ def run_eval(
         future_map: Dict[Any, tuple[int, Dict[str, Any], Dict[str, Any]]] = {}
         max_workers = max(1, jobs)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for index, ds in enumerate(dataset_rows, start=1):
+            for index, (ds, pred) in enumerate(eval_items, start=1):
                 iid = str(ds["instance_id"])
                 progress.start(f"starting [{index}/{total}] {iid}")
-                pred = pred_by_id.get(iid)
                 if pred is None:
                     skipped_count += 1
                     results_by_index[index] = _result_row_from_outcome(

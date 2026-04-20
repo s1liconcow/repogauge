@@ -100,6 +100,25 @@ class TestAdapters(unittest.TestCase):
         self.assertIn("Do not modify these files in your returned patch:", prompt)
         self.assertIn("- tests/x.py", prompt)
 
+    def test_build_prompt_does_not_include_reference_patch(self) -> None:
+        prompt = _build_prompt(
+            solver_id="solver-a",
+            model="gpt-5.4",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+                "patch": "diff --git a/src/x.py b/src/x.py\n+secret\n",
+                "test_patch": "diff --git a/tests/x.py b/tests/x.py\n+test\n",
+            },
+        )
+
+        self.assertNotIn("Reference patch:", prompt)
+        self.assertNotIn("+secret", prompt)
+        self.assertIn("Test patch:", prompt)
+
     def test_build_solver_adapters_constructs_mock_adapter(self) -> None:
         instance_row = {
             "instance_id": "repo__sample-1",
