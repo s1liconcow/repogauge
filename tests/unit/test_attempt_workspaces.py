@@ -66,6 +66,7 @@ def test_prepare_attempt_workspace_is_isolated_and_persists_artifacts(
         assert pack["base_commit"] == commit
         assert pack["solver_id"] == "solver-a"
         assert pack["instance_id"] == row["instance_id"]
+        assert pack["immutable_paths"] == []
         assert (attempt.workspace_path / ".git").is_dir()
         remotes = run_command(
             ["git", "-C", str(attempt.workspace_path), "remote"]
@@ -78,6 +79,7 @@ def test_prepare_attempt_workspace_is_isolated_and_persists_artifacts(
         agents_text = (attempt.workspace_path / "AGENTS.md").read_text(encoding="utf-8")
         assert "disposable benchmark attempt sandbox" in agents_text
         assert "Do not run repo triage workflows" in agents_text
+        assert "Do not modify held-out regression test files" in agents_text
         codex_config = (attempt.codex_home_root / ".codex" / "config.toml").read_text(
             encoding="utf-8"
         )
@@ -143,6 +145,34 @@ def test_prepare_attempt_workspace_overrides_repo_agents_file(tmp_path: Path) ->
         assert (
             "Return the patch/output requested by the benchmark harness." in agents_text
         )
+
+
+def test_prepare_attempt_workspace_records_immutable_paths_in_instruction_pack(
+    tmp_path: Path,
+) -> None:
+    repo, commit = _create_repo(tmp_path)
+    row = _attempt_row(commit)
+    row["test_patch"] = (
+        "diff --git a/tests/test_src.py b/tests/test_src.py\n"
+        "+++ b/tests/test_src.py\n"
+        "@@ -0,0 +1 @@\n"
+        "+def test_added():\n"
+    )
+
+    with prepare_attempt_workspace(
+        repo_root=repo,
+        instance_row=row,
+        attempt_id="att-immutable-pack",
+        solver_id="solver-a",
+        workspaces_root=tmp_path / "workspaces",
+    ) as attempt:
+        pack = json.loads(attempt.instruction_pack_path.read_text(encoding="utf-8"))
+
+    assert pack["immutable_paths"] == ["tests/test_src.py"]
+    assert pack["benchmark_contract"]["test_patch_is_benchmark_owned"] is True
+    assert pack["benchmark_contract"]["do_not_modify_immutable_paths"] == [
+        "tests/test_src.py"
+    ]
 
 
 def test_normalize_solver_output_from_diff(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ from repogauge.runner.adapters import (
     OpenAIResponsesAdapter,
     MockSolverAdapter,
     SolverAdapterError,
+    _build_prompt,
     _claude_cli_child_env_for_home,
     build_solver_adapters,
 )
@@ -78,6 +79,27 @@ def _solver(*, adapter: str = SOLVER_ADAPTER_MOCK) -> MatrixSolver:
 
 
 class TestAdapters(unittest.TestCase):
+    def test_build_prompt_marks_test_patch_files_immutable(self) -> None:
+        prompt = _build_prompt(
+            solver_id="solver-a",
+            model="gpt-5.4",
+            attempt_index=1,
+            instance_row={
+                "instance_id": "repo__sample-1",
+                "repo": "repo",
+                "base_commit": "abc123",
+                "problem_statement": "fix bug",
+                "test_patch": "diff --git a/tests/x.py b/tests/x.py\n+test\n",
+            },
+        )
+
+        self.assertIn(
+            "The files in test_patch are benchmark-owned regression tests.",
+            prompt,
+        )
+        self.assertIn("Do not modify these files in your returned patch:", prompt)
+        self.assertIn("- tests/x.py", prompt)
+
     def test_build_solver_adapters_constructs_mock_adapter(self) -> None:
         instance_row = {
             "instance_id": "repo__sample-1",

@@ -378,6 +378,15 @@ def _safe_attempt_log_dir(root: Path, attempt_id: str) -> Path:
     return root / safe_id
 
 
+def _immutable_paths(dataset_row: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if dataset_row is None:
+        return ()
+    raw = dataset_row.get("immutable_paths")
+    if isinstance(raw, list):
+        return tuple(str(value).strip() for value in raw if str(value).strip())
+    return tuple(extract_patch_paths(str(dataset_row.get("test_patch") or "")))
+
+
 def _coerce_attempt_index(attempt_id: str) -> int:
     parts = attempt_id.rsplit(":attempt-", 1)
     if len(parts) != 2:
@@ -742,11 +751,7 @@ class SolverScheduler:
             )
 
         try:
-            excluded_paths = ()
-            if dataset_row is not None:
-                excluded_paths = tuple(
-                    extract_patch_paths(str(dataset_row.get("test_patch") or ""))
-                )
+            excluded_paths = _immutable_paths(dataset_row)
             normalized = normalize_solver_output(
                 result.model_patch or result.raw_output,
                 attempt=attempt_workspace,

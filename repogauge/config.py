@@ -106,6 +106,7 @@ class DatasetInstance(ContractRecord):
     version: str = ""
     patch: str = ""
     test_patch: str = ""
+    immutable_paths: List[str] = field(default_factory=list)
     FAIL_TO_PASS: List[str] = field(default_factory=list)
     PASS_TO_PASS: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)

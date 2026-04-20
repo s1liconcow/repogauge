@@ -10,6 +10,7 @@ def test_dataset_instance_round_trip():
         version="v1",
         patch="diff --git a/x.py b/x.py",
         test_patch="diff --git a/test_x.py b/test_x.py",
+        immutable_paths=["tests/test.py"],
         FAIL_TO_PASS=["tests/test.py::test_regression"],
         PASS_TO_PASS=["tests/test.py::test_existing"],
     )

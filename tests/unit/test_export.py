@@ -114,6 +114,12 @@ class TestMaterialize(unittest.TestCase):
             self.assertIn("diff --git", ready_rows[0]["patch"])
             self.assertIn("src/module.py", ready_rows[0]["prod_patch"])
             self.assertIn("tests/test_module.py", ready_rows[0]["test_patch"])
+            self.assertEqual(
+                ready_rows[0]["metadata"]["materialization"]["split_meta"][
+                    "test_files"
+                ],
+                ["tests/test_module.py"],
+            )
             self.assertEqual(rejected_rows[0]["reason"], "empty_test_patch_after_split")
 
     def test_run_materialization_rejects_missing_commit(self) -> None:
@@ -277,7 +283,12 @@ class TestExportCommand(unittest.TestCase):
             self.assertEqual(dataset_rows[0]["instance_id"], "owner__repo-rg-11a")
             self.assertEqual(dataset_rows[0]["repo"], "owner/repo")
             self.assertEqual(dataset_rows[0]["version"], "0.0.0")
+            self.assertEqual(dataset_rows[0]["immutable_paths"], ["tests/test_x.py"])
             self.assertEqual(dataset_rows[0]["FAIL_TO_PASS"], ["t1"])
+            self.assertEqual(
+                dataset_rows[0]["metadata"]["benchmark_contract"]["immutable_paths"],
+                ["tests/test_x.py"],
+            )
             self.assertEqual(
                 prediction_rows[0]["model_patch"], dataset_rows[0]["patch"]
             )

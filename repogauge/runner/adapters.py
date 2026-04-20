@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from repogauge.exec import run_command
+from repogauge.validation.testsel import extract_patch_paths
 
 from .container_exec import WorkspaceContainerError, run_solver_command_in_container
 from .pricing import estimate_public_api_cost_usd, read_cost_usd
@@ -494,6 +495,16 @@ def _required_instance_fields(instance_row: Mapping[str, Any] | None) -> dict[st
     return row
 
 
+def _immutable_paths_for_instance(row: Mapping[str, Any]) -> list[str]:
+    raw = row.get("immutable_paths")
+    if isinstance(raw, list):
+        return [str(value).strip() for value in raw if str(value).strip()]
+    test_patch = row.get("test_patch")
+    if isinstance(test_patch, str) and test_patch.strip():
+        return extract_patch_paths(test_patch)
+    return []
+
+
 def _build_prompt(
     *, solver_id: str, model: str, attempt_index: int, instance_row: Mapping[str, Any]
 ) -> str:
@@ -507,6 +518,16 @@ def _build_prompt(
         f"Model: {model}".strip(),
         "Return a unified diff rooted at repository root with diff --git headers.",
     ]
+    immutable_paths = _immutable_paths_for_instance(row)
+    if immutable_paths:
+        prompt.extend(
+            [
+                "The files in test_patch are benchmark-owned regression tests. Treat them as immutable inputs.",
+                "Do not modify these files in your returned patch:",
+                *[f"- {path}" for path in immutable_paths],
+                "Focus your patch on production code or non-test support files needed to satisfy the held-out tests.",
+            ]
+        )
     if row.get("patch"):
         prompt.append(f"Reference patch:\n{row['patch']}")
     if row.get("test_patch"):

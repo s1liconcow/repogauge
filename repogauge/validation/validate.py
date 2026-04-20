@@ -172,6 +172,13 @@ def _emit_eval_progress(
     print(f"repogauge eval: {message}", file=progress_stream, flush=True)
 
 
+def _immutable_paths(ds: Mapping[str, Any], test_patch: str) -> List[str]:
+    raw = ds.get("immutable_paths")
+    if isinstance(raw, list):
+        return [str(value).strip() for value in raw if str(value).strip()]
+    return extract_patch_paths(test_patch)
+
+
 def _result_row_from_outcome(
     *,
     ds: Mapping[str, Any],
@@ -861,7 +868,8 @@ def _eval_instance(
     targeted_test_cmd, targeted_test_inputs = build_targeted_test_plan(
         test_cmd_base, test_patch
     )
-    withheld_test_paths = extract_patch_paths(test_patch)
+    row_for_paths = instance_row if isinstance(instance_row, Mapping) else {}
+    withheld_test_paths = _immutable_paths(row_for_paths, test_patch)
     sanitized_pred_patch, _excluded_patch, withheld_test_paths_touched = (
         exclude_patch_paths(pred_patch, withheld_test_paths)
     )

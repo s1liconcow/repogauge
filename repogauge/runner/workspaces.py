@@ -11,6 +11,7 @@ from typing import Any, Iterator, Mapping
 from contextlib import contextmanager
 
 from repogauge.utils.git import scoped_checkout
+from repogauge.validation.testsel import extract_patch_paths
 
 
 _BENCHMARK_AGENTS_FILENAME = "AGENTS.md"
@@ -29,6 +30,8 @@ Rules:
 - Do not push, commit, branch, or modify git metadata.
 - Do not perform session wrap-up steps such as smoke tests, release checks, or handoff docs.
 - Prefer the smallest useful set of reads, one patch, and only the most relevant validation command.
+- Treat files supplied through `test_patch` as benchmark-owned immutable inputs.
+- Do not modify held-out regression test files in your patch.
 - Return the patch/output requested by the benchmark harness.
 """
 
@@ -69,6 +72,13 @@ def _resolve_attempt_root(workspaces_root: Path, attempt_id: str) -> Path:
     return workspaces_root / safe_id
 
 
+def _immutable_paths(instance_row: Mapping[str, Any]) -> list[str]:
+    raw = instance_row.get("immutable_paths")
+    if isinstance(raw, list):
+        return [str(value).strip() for value in raw if str(value).strip()]
+    return extract_patch_paths(_instance_value(instance_row, "test_patch"))
+
+
 def _write_instruction_pack(
     *,
     path: Path,
@@ -79,6 +89,7 @@ def _write_instruction_pack(
     prompt_policy: Mapping[str, Any] | None,
     tool_policy: Mapping[str, Any] | None,
 ) -> None:
+    immutable_paths = _immutable_paths(instance_row)
     payload = {
         "attempt_id": attempt_id,
         "instance_id": _instance_value(instance_row, "instance_id"),
@@ -86,6 +97,11 @@ def _write_instruction_pack(
         "base_commit": base_commit,
         "problem_statement": _instance_value(instance_row, "problem_statement"),
         "solver_id": solver_id,
+        "immutable_paths": immutable_paths,
+        "benchmark_contract": {
+            "test_patch_is_benchmark_owned": bool(immutable_paths),
+            "do_not_modify_immutable_paths": immutable_paths,
+        },
         "prompt_policy": dict(_coerce_dict(prompt_policy)),
         "tool_policy": dict(_coerce_dict(tool_policy)),
         "expected_output": {

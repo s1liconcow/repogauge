@@ -12,6 +12,7 @@ from typing import Any, Dict, Sequence
 
 from repogauge.artifacts import ArtifactLayout
 from repogauge.config import DatasetInstance, PredictionRow
+from repogauge.validation.testsel import extract_patch_paths
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -115,6 +116,7 @@ def _to_dataset_rows(
 
         fail_to_pass = _coerce_test_ids(metadata_value.get("FAIL_TO_PASS"))
         pass_to_pass = _coerce_test_ids(metadata_value.get("PASS_TO_PASS"))
+        immutable_paths = extract_patch_paths(test_patch)
         if "problem_statement_source" in metadata_value:
             metadata_value = dict(metadata_value)
             metadata_value["problem_statement_source"] = metadata_value[
@@ -128,6 +130,7 @@ def _to_dataset_rows(
             version=_coerce_version(row),
             patch=prod_patch,
             test_patch=test_patch,
+            immutable_paths=immutable_paths,
             FAIL_TO_PASS=fail_to_pass,
             PASS_TO_PASS=pass_to_pass,
             metadata={
@@ -135,6 +138,10 @@ def _to_dataset_rows(
                 "source_repo": repo,
                 "source_candidate_id": candidate_id,
                 "source_short_commit": _coerce_short_commit(commit, fallback="unknown"),
+                "benchmark_contract": {
+                    "immutable_paths": immutable_paths,
+                    "test_patch_is_benchmark_owned": bool(immutable_paths),
+                },
                 **metadata_value,
             },
         )
