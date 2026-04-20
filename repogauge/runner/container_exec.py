@@ -41,6 +41,20 @@ _CONTAINER_CODEX_SEED_HOME = f"{_CONTAINER_ATTEMPT_ROOT}/codex-home"
 _CONTAINER_CODEX_RUNTIME_HOME = "/home/nonroot/.repogauge-codex-home"
 _CONTAINER_OPENCODE_SEED_HOME = f"{_CONTAINER_ATTEMPT_ROOT}/opencode-home"
 _CONTAINER_OPENCODE_RUNTIME_HOME = "/home/nonroot/.repogauge-opencode-home"
+_CONTAINER_ENV_DROP_KEYS = frozenset(
+    {
+        "PATH",
+        "PYTHONHOME",
+        "VIRTUAL_ENV",
+        "CONDA_DEFAULT_ENV",
+        "CONDA_PREFIX",
+        "CONDA_PROMPT_MODIFIER",
+        "CONDA_EXE",
+        "_CE_CONDA",
+        "_CE_M",
+    }
+)
+_CONTAINER_ENV_DROP_PREFIXES = ("CONDA_",)
 
 
 class WorkspaceContainerError(RuntimeError):
@@ -434,6 +448,12 @@ def _containerize_environment(
     workspace_path: Path | None = None,
 ) -> dict[str, str]:
     command_env = dict(environment or {})
+    # Keep host activation state from shadowing toolchains installed in the image.
+    for key in list(command_env):
+        if key in _CONTAINER_ENV_DROP_KEYS or any(
+            key.startswith(prefix) for prefix in _CONTAINER_ENV_DROP_PREFIXES
+        ):
+            command_env.pop(key, None)
     host_attempt_root = str(attempt_root.resolve())
     host_workspace = str(workspace_path.resolve()) if workspace_path is not None else None
     for key, value in list(command_env.items()):

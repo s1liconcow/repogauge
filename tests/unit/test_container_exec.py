@@ -179,6 +179,9 @@ def test_containerize_environment_rewrites_attempt_root_paths(tmp_path: Path) ->
             "PYTHONPATH": str(workspace),
             "GOCACHE": str(workspace / ".gocache"),
             "PATH": "/usr/bin:/bin",
+            "VIRTUAL_ENV": "/tmp/venv",
+            "CONDA_PREFIX": "/tmp/conda",
+            "OPENAI_API_KEY": "test-key",
         },
         attempt_root=attempt_root,
         workspace_path=workspace,
@@ -189,7 +192,7 @@ def test_containerize_environment_rewrites_attempt_root_paths(tmp_path: Path) ->
         "CODEX_HOME": "/repogauge/codex-home/.codex",
         "PYTHONPATH": "/testbed",
         "GOCACHE": "/testbed/.gocache",
-        "PATH": "/usr/bin:/bin",
+        "OPENAI_API_KEY": "test-key",
     }
 
 
