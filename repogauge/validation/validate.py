@@ -39,7 +39,7 @@ from repogauge.runner.container_exec import (
     run_workspace_command_in_container,
 )
 from repogauge.runner.progress import CountedProgressReporter
-from repogauge.utils.git import CommandPatchError, apply_patch_text, create_worktree
+from repogauge.utils.git import CommandPatchError, apply_patch_text, create_checkout
 from repogauge.validation.junit_parser import (
     JUnitParseError,
     OUTCOME_PASS,
@@ -639,7 +639,7 @@ def _run_validation_pass(
     active_adapter = _resolve_adapter(adapter)
 
     try:
-        wt = create_worktree(repo_root, ref=base_commit)
+        wt = create_checkout(repo_root, ref=base_commit)
         if test_patch.strip():
             apply_patch_text(wt.path, test_patch)
         if pred_patch.strip():

@@ -10,7 +10,7 @@ from typing import Any, Iterator, Mapping
 
 from contextlib import contextmanager
 
-from repogauge.utils.git import scoped_worktree
+from repogauge.utils.git import scoped_checkout
 
 
 _BENCHMARK_AGENTS_FILENAME = "AGENTS.md"
@@ -174,8 +174,8 @@ def prepare_attempt_workspace(
         tool_policy=tool_policy,
     )
 
-    with scoped_worktree(
-        repo_root, ref=base_commit, worktree_path=workspace_root
+    with scoped_checkout(
+        repo_root, ref=base_commit, checkout_path=workspace_root
     ) as worktree:
         _write_benchmark_agents(worktree)
         _prepare_codex_home(codex_home_root)

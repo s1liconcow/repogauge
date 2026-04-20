@@ -134,6 +134,16 @@ class WorktreeHandle:
         remove_worktree(self.repo, self.path)
 
 
+@dataclass
+class CheckoutHandle:
+    """Handle for a disposable self-contained clone checkout."""
+
+    path: Path
+
+    def remove(self) -> None:
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
 def _prune_worktrees(repo: Path) -> None:
     run_command(["git", "-C", str(repo), "worktree", "prune"])
 
@@ -193,12 +203,78 @@ def remove_worktree(path: str | Path, worktree_path: str | Path) -> None:
     _prune_worktrees(root)
 
 
+def create_checkout(
+    path: str | Path,
+    *,
+    ref: str = "HEAD",
+    checkout_path: Optional[str | Path] = None,
+) -> CheckoutHandle:
+    """Create a self-contained disposable clone checkout at ``ref``."""
+    repo = get_repo_root(path)
+    if checkout_path is None:
+        temp_path = Path(tempfile.mkdtemp(prefix="repogauge-co-"))
+        temp_path.rmdir()
+    else:
+        temp_path = Path(checkout_path)
+
+    if temp_path.exists():
+        shutil.rmtree(temp_path, ignore_errors=True)
+
+    clone_result = run_command(
+        [
+            "git",
+            "clone",
+            "--local",
+            "--quiet",
+            "--no-checkout",
+            str(repo),
+            str(temp_path),
+        ]
+    )
+    if not clone_result.success:
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
+        raise GitError(
+            f"failed to create checkout: {clone_result.stderr.strip() or clone_result.stdout}"
+        )
+
+    setup_commands = (
+        ["git", "-C", str(temp_path), "config", "core.fileMode", "false"],
+        ["git", "-C", str(temp_path), "checkout", "--detach", ref],
+        ["git", "-C", str(temp_path), "remote", "remove", "origin"],
+    )
+    for cmd in setup_commands:
+        result = run_command(cmd)
+        if result.success:
+            continue
+        if cmd[-2:] == ["remove", "origin"]:
+            continue
+        shutil.rmtree(temp_path, ignore_errors=True)
+        raise GitError(
+            f"failed to prepare checkout: {result.stderr.strip() or result.stdout}"
+        )
+
+    return CheckoutHandle(path=temp_path)
+
+
 @contextmanager
 def scoped_worktree(
     path: str | Path, *, ref: str = "HEAD", worktree_path: Optional[str | Path] = None
 ) -> Iterator[Path]:
     """Context manager yielding a temporary worktree path."""
     handle = create_worktree(path, ref=ref, worktree_path=worktree_path)
+    try:
+        yield handle.path
+    finally:
+        handle.remove()
+
+
+@contextmanager
+def scoped_checkout(
+    path: str | Path, *, ref: str = "HEAD", checkout_path: Optional[str | Path] = None
+) -> Iterator[Path]:
+    """Context manager yielding a self-contained disposable clone checkout."""
+    handle = create_checkout(path, ref=ref, checkout_path=checkout_path)
     try:
         yield handle.path
     finally:

@@ -66,6 +66,15 @@ def test_prepare_attempt_workspace_is_isolated_and_persists_artifacts(
         assert pack["base_commit"] == commit
         assert pack["solver_id"] == "solver-a"
         assert pack["instance_id"] == row["instance_id"]
+        assert (attempt.workspace_path / ".git").is_dir()
+        remotes = run_command(
+            ["git", "-C", str(attempt.workspace_path), "remote"]
+        ).stdout.strip()
+        filemode = run_command(
+            ["git", "-C", str(attempt.workspace_path), "config", "--get", "core.fileMode"]
+        ).stdout.strip()
+        assert remotes == ""
+        assert filemode == "false"
         agents_text = (attempt.workspace_path / "AGENTS.md").read_text(encoding="utf-8")
         assert "disposable benchmark attempt sandbox" in agents_text
         assert "Do not run repo triage workflows" in agents_text

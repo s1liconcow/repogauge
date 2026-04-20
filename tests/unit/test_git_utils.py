@@ -4,6 +4,7 @@ from unittest import mock
 
 from repogauge.exec import CommandResult, run_command
 from repogauge.utils.git import (
+    create_checkout,
     apply_patch_text,
     create_worktree,
     extract_commit_diff,
@@ -12,6 +13,7 @@ from repogauge.utils.git import (
     list_commit_parents,
     list_commits,
     remove_worktree,
+    scoped_checkout,
     scoped_worktree,
 )
 
@@ -79,6 +81,45 @@ def test_scoped_worktree_path_cleanup(tmp_path: Path):
         }
         tracked = os.path.abspath(str(worktree))
     assert not os.path.exists(tracked)
+
+
+def test_scoped_checkout_path_cleanup(tmp_path: Path):
+    repo = _repo(tmp_path)
+    with scoped_checkout(repo) as checkout:
+        assert (checkout / "hello.txt").read_text(encoding="utf-8") in {
+            "first\n",
+            "second\n",
+        }
+        tracked = os.path.abspath(str(checkout))
+    assert not os.path.exists(tracked)
+
+
+def test_create_checkout_is_self_contained_without_origin_and_ignores_filemode(
+    tmp_path: Path,
+):
+    repo = _repo(tmp_path)
+    head = list_commits(repo, max_count=1)[0]
+
+    handle = create_checkout(repo, ref=head, checkout_path=tmp_path / "checkout")
+    try:
+        git_dir = run_command(
+            ["git", "-C", str(handle.path), "rev-parse", "--git-dir"]
+        ).stdout.strip()
+        git_common_dir = run_command(
+            ["git", "-C", str(handle.path), "rev-parse", "--git-common-dir"]
+        ).stdout.strip()
+        remotes = run_command(["git", "-C", str(handle.path), "remote"]).stdout.strip()
+        filemode = run_command(
+            ["git", "-C", str(handle.path), "config", "--get", "core.fileMode"]
+        ).stdout.strip()
+
+        assert git_dir == ".git"
+        assert git_common_dir == ".git"
+        assert (handle.path / ".git").is_dir()
+        assert remotes == ""
+        assert filemode == "false"
+    finally:
+        handle.remove()
 
 
 def test_create_worktree_prunes_and_retries_stale_registration(tmp_path: Path):
