@@ -155,6 +155,14 @@ def _sanitize_container_name(value: str) -> str:
     return normalized.lower()[:120]
 
 
+def _scoped_container_name(
+    *, attempt_id: str, role: str, scope_paths: tuple[Path, ...]
+) -> str:
+    scope_key = "\n".join(str(path.resolve()) for path in scope_paths)
+    digest = hashlib.sha256(scope_key.encode("utf-8")).hexdigest()[:12]
+    return _sanitize_container_name(f"repogauge-{attempt_id}-{role}-{digest}")
+
+
 def _image_prep_lock(key: str) -> threading.Lock:
     with _IMAGE_PREP_LOCK:
         lock = _IMAGE_PREP_LOCKS.get(key)
@@ -838,7 +846,11 @@ def workspace_container_session(
                 client=client,
             )
 
-        container_name = _sanitize_container_name(f"repogauge-{attempt_id}-workspace")
+        container_name = _scoped_container_name(
+            attempt_id=attempt_id,
+            role="workspace",
+            scope_paths=(attempt_root, workspace_path),
+        )
         try:
             existing = client.containers.get(container_name)
             existing.remove(force=True)
@@ -951,7 +963,11 @@ def run_solver_command_in_container(
             client=client,
         )
 
-        container_name = _sanitize_container_name(f"repogauge-{attempt_id}-solver")
+        container_name = _scoped_container_name(
+            attempt_id=attempt_id,
+            role="solver",
+            scope_paths=(attempt_root, workspace_path),
+        )
         try:
             existing = client.containers.get(container_name)
             existing.remove(force=True)

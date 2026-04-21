@@ -16,6 +16,9 @@ class ContainerRuntimeError(RuntimeError):
     """Raised when the configured container runtime cannot be used."""
 
 
+REPOGAUGE_CONTAINER_PREFIX = "repogauge-"
+
+
 def coerce_container_host(
     *, container_runtime: str, container_host: str | None
 ) -> str | None:
@@ -57,6 +60,51 @@ def docker_client(*, container_host: str | None):
     overrides = {"DOCKER_HOST": container_host} if container_host else {}
     with temporary_environment(overrides):
         return docker_module.from_env()
+
+
+def cleanup_repogauge_containers(
+    *,
+    container_host: str | None,
+    name_prefix: str = REPOGAUGE_CONTAINER_PREFIX,
+) -> list[dict[str, str]]:
+    client = docker_client(container_host=container_host)
+    try:
+        containers = list(client.containers.list(all=True))
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ContainerRuntimeError(f"failed to list containers: {exc}") from exc
+
+    matching = sorted(
+        (
+            container
+            for container in containers
+            if str(getattr(container, "name", "")).strip().startswith(name_prefix)
+        ),
+        key=lambda container: (
+            str(getattr(container, "name", "")).strip(),
+            str(getattr(container, "id", "")).strip(),
+        ),
+    )
+
+    removed: list[dict[str, str]] = []
+    for container in matching:
+        container_id = str(getattr(container, "id", "")).strip()
+        container_name = str(getattr(container, "name", "")).strip()
+        container_status = str(getattr(container, "status", "")).strip()
+        try:
+            container.remove(force=True)
+        except Exception as exc:
+            label = container_name or container_id or "<unknown>"
+            raise ContainerRuntimeError(
+                f"failed to remove container {label}: {exc}"
+            ) from exc
+        removed.append(
+            {
+                "id": container_id,
+                "name": container_name,
+                "status": container_status,
+            }
+        )
+    return removed
 
 
 def unix_socket_path(container_host: str | None) -> Path | None:

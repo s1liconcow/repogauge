@@ -13,6 +13,7 @@ from repogauge.runner.container_exec import (
     _local_repo_setup_commands,
     _resolve_image_from_adapter_spec,
     _resolve_host_tool_fallback,
+    _scoped_container_name,
     _shared_cache_mounts,
     _solver_shell_command,
     _workspace_setup_timeout,
@@ -306,6 +307,28 @@ def test_workspace_setup_timeout_has_higher_floor_than_test_timeout() -> None:
     assert _workspace_setup_timeout(None) is None
     assert _workspace_setup_timeout(120) == 600
     assert _workspace_setup_timeout(900) == 900
+
+
+def test_scoped_container_name_distinguishes_parallel_workspaces(tmp_path: Path) -> None:
+    first_attempt_root = tmp_path / "eval-a"
+    second_attempt_root = tmp_path / "eval-b"
+    first_workspace = first_attempt_root / "checkout"
+    second_workspace = second_attempt_root / "checkout"
+
+    first = _scoped_container_name(
+        attempt_id="eval-inst-1-session",
+        role="workspace",
+        scope_paths=(first_attempt_root, first_workspace),
+    )
+    second = _scoped_container_name(
+        attempt_id="eval-inst-1-session",
+        role="workspace",
+        scope_paths=(second_attempt_root, second_workspace),
+    )
+
+    assert first != second
+    assert first.startswith("repogauge-eval-inst-1-session-workspace-")
+    assert second.startswith("repogauge-eval-inst-1-session-workspace-")
 
 
 def test_workspace_container_session_reads_from_mounted_root_and_copies_outputs(

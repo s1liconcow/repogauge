@@ -51,7 +51,11 @@ from repogauge.runner.router import (
     run_router_training,
     write_router_training_rows,
 )
-from repogauge.runner.runtime import ensure_container_runtime, temporary_environment
+from repogauge.runner.runtime import (
+    cleanup_repogauge_containers,
+    ensure_container_runtime,
+    temporary_environment,
+)
 from repogauge.runner.scheduler import (
     SolverAttemptState,
     SolverScheduler,
@@ -99,7 +103,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RepoGauge CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for name in ["mine", "review", "export", "eval", "run", "analyze", "train-router"]:
+    for name in [
+        "mine",
+        "review",
+        "export",
+        "eval",
+        "run",
+        "analyze",
+        "train-router",
+        "cleanup",
+    ]:
         cmd = subparsers.add_parser(name, help=f"{name} command")
         cmd.add_argument("path", nargs="?", help="Command input path.")
         cmd.add_argument("--config", help=CONFIG_HELP)
@@ -316,6 +329,17 @@ def _build_parser() -> argparse.ArgumentParser:
                 type=int,
                 help="Maximum tree depth for the supervised router baseline.",
             )
+        if name == "cleanup":
+            cmd.add_argument(
+                "--container-runtime",
+                choices=["docker", "podman"],
+                default="podman",
+                help="Container runtime to clean up.",
+            )
+            cmd.add_argument(
+                "--container-host",
+                help="Docker-compatible socket/host override for cleanup.",
+            )
 
     return parser
 
@@ -370,6 +394,16 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
         "llm_model": getattr(namespace, "llm_model", ""),
         "llm_provider": getattr(namespace, "llm_provider", ""),
         "triage_hints": getattr(namespace, "triage_hints", ""),
+        "container_runtime": (
+            getattr(namespace, "container_runtime", "")
+            if command in {"eval", "run", "analyze", "cleanup"}
+            else ""
+        ),
+        "container_host": (
+            getattr(namespace, "container_host", "")
+            if command in {"eval", "run", "analyze", "cleanup"}
+            else ""
+        ),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -999,6 +1033,99 @@ def _run_command(namespace: argparse.Namespace) -> int:
             events_path,
         )
         return 0
+
+    if command == "cleanup":
+        manifest.mark_step(
+            "inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp
+        )
+        try:
+            with ensure_container_runtime(
+                container_runtime=getattr(namespace, "container_runtime", "podman"),
+                container_host=getattr(namespace, "container_host", None),
+                log_prefix="repogauge cleanup",
+            ) as resolved_container_host:
+                removed = cleanup_repogauge_containers(
+                    container_host=resolved_container_host
+                )
+
+            cleanup_report = {
+                "container_runtime": getattr(namespace, "container_runtime", "podman"),
+                "container_host": resolved_container_host,
+                "requested_container_host": getattr(namespace, "container_host", None),
+                "removed_count": len(removed),
+                "removed": removed,
+            }
+            cleanup_report_path = out_root / "cleanup.json"
+            cleanup_report_path.write_text(
+                json.dumps(cleanup_report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+            manifest.mark_step(
+                "execute",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.artifact_paths["cleanup"] = str(cleanup_report_path)
+            manifest.metadata["cleanup"] = cleanup_report
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.finish(
+                status="succeeded",
+                metadata={"reason": "cleanup_complete"},
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "removed_count": len(removed),
+                },
+                events_path,
+            )
+            print(
+                f"repogauge cleanup: removed {len(removed)} containers",
+                file=sys.stderr,
+            )
+            return 0
+        except Exception as exc:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={"reason": "cleanup_failed", "error": str(exc)},
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            print(f"repogauge cleanup: error: {exc}", file=sys.stderr)
+            return 1
 
     if command == "review":
         if not namespace.path:

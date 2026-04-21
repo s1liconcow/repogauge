@@ -30,8 +30,12 @@ class TestCliSurface(unittest.TestCase):
             "run",
             "analyze",
             "train-router",
+            "cleanup",
         ):
-            namespace = self.parser.parse_args([cmd, "./input"])
+            args = [cmd]
+            if cmd != "cleanup":
+                args.append("./input")
+            namespace = self.parser.parse_args(args)
             self.assertEqual(namespace.command, cmd)
 
     def test_stable_flags_exist(self) -> None:
@@ -140,6 +144,17 @@ class TestCliSurface(unittest.TestCase):
         self.assertTrue(namespace.judge_diffs)
         self.assertEqual(namespace.judge_model, "judge-unit")
         self.assertEqual(namespace.judge_provider, "local")
+        namespace = self.parser.parse_args(
+            [
+                "cleanup",
+                "--container-runtime",
+                "docker",
+                "--container-host",
+                "unix:///tmp/docker.sock",
+            ]
+        )
+        self.assertEqual(namespace.container_runtime, "docker")
+        self.assertEqual(namespace.container_host, "unix:///tmp/docker.sock")
 
     def test_llm_mode_help_notes_review_and_analyze_behavior(self) -> None:
         subparsers_action = next(
@@ -1885,6 +1900,84 @@ solvers:
             self.assertEqual(result, 0)
             self.assertEqual(mock_eval.call_args.kwargs["container_runtime"], "podman")
             self.assertIsNone(mock_eval.call_args.kwargs["container_host"])
+
+    def test_cleanup_removes_repogauge_containers(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            out_root = Path(workspace) / "cleanup-out"
+
+            @contextmanager
+            def fake_runtime(
+                *, container_runtime: str, container_host: str | None, log_prefix: str
+            ):
+                self.assertEqual(container_runtime, "podman")
+                self.assertIsNone(container_host)
+                self.assertEqual(log_prefix, "repogauge cleanup")
+                yield "unix:///tmp/podman.sock"
+
+            removed = [
+                {
+                    "id": "abc123",
+                    "name": "repogauge-eval-one",
+                    "status": "running",
+                }
+            ]
+
+            with (
+                patch("repogauge.cli.ensure_container_runtime", fake_runtime),
+                patch(
+                    "repogauge.cli.cleanup_repogauge_containers",
+                    return_value=removed,
+                ) as mock_cleanup,
+            ):
+                result = main(["cleanup", "--out", str(out_root)])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                mock_cleanup.call_args.kwargs["container_host"],
+                "unix:///tmp/podman.sock",
+            )
+            payload = json.loads((out_root / "cleanup.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["container_host"], "unix:///tmp/podman.sock")
+            self.assertEqual(payload["removed_count"], 1)
+            self.assertEqual(payload["removed"], removed)
+
+    def test_cleanup_propagates_runtime_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            out_root = Path(workspace) / "cleanup-out"
+
+            @contextmanager
+            def fake_runtime(
+                *, container_runtime: str, container_host: str | None, log_prefix: str
+            ):
+                self.assertEqual(container_runtime, "docker")
+                self.assertEqual(container_host, "unix:///tmp/docker.sock")
+                self.assertEqual(log_prefix, "repogauge cleanup")
+                yield "unix:///tmp/docker.sock"
+
+            with (
+                patch("repogauge.cli.ensure_container_runtime", fake_runtime),
+                patch(
+                    "repogauge.cli.cleanup_repogauge_containers",
+                    return_value=[],
+                ) as mock_cleanup,
+            ):
+                result = main(
+                    [
+                        "cleanup",
+                        "--out",
+                        str(out_root),
+                        "--container-runtime",
+                        "docker",
+                        "--container-host",
+                        "unix:///tmp/docker.sock",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                mock_cleanup.call_args.kwargs["container_host"],
+                "unix:///tmp/docker.sock",
+            )
 
     def test_analyze_merge_retries_prefers_retry_rows(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
