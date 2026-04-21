@@ -1,24 +1,21 @@
 #!/usr/bin/env bash
 # Run repogauge against this repository.
 # Usage: scripts/gauge_self.sh [--out DIR] [--max-commits N] [--decisions FILE]
-#                               [--eval-workers N] [--eval-batch-size N]
-#                               [--eval-max-parallel-batches N]
-#                               [--eval-workers-per-batch N] [--eval-timeout SECONDS]
+#                               [--jobs N] [--eval-workers N]
+#                               [--eval-timeout SECONDS]
 #                               [--eval-container-runtime docker|podman]
 #                               [--eval-container-host URI]
 
 set -euo pipefail
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/codex-uv-cache}"
 OUT_DIR="$REPO_ROOT/out"
 # NOTE: --out must be a path inside the repo so that the export step can
 # resolve the git root by walking up from the output directory.
 MAX_COMMITS=300
 DECISIONS_FILE=""
-EVAL_WORKERS=4
-EVAL_BATCH_SIZE=32
-EVAL_MAX_PARALLEL_BATCHES=1
-EVAL_WORKERS_PER_BATCH=1
+JOBS=4
 EVAL_TIMEOUT=120
 EVAL_CONTAINER_RUNTIME="podman"
 EVAL_CONTAINER_HOST=""
@@ -28,10 +25,11 @@ while [[ $# -gt 0 ]]; do
         --out) OUT_DIR="$2"; shift 2 ;;
         --max-commits) MAX_COMMITS="$2"; shift 2 ;;
         --decisions) DECISIONS_FILE="$2"; shift 2 ;;
-        --eval-workers) EVAL_WORKERS="$2"; shift 2 ;;
-        --eval-batch-size) EVAL_BATCH_SIZE="$2"; shift 2 ;;
-        --eval-max-parallel-batches) EVAL_MAX_PARALLEL_BATCHES="$2"; shift 2 ;;
-        --eval-workers-per-batch) EVAL_WORKERS_PER_BATCH="$2"; shift 2 ;;
+        --jobs|--eval-workers) JOBS="$2"; shift 2 ;;
+        --eval-batch-size|--eval-max-parallel-batches|--eval-workers-per-batch)
+            echo "WARNING: $1 is deprecated and ignored; repogauge eval now uses --jobs." >&2
+            shift 2
+            ;;
         --eval-timeout) EVAL_TIMEOUT="$2"; shift 2 ;;
         --eval-container-runtime) EVAL_CONTAINER_RUNTIME="$2"; shift 2 ;;
         --eval-container-host) EVAL_CONTAINER_HOST="$2"; shift 2 ;;
@@ -67,10 +65,7 @@ EVAL_ARGS=(
     eval "$EXPORT_OUT"
     --gold
     --out "$EVAL_OUT"
-    --workers "$EVAL_WORKERS"
-    --batch-size "$EVAL_BATCH_SIZE"
-    --max-parallel-batches "$EVAL_MAX_PARALLEL_BATCHES"
-    --workers-per-batch "$EVAL_WORKERS_PER_BATCH"
+    --jobs "$JOBS"
     --timeout "$EVAL_TIMEOUT"
     --container-runtime "$EVAL_CONTAINER_RUNTIME"
 )
