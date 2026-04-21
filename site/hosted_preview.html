@@ -1,0 +1,2820 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#fafaf7">
+  <title>RepoGauge — Hosted (preview)</title>
+  <meta name="description" content="A preview of the hosted RepoGauge platform: dashboards, comparisons, live runs, and budget controls for evaluating coding agents on your own repositories.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+  <style>
+    /* ============================================================
+       Design tokens — aligned with site/index.html so the hosted
+       preview feels like a continuation of the marketing system.
+       ============================================================ */
+    :root {
+      color-scheme: light;
+
+      --ink:        #0a0c17;
+      --ink-soft:   #1a1f33;
+      --body:       #2a3145;
+      --muted:      #5a6379;
+      --muted-2:    #8892a6;
+      --line:       rgba(10, 12, 23, 0.07);
+      --line-strong:rgba(10, 12, 23, 0.14);
+      --line-soft:  rgba(10, 12, 23, 0.04);
+      --surface:    #ffffff;
+      --surface-2:  #f7f8fb;
+      --surface-3:  #eef0f6;
+      --cream:      #fafaf7;
+      --canvas:     #f4f5fa;
+
+      --night:      #06070f;
+      --night-2:    #0b0e1c;
+      --night-3:    #121733;
+      --night-line: rgba(255, 255, 255, 0.08);
+      --night-text: #e6ebf7;
+      --night-muted:#8892b3;
+
+      --accent:     #635bff;
+      --accent-2:   #22d3ee;
+      --accent-3:   #f472b6;
+      --accent-glow:#a78bfa;
+      --amber:      #fbbf24;
+      --emerald:    #10b981;
+      --coral:      #ff6a5b;
+      --rose:       #f43f5e;
+      --indigo:     #4f46e5;
+
+      --r-xs: 8px;
+      --r-sm: 12px;
+      --r-md: 16px;
+      --r-lg: 22px;
+      --r-xl: 28px;
+      --r-xxl:36px;
+
+      --shadow-xs: 0 1px 2px rgba(15, 20, 40, 0.05);
+      --shadow-sm: 0 4px 16px rgba(15, 20, 40, 0.06);
+      --shadow-md: 0 14px 40px rgba(15, 20, 40, 0.08);
+      --shadow-lg: 0 32px 70px rgba(15, 20, 40, 0.12);
+      --shadow-glow: 0 20px 50px -16px rgba(99, 91, 255, 0.42);
+
+      --sidebar-w: 264px;
+      --topbar-h: 64px;
+
+      --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+      --ease-spring: cubic-bezier(0.22, 1.4, 0.36, 1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+    body {
+      margin: 0;
+      font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+      font-feature-settings: "ss01", "cv11", "cv02";
+      color: var(--body);
+      background:
+        radial-gradient(1200px 600px at 100% -10%, rgba(99, 91, 255, 0.06), transparent 60%),
+        radial-gradient(900px 500px at -10% 0%, rgba(34, 211, 238, 0.05), transparent 55%),
+        var(--cream);
+      line-height: 1.5;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    button { cursor: pointer; border: 0; background: none; padding: 0; color: inherit; font: inherit; }
+    img, svg { display: block; max-width: 100%; }
+    h1, h2, h3, h4, h5, p { margin: 0; }
+    code, pre { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    input, textarea, select { font: inherit; color: inherit; }
+
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+    ::selection { background: rgba(99, 91, 255, 0.22); color: var(--ink); }
+
+    /* ============================================================
+       Preview ribbon — context that this is a designed mockup.
+       ============================================================ */
+    .preview-ribbon {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px 8px 12px;
+      border-radius: 999px;
+      background: rgba(10, 12, 23, 0.86);
+      color: white;
+      backdrop-filter: blur(14px) saturate(140%);
+      box-shadow: 0 12px 40px -12px rgba(10, 12, 23, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      font-size: 0.8rem;
+      font-weight: 500;
+      letter-spacing: -0.005em;
+      animation: ribbon-in 600ms var(--ease-spring) both 200ms;
+    }
+    .preview-ribbon b { font-weight: 700; }
+    .preview-ribbon .dot {
+      width: 7px; height: 7px;
+      border-radius: 999px;
+      background: var(--accent-2);
+      box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.22);
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    .preview-ribbon a {
+      color: var(--accent-glow);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      letter-spacing: 0.04em;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(167, 139, 250, 0.12);
+      transition: background 160ms ease;
+    }
+    .preview-ribbon a:hover { background: rgba(167, 139, 250, 0.22); }
+    @keyframes ribbon-in {
+      from { transform: translate(-50%, -20px); opacity: 0; }
+      to   { transform: translate(-50%, 0); opacity: 1; }
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.22); }
+      50%      { box-shadow: 0 0 0 6px rgba(34, 211, 238, 0.06); }
+    }
+
+    /* ============================================================
+       App shell layout
+       ============================================================ */
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr; }
+    }
+
+    /* ============================================================
+       Sidebar
+       ============================================================ */
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 18px 14px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.3));
+      border-right: 1px solid var(--line);
+      backdrop-filter: blur(18px) saturate(140%);
+    }
+    @media (max-width: 980px) {
+      .sidebar { display: none; }
+    }
+
+    .workspace {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 10px;
+      border-radius: var(--r-md);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-xs);
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+      cursor: pointer;
+    }
+    .workspace:hover { border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+
+    .workspace__mark {
+      width: 32px; height: 32px;
+      border-radius: 9px;
+      background:
+        radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.85), transparent 36%),
+        conic-gradient(from 210deg at 50% 50%, #22d3ee, #635bff, #f472b6, #22d3ee);
+      display: grid;
+      place-items: center;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 6px 14px -4px rgba(99, 91, 255, 0.35);
+      flex-shrink: 0;
+      position: relative;
+    }
+    .workspace__mark::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 6px;
+      background: rgba(10, 12, 23, 0.86);
+    }
+    .workspace__mark svg { position: relative; z-index: 1; }
+
+    .workspace__meta { min-width: 0; flex: 1; }
+    .workspace__name {
+      font-size: 0.92rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .workspace__plan {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: linear-gradient(135deg, rgba(99, 91, 255, 0.14), rgba(34, 211, 238, 0.14));
+      color: var(--accent);
+      border: 1px solid rgba(99, 91, 255, 0.2);
+    }
+    .workspace__sub {
+      font-size: 0.74rem;
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      letter-spacing: 0.02em;
+    }
+    .workspace__chev {
+      color: var(--muted-2);
+      flex-shrink: 0;
+    }
+
+    .nav-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--r-sm);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.86rem;
+      cursor: pointer;
+      transition: border-color 160ms ease, background 160ms ease;
+    }
+    .nav-search:hover { border-color: var(--line-strong); background: var(--surface-2); }
+    .nav-search__hint {
+      margin-left: auto;
+      display: inline-flex;
+      gap: 2px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted-2);
+    }
+    .nav-search__hint kbd {
+      display: inline-grid;
+      place-items: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 4px;
+      border-radius: 5px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      box-shadow: inset 0 -1px 0 rgba(10,12,23,0.08);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.66rem;
+      color: var(--ink-soft);
+    }
+
+    .nav { display: flex; flex-direction: column; gap: 2px; }
+    .nav__group {
+      padding: 14px 12px 6px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+    }
+    .nav__item {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 8px 10px;
+      border-radius: var(--r-sm);
+      color: var(--ink-soft);
+      font-size: 0.92rem;
+      font-weight: 500;
+      letter-spacing: -0.005em;
+      position: relative;
+      transition: background 140ms ease, color 140ms ease;
+      width: 100%;
+      text-align: left;
+    }
+    .nav__item:hover { background: rgba(10, 12, 23, 0.04); color: var(--ink); }
+    .nav__item .nav__icon {
+      width: 18px; height: 18px;
+      color: var(--muted);
+      flex-shrink: 0;
+      transition: color 140ms ease;
+    }
+    .nav__item:hover .nav__icon { color: var(--ink-soft); }
+    .nav__count {
+      margin-left: auto;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      border: 1px solid var(--line);
+    }
+    .nav__count--live {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--emerald);
+      border-color: rgba(16, 185, 129, 0.22);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .nav__count--live::before {
+      content: "";
+      width: 5px; height: 5px;
+      border-radius: 999px;
+      background: var(--emerald);
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22);
+      animation: pulse-em 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse-em {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22); }
+      50%      { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.05); }
+    }
+
+    .nav__item--active {
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: var(--shadow-xs), inset 0 0 0 1px var(--line);
+    }
+    .nav__item--active .nav__icon { color: var(--accent); }
+    .nav__item--active::before {
+      content: "";
+      position: absolute;
+      left: -14px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 18px;
+      border-radius: 0 3px 3px 0;
+      background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    }
+
+    .sidebar__footer {
+      margin-top: auto;
+      display: grid;
+      gap: 10px;
+    }
+
+    .credits-card {
+      padding: 14px;
+      border-radius: var(--r-md);
+      background:
+        radial-gradient(120% 80% at 0% 0%, rgba(99, 91, 255, 0.12), transparent 50%),
+        radial-gradient(120% 80% at 100% 100%, rgba(34, 211, 238, 0.10), transparent 55%),
+        var(--surface);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-xs);
+    }
+    .credits-card__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .credits-card__label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .credits-card__pct {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--ink-soft);
+      font-weight: 600;
+    }
+    .credits-card__bar {
+      margin-top: 10px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(10, 12, 23, 0.06);
+      overflow: hidden;
+    }
+    .credits-card__fill {
+      height: 100%;
+      width: 64%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 16px rgba(99, 91, 255, 0.55);
+      animation: bar-grow 1.4s var(--ease-out) both;
+    }
+    @keyframes bar-grow { from { width: 0; } }
+    .credits-card__row {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .credits-card__row b { color: var(--ink); font-weight: 600; }
+    .credits-card__cta {
+      margin-top: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      transition: color 140ms ease;
+    }
+    .credits-card__cta:hover { color: var(--ink); }
+
+    .user-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--r-md);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      transition: border-color 160ms ease;
+    }
+    .user-card:hover { border-color: var(--line-strong); }
+    .avatar {
+      width: 30px; height: 30px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: white;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, var(--accent), var(--indigo));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 10px -4px rgba(99,91,255,0.5);
+    }
+    .avatar--sm { width: 22px; height: 22px; font-size: 0.62rem; border-radius: 999px; }
+    .avatar--xs { width: 18px; height: 18px; font-size: 0.56rem; }
+    .avatar--cyan { background: linear-gradient(135deg, var(--accent-2), #0ea5e9); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 10px -4px rgba(34,211,238,0.5); }
+    .avatar--pink { background: linear-gradient(135deg, var(--accent-3), #db2777); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 10px -4px rgba(244,114,182,0.5); }
+    .avatar--amber{ background: linear-gradient(135deg, var(--amber), #ea580c); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 10px -4px rgba(251,191,36,0.5); }
+    .avatar--em   { background: linear-gradient(135deg, var(--emerald), #047857); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 10px -4px rgba(16,185,129,0.5); }
+
+    .user-card__meta { min-width: 0; flex: 1; }
+    .user-card__name {
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.005em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .user-card__email {
+      font-size: 0.74rem;
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ============================================================
+       Topbar + content area
+       ============================================================ */
+    .content {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      height: var(--topbar-h);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 28px;
+      background: rgba(250, 250, 247, 0.78);
+      backdrop-filter: blur(18px) saturate(150%);
+      border-bottom: 1px solid var(--line);
+    }
+    @media (max-width: 720px) { .topbar { padding: 0 16px; } }
+
+    .crumbs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.86rem;
+      color: var(--muted);
+      min-width: 0;
+    }
+    .crumbs__sep { color: var(--muted-2); }
+    .crumbs__current { color: var(--ink); font-weight: 600; }
+    .crumbs__chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+
+    .topbar__spacer { flex: 1; }
+
+    .icon-btn {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      background: transparent;
+      transition: background 140ms ease, color 140ms ease;
+      position: relative;
+    }
+    .icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+    .icon-btn__dot {
+      position: absolute;
+      top: 7px; right: 7px;
+      width: 7px; height: 7px;
+      border-radius: 999px;
+      background: var(--coral);
+      border: 2px solid var(--cream);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 36px;
+      padding: 0 14px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.86rem;
+      letter-spacing: -0.005em;
+      transition: transform 140ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease, color 160ms ease;
+      white-space: nowrap;
+    }
+    .btn--primary {
+      background: var(--ink);
+      color: white;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.15) inset, 0 6px 16px -4px rgba(10, 12, 23, 0.4);
+    }
+    .btn--primary:hover { background: #000; transform: translateY(-1px); box-shadow: 0 10px 22px -6px rgba(10,12,23,0.55); }
+    .btn--accent {
+      background: linear-gradient(135deg, var(--accent), #7c6bff 55%, var(--accent-2));
+      color: white;
+      box-shadow: var(--shadow-glow);
+    }
+    .btn--accent:hover { transform: translateY(-1px); }
+    .btn--ghost {
+      background: var(--surface);
+      color: var(--ink-soft);
+      border: 1px solid var(--line);
+    }
+    .btn--ghost:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--ink); }
+    .btn--soft {
+      background: var(--surface-2);
+      color: var(--ink-soft);
+    }
+    .btn--soft:hover { background: var(--surface-3); color: var(--ink); }
+    .btn--sm { height: 30px; padding: 0 10px; font-size: 0.8rem; border-radius: 8px; }
+    .btn--xs { height: 26px; padding: 0 8px; font-size: 0.74rem; border-radius: 7px; }
+
+    /* ============================================================
+       View container & view switching animation
+       ============================================================ */
+    .view-stage {
+      flex: 1;
+      padding: 28px;
+      min-width: 0;
+    }
+    @media (max-width: 720px) { .view-stage { padding: 16px; } }
+
+    .view { display: none; animation: view-in 480ms var(--ease-out) both; }
+    .view[data-active] { display: block; }
+    @keyframes view-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ============================================================
+       Common heading + card primitives
+       ============================================================ */
+    .page-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 22px;
+      align-items: end;
+      margin-bottom: 22px;
+    }
+    @media (max-width: 720px) { .page-head { grid-template-columns: 1fr; } }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .kicker::before {
+      content: "";
+      width: 16px;
+      height: 1px;
+      background: currentColor;
+    }
+    .page-head h1 {
+      margin-top: 8px;
+      font-size: clamp(1.6rem, 2.4vw, 2.1rem);
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .page-head__deck {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.96rem;
+      max-width: 60ch;
+    }
+    .page-head__actions {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-xs);
+      padding: 22px;
+    }
+    .card--pad-tight { padding: 18px; }
+    .card--dark {
+      color: white;
+      border-color: rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(80% 90% at 0% 0%, rgba(99, 91, 255, 0.22), transparent 55%),
+        radial-gradient(70% 90% at 100% 100%, rgba(34, 211, 238, 0.16), transparent 55%),
+        linear-gradient(180deg, #0c0f1f 0%, #070914 100%);
+      box-shadow: 0 24px 60px -20px rgba(10,12,23,0.4);
+    }
+    .card__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card__title {
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+    }
+    .card--dark .card__title { color: white; }
+    .card__sub {
+      margin-top: 3px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+    }
+    .card--dark .card__sub { color: rgba(220, 226, 245, 0.6); }
+
+    /* Segmented tabs (chart toggles) */
+    .seg {
+      display: inline-flex;
+      padding: 3px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      gap: 2px;
+    }
+    .card--dark .seg {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.08);
+    }
+    .seg__btn {
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      transition: background 140ms ease, color 140ms ease;
+    }
+    .seg__btn:hover { color: var(--ink-soft); }
+    .seg__btn--active {
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: var(--shadow-xs);
+    }
+    .card--dark .seg__btn { color: rgba(220,226,245,0.6); }
+    .card--dark .seg__btn--active {
+      background: rgba(255,255,255,0.1);
+      color: white;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+
+    /* ============================================================
+       Chip / pill primitives
+       ============================================================ */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: var(--surface-2);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+    .chip__dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+    .chip--em { background: rgba(16, 185, 129, 0.1); color: #047857; border-color: rgba(16, 185, 129, 0.22); }
+    .chip--am { background: rgba(251, 191, 36, 0.12); color: #b45309; border-color: rgba(251, 191, 36, 0.28); }
+    .chip--ro { background: rgba(244, 63, 94, 0.1); color: #be123c; border-color: rgba(244, 63, 94, 0.22); }
+    .chip--vio{ background: rgba(99, 91, 255, 0.1); color: var(--accent); border-color: rgba(99, 91, 255, 0.22); }
+    .chip--cy { background: rgba(34, 211, 238, 0.12); color: #0e7490; border-color: rgba(34, 211, 238, 0.24); }
+    .chip--live::before {
+      content: "";
+      width: 5px; height: 5px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 0 2px currentColor;
+      opacity: 0.45;
+      animation: pulse-em 2s ease-in-out infinite;
+    }
+    .chip--live { color: var(--emerald); background: rgba(16, 185, 129, 0.1); border-color: rgba(16, 185, 129, 0.22); }
+
+    /* ============================================================
+       KPI strip
+       ============================================================ */
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    @media (max-width: 1100px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px)  { .kpis { grid-template-columns: 1fr; } }
+
+    .kpi {
+      position: relative;
+      padding: 18px;
+      border-radius: var(--r-lg);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-xs);
+      overflow: hidden;
+      transition: transform 240ms var(--ease-out), box-shadow 240ms var(--ease-out), border-color 240ms ease;
+    }
+    .kpi:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+      border-color: var(--line-strong);
+    }
+    .kpi__top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .kpi__label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .kpi__delta {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .kpi__delta--up   { color: #047857; background: rgba(16, 185, 129, 0.1); }
+    .kpi__delta--down { color: #be123c; background: rgba(244, 63, 94, 0.1); }
+    .kpi__value {
+      margin-top: 14px;
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.035em;
+      color: var(--ink);
+      line-height: 1;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .kpi__unit { font-size: 0.9rem; color: var(--muted); font-weight: 500; letter-spacing: -0.01em; }
+    .kpi__sub {
+      margin-top: 6px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .kpi__spark {
+      margin-top: 12px;
+      height: 36px;
+      width: 100%;
+    }
+
+    /* ============================================================
+       Overview layout
+       ============================================================ */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+    @media (max-width: 1100px) { .overview-grid { grid-template-columns: 1fr; } }
+
+    .stack { display: grid; gap: 16px; }
+
+    /* Live runs panel */
+    .live-runs { display: grid; gap: 10px; }
+    .run-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 14px;
+      border-radius: var(--r-md);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      transition: border-color 160ms ease, transform 160ms ease;
+    }
+    .run-row:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+    .run-row__icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: grid; place-items: center;
+      flex-shrink: 0;
+      background: var(--surface-2);
+      color: var(--ink-soft);
+    }
+    .run-row__icon--live {
+      background: linear-gradient(135deg, rgba(99, 91, 255, 0.14), rgba(34, 211, 238, 0.18));
+      color: var(--accent);
+      position: relative;
+    }
+    .run-row__icon--live::after {
+      content: "";
+      position: absolute;
+      inset: -4px;
+      border-radius: inherit;
+      border: 2px solid rgba(99, 91, 255, 0.18);
+      animation: ring-pulse 2.4s ease-out infinite;
+    }
+    @keyframes ring-pulse {
+      0%   { transform: scale(1); opacity: 0.6; }
+      80%, 100% { transform: scale(1.18); opacity: 0; }
+    }
+    .run-row__meta { min-width: 0; }
+    .run-row__top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.94rem;
+      color: var(--ink);
+      font-weight: 600;
+      letter-spacing: -0.005em;
+    }
+    .run-row__repo {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.78rem;
+      color: var(--muted);
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+    .run-row__bar {
+      margin-top: 10px;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(10, 12, 23, 0.05);
+      overflow: hidden;
+      position: relative;
+    }
+    .run-row__bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 14px rgba(99, 91, 255, 0.42);
+      transition: width 600ms var(--ease-out);
+    }
+    .run-row__bar-fill::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+      animation: shimmer 1.6s linear infinite;
+      mix-blend-mode: overlay;
+    }
+    @keyframes shimmer {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(100%); }
+    }
+    .run-row__sub {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+    }
+    .run-row__sub-item { display: inline-flex; align-items: center; gap: 5px; }
+    .run-row__pct {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.8rem;
+      color: var(--ink);
+      font-weight: 600;
+      tabular-nums: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Leaderboard */
+    .leaderboard { display: grid; gap: 6px; }
+    .lb-row {
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: var(--r-sm);
+      transition: background 140ms ease;
+    }
+    .lb-row:hover { background: var(--surface-2); }
+    .lb-row__rank {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      color: var(--muted-2);
+      font-weight: 600;
+      text-align: center;
+    }
+    .lb-row--win .lb-row__rank {
+      color: white;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-radius: 6px;
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 4px 10px -4px rgba(99, 91, 255, 0.5);
+    }
+    .lb-row__meta { min-width: 0; }
+    .lb-row__name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.005em;
+    }
+    .lb-row__bar {
+      margin-top: 6px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(10, 12, 23, 0.05);
+      overflow: hidden;
+    }
+    .lb-row__bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent));
+      transition: width 1.2s var(--ease-out);
+    }
+    .lb-row__stats {
+      display: grid;
+      grid-auto-flow: column;
+      gap: 16px;
+      text-align: right;
+      font-family: "JetBrains Mono", monospace;
+      align-items: center;
+    }
+    .lb-row__stat {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 1px;
+      min-width: 50px;
+    }
+    .lb-row__stat-label {
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+    }
+    .lb-row__stat-value {
+      font-size: 0.88rem;
+      color: var(--ink);
+      font-weight: 600;
+      tabular-nums: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Activity stream */
+    .activity { display: grid; gap: 4px; }
+    .activity__row {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      gap: 12px;
+      padding: 10px 6px;
+      align-items: start;
+      border-radius: 8px;
+      transition: background 140ms ease;
+    }
+    .activity__row:hover { background: var(--surface-2); }
+    .activity__icon {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: grid; place-items: center;
+      background: var(--surface-2);
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .activity__icon--em { background: rgba(16, 185, 129, 0.1); color: var(--emerald); }
+    .activity__icon--ro { background: rgba(244, 63, 94, 0.1); color: var(--rose); }
+    .activity__icon--am { background: rgba(251, 191, 36, 0.12); color: #b45309; }
+    .activity__icon--vio{ background: rgba(99, 91, 255, 0.12); color: var(--accent); }
+    .activity__text {
+      font-size: 0.88rem;
+      color: var(--ink-soft);
+      line-height: 1.45;
+    }
+    .activity__text b { color: var(--ink); font-weight: 600; }
+    .activity__text code {
+      font-size: 0.78rem;
+      color: var(--ink-soft);
+      padding: 0 5px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+    .activity__time {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      color: var(--muted-2);
+      white-space: nowrap;
+      padding-top: 1px;
+    }
+
+    /* ============================================================
+       Spend chart
+       ============================================================ */
+    .spend-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 22px;
+      align-items: stretch;
+    }
+    @media (max-width: 860px) { .spend-grid { grid-template-columns: 1fr; } }
+
+    .chart {
+      width: 100%;
+      height: 220px;
+      display: block;
+    }
+    .chart-tooltip {
+      position: absolute;
+      pointer-events: none;
+      transform: translate(-50%, calc(-100% - 12px));
+      background: rgba(10, 12, 23, 0.95);
+      color: white;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      box-shadow: 0 12px 32px -8px rgba(10,12,23,0.5);
+      opacity: 0;
+      transition: opacity 120ms ease;
+      white-space: nowrap;
+    }
+    .chart-tooltip[data-show] { opacity: 1; }
+    .chart-tooltip code {
+      font-size: 0.74rem;
+      opacity: 0.7;
+      display: block;
+      margin-top: 2px;
+    }
+
+    .spend-legend {
+      display: grid;
+      gap: 8px;
+      align-content: end;
+    }
+    .spend-legend__row {
+      display: grid;
+      grid-template-columns: 12px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      transition: background 140ms ease;
+    }
+    .spend-legend__row:hover { background: var(--surface-2); }
+    .spend-legend__swatch {
+      width: 12px; height: 12px;
+      border-radius: 4px;
+    }
+    .spend-legend__label { font-size: 0.86rem; color: var(--ink-soft); font-weight: 500; }
+    .spend-legend__val {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.84rem;
+      color: var(--ink);
+      font-weight: 600;
+      tabular-nums: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ============================================================
+       Repository grid
+       ============================================================ */
+    .repo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 16px;
+    }
+    .repo-card {
+      padding: 20px;
+      border-radius: var(--r-lg);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-xs);
+      transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out), border-color 220ms ease;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      gap: 14px;
+    }
+    .repo-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--line-strong);
+    }
+    .repo-card::before {
+      content: "";
+      position: absolute;
+      inset: -1px -1px auto -1px;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+      opacity: 0;
+      transition: opacity 220ms ease;
+    }
+    .repo-card:hover::before { opacity: 1; }
+
+    .repo-card__head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .repo-card__title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+      min-width: 0;
+    }
+    .repo-card__lang {
+      width: 8px; height: 8px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+    .repo-card__path {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .repo-card__metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      border-radius: var(--r-md);
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .repo-card__metric {
+      padding: 12px;
+      border-right: 1px solid var(--line);
+    }
+    .repo-card__metric:last-child { border-right: 0; }
+    .repo-card__metric-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+    }
+    .repo-card__metric-value {
+      margin-top: 6px;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      tabular-nums: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .repo-card__metric-sub {
+      margin-top: 2px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+    }
+
+    .repo-card__foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .repo-card__top-agent {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .repo-card__agent-name {
+      font-size: 0.86rem;
+      color: var(--ink-soft);
+      font-weight: 600;
+      letter-spacing: -0.005em;
+    }
+    .repo-card__agent-sub {
+      font-size: 0.74rem;
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+    }
+    .repo-card__action {
+      color: var(--muted);
+      transition: color 140ms ease, transform 140ms ease;
+    }
+    .repo-card__action:hover { color: var(--ink); transform: translateX(2px); }
+
+    /* New repo placeholder card */
+    .repo-card--add {
+      display: grid;
+      place-items: center;
+      gap: 10px;
+      text-align: center;
+      background: transparent;
+      border: 2px dashed var(--line-strong);
+      box-shadow: none;
+      color: var(--muted);
+      font-size: 0.92rem;
+      cursor: pointer;
+      min-height: 220px;
+    }
+    .repo-card--add:hover { color: var(--accent); border-color: rgba(99, 91, 255, 0.4); background: rgba(99, 91, 255, 0.03); }
+    .repo-card--add svg { color: inherit; }
+
+    /* ============================================================
+       Comparison heatmap
+       ============================================================ */
+    .compare-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .compare-toolbar__group {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 10px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+    }
+    .compare-toolbar__label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding-left: 4px;
+    }
+
+    .heatmap-wrap { overflow-x: auto; }
+    .heatmap {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 4px;
+      min-width: 720px;
+    }
+    .heatmap th {
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.82rem;
+      color: var(--ink);
+      letter-spacing: -0.005em;
+    }
+    .heatmap thead th {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      padding: 6px 12px;
+    }
+    .heatmap tbody th {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .heatmap tbody th .repo-card__lang { display: inline-block; margin-right: 8px; }
+    .heatmap td {
+      padding: 0;
+      vertical-align: middle;
+      width: 14%;
+    }
+    .hm-cell {
+      position: relative;
+      display: grid;
+      gap: 2px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      color: white;
+      cursor: pointer;
+      transition: transform 160ms var(--ease-out), box-shadow 160ms ease;
+      min-height: 64px;
+      overflow: hidden;
+    }
+    .hm-cell::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent 60%);
+      pointer-events: none;
+    }
+    .hm-cell:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -8px rgba(10,12,23,0.4); }
+    .hm-cell__value {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      tabular-nums: 1;
+      font-variant-numeric: tabular-nums;
+      position: relative;
+    }
+    .hm-cell__sub {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.68rem;
+      color: rgba(255,255,255,0.78);
+      letter-spacing: 0.04em;
+      position: relative;
+    }
+    .hm-cell--best::before {
+      content: "";
+      position: absolute;
+      top: 6px; right: 6px;
+      width: 16px; height: 16px;
+      background: white;
+      border-radius: 999px;
+      mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>") center/12px 12px no-repeat;
+      -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>") center/12px 12px no-repeat;
+      opacity: 0.85;
+    }
+    .hm-cell--na {
+      background: var(--surface-2);
+      color: var(--muted-2);
+      border: 1px dashed var(--line-strong);
+    }
+    .hm-cell--na .hm-cell__value { color: var(--muted-2); }
+    .hm-cell--na::after { display: none; }
+
+    .hm-scale {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .hm-scale__bar {
+      width: 140px;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #fee2e2, #fde68a, #bbf7d0, #6ee7b7);
+    }
+
+    /* ============================================================
+       Run detail (pipeline timeline)
+       ============================================================ */
+    .run-detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+    @media (max-width: 1100px) { .run-detail-grid { grid-template-columns: 1fr; } }
+
+    .pipeline { display: grid; gap: 0; position: relative; }
+    .stage {
+      display: grid;
+      grid-template-columns: 36px 1fr;
+      gap: 16px;
+      padding: 6px 0;
+      position: relative;
+    }
+    .stage__rail {
+      position: relative;
+      display: flex;
+      justify-content: center;
+    }
+    .stage__rail::before {
+      content: "";
+      position: absolute;
+      top: 0; bottom: -10px; left: 50%;
+      width: 2px;
+      transform: translateX(-50%);
+      background: linear-gradient(180deg, var(--line-strong), var(--line));
+    }
+    .stage:last-child .stage__rail::before { display: none; }
+    .stage__node {
+      width: 26px; height: 26px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 2px solid var(--line-strong);
+      display: grid;
+      place-items: center;
+      color: var(--muted-2);
+      position: relative;
+      z-index: 1;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+    .stage--done .stage__node {
+      background: linear-gradient(135deg, var(--emerald), #047857);
+      border-color: transparent;
+      color: white;
+      box-shadow: 0 4px 10px -4px rgba(16, 185, 129, 0.5);
+    }
+    .stage--running .stage__node {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-color: transparent;
+      color: white;
+      box-shadow: 0 4px 10px -4px rgba(99, 91, 255, 0.5);
+    }
+    .stage--running .stage__node::after {
+      content: "";
+      position: absolute;
+      inset: -6px;
+      border-radius: 999px;
+      border: 2px solid rgba(99, 91, 255, 0.28);
+      animation: ring-pulse 2s ease-out infinite;
+    }
+    .stage--queued .stage__node {
+      color: var(--muted-2);
+    }
+
+    .stage__body {
+      padding: 12px 14px;
+      border-radius: var(--r-md);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      transition: border-color 160ms ease;
+      margin-bottom: 8px;
+    }
+    .stage--running .stage__body {
+      border-color: rgba(99, 91, 255, 0.28);
+      box-shadow: 0 0 0 4px rgba(99, 91, 255, 0.06);
+    }
+    .stage__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .stage__title {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.005em;
+    }
+    .stage__sub {
+      margin-top: 2px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+    }
+    .stage__meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .stage__bar {
+      margin-top: 10px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(10, 12, 23, 0.05);
+      overflow: hidden;
+    }
+    .stage__bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 600ms var(--ease-out);
+      position: relative;
+    }
+    .stage__bar-fill::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+      animation: shimmer 1.6s linear infinite;
+    }
+
+    .log {
+      padding: 18px;
+      border-radius: var(--r-md);
+      background: #0a0c17;
+      color: #e6ebf7;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.78rem;
+      line-height: 1.7;
+      max-height: 320px;
+      overflow: auto;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    .log__line { display: flex; gap: 12px; }
+    .log__time { color: rgba(220, 226, 245, 0.4); white-space: nowrap; }
+    .log__lvl  {
+      flex-shrink: 0;
+      padding: 0 6px;
+      border-radius: 4px;
+      font-size: 0.66rem;
+      letter-spacing: 0.08em;
+      align-self: center;
+      line-height: 1.6;
+    }
+    .log__lvl--ok   { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; }
+    .log__lvl--warn { background: rgba(251, 191, 36, 0.16); color: #fcd34d; }
+    .log__lvl--info { background: rgba(34, 211, 238, 0.16); color: #67e8f9; }
+    .log__lvl--err  { background: rgba(244, 63, 94, 0.16); color: #fda4af; }
+    .log__msg { color: rgba(220, 226, 245, 0.86); white-space: pre-wrap; word-break: break-word; }
+    .log__msg b { color: white; font-weight: 600; }
+
+    /* Task table inside run */
+    .task-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+    }
+    .task-table th {
+      text-align: left;
+      padding: 8px 10px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+      border-bottom: 1px solid var(--line);
+    }
+    .task-table td {
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--ink-soft);
+      vertical-align: middle;
+    }
+    .task-table tr:last-child td { border-bottom: 0; }
+    .task-table tr { transition: background 140ms ease; }
+    .task-table tbody tr:hover { background: var(--surface-2); }
+    .task-table code {
+      font-size: 0.78rem;
+      color: var(--ink);
+      background: var(--surface-2);
+      padding: 2px 6px;
+      border-radius: 5px;
+      border: 1px solid var(--line);
+    }
+    .task-table__title { font-weight: 600; color: var(--ink); }
+
+    /* ============================================================
+       Budgets
+       ============================================================ */
+    .budget-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+    @media (max-width: 1100px) { .budget-grid { grid-template-columns: 1fr; } }
+
+    .budget-rule {
+      padding: 14px;
+      border-radius: var(--r-md);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+    }
+    .budget-rule__icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: var(--surface-2);
+      color: var(--ink-soft);
+    }
+    .budget-rule__title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.005em;
+    }
+    .budget-rule__sub {
+      margin-top: 2px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .switch {
+      width: 36px;
+      height: 22px;
+      border-radius: 999px;
+      background: var(--surface-3);
+      border: 1px solid var(--line-strong);
+      position: relative;
+      cursor: pointer;
+      transition: background 180ms ease, border-color 180ms ease;
+      flex-shrink: 0;
+    }
+    .switch::after {
+      content: "";
+      position: absolute;
+      top: 1.5px; left: 1.5px;
+      width: 16px; height: 16px;
+      border-radius: 999px;
+      background: white;
+      box-shadow: 0 2px 5px rgba(10,12,23,0.2);
+      transition: transform 180ms var(--ease-spring);
+    }
+    .switch[data-on="true"] {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-color: transparent;
+    }
+    .switch[data-on="true"]::after { transform: translateX(14px); }
+
+    /* ============================================================
+       Empty / coming soon
+       ============================================================ */
+    .empty {
+      display: grid;
+      place-items: center;
+      gap: 8px;
+      padding: 64px 24px;
+      text-align: center;
+      border-radius: var(--r-lg);
+      background: var(--surface);
+      border: 1px dashed var(--line-strong);
+      color: var(--muted);
+    }
+    .empty h3 { color: var(--ink); font-size: 1.1rem; letter-spacing: -0.01em; font-weight: 600; }
+
+    /* ============================================================
+       Command palette
+       ============================================================ */
+    .cmdk-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 12, 23, 0.5);
+      backdrop-filter: blur(6px);
+      z-index: 100;
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 14vh;
+      animation: fade-in 200ms ease both;
+    }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    .cmdk-backdrop[data-open] { display: flex; }
+    .cmdk {
+      width: min(560px, calc(100% - 32px));
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-lg);
+      box-shadow: 0 40px 80px -10px rgba(10,12,23,0.4), 0 0 0 1px rgba(255,255,255,0.6) inset;
+      overflow: hidden;
+      animation: cmdk-in 280ms var(--ease-spring) both;
+    }
+    @keyframes cmdk-in {
+      from { transform: translateY(-12px) scale(0.98); opacity: 0; }
+      to   { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .cmdk__input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .cmdk__input-wrap svg { color: var(--muted); flex-shrink: 0; }
+    .cmdk__input {
+      flex: 1;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      font-size: 1rem;
+      color: var(--ink);
+    }
+    .cmdk__input::placeholder { color: var(--muted-2); }
+    .cmdk__esc {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      padding: 3px 7px;
+      border-radius: 5px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+    .cmdk__list { max-height: 380px; overflow: auto; padding: 6px; }
+    .cmdk__group {
+      padding: 10px 12px 4px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+    }
+    .cmdk__row {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 100ms ease;
+    }
+    .cmdk__row[data-active="true"], .cmdk__row:hover { background: var(--surface-2); }
+    .cmdk__row svg { color: var(--muted); }
+    .cmdk__row[data-active="true"] svg { color: var(--accent); }
+    .cmdk__row-title { font-size: 0.92rem; color: var(--ink); font-weight: 500; }
+    .cmdk__row-sub {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      color: var(--muted);
+    }
+    .cmdk__hint {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted-2);
+      padding: 3px 7px;
+      border-radius: 5px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+    .cmdk__foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px;
+      border-top: 1px solid var(--line);
+      background: var(--surface-2);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .cmdk__foot kbd {
+      display: inline-grid;
+      place-items: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 4px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      font-size: 0.66rem;
+      color: var(--ink-soft);
+    }
+
+    /* ============================================================
+       Connect-repo modal (a wizard)
+       ============================================================ */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 12, 23, 0.55);
+      backdrop-filter: blur(8px);
+      z-index: 110;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      animation: fade-in 200ms ease both;
+    }
+    .modal-backdrop[data-open] { display: flex; }
+    .modal {
+      width: min(720px, 100%);
+      background: var(--surface);
+      border-radius: var(--r-xl);
+      border: 1px solid var(--line-strong);
+      box-shadow: 0 40px 80px -10px rgba(10,12,23,0.4);
+      overflow: hidden;
+      animation: cmdk-in 320ms var(--ease-spring) both;
+    }
+    .modal__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--line);
+    }
+    .modal__title { font-size: 1.1rem; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+    .modal__sub { font-size: 0.86rem; color: var(--muted); margin-top: 2px; }
+    .modal__close {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      display: grid; place-items: center;
+      color: var(--muted);
+      transition: background 140ms ease;
+    }
+    .modal__close:hover { background: var(--surface-2); color: var(--ink); }
+
+    .modal__body { padding: 22px; display: grid; gap: 20px; }
+    .modal__steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .modal__step {
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      display: grid;
+      gap: 2px;
+      transition: background 160ms ease, border-color 160ms ease;
+    }
+    .modal__step--active {
+      background: linear-gradient(135deg, rgba(99, 91, 255, 0.08), rgba(34, 211, 238, 0.06));
+      border-color: rgba(99, 91, 255, 0.28);
+    }
+    .modal__step-num {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .modal__step--active .modal__step-num { color: var(--accent); }
+    .modal__step-title {
+      font-size: 0.92rem;
+      color: var(--ink);
+      font-weight: 600;
+      letter-spacing: -0.005em;
+    }
+    .modal__step-sub {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .repo-pick {
+      display: grid;
+      gap: 8px;
+      max-height: 280px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .repo-pick__row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      cursor: pointer;
+      transition: border-color 140ms ease, background 140ms ease;
+    }
+    .repo-pick__row:hover { border-color: var(--line-strong); background: var(--surface); }
+    .repo-pick__check {
+      width: 20px; height: 20px;
+      border-radius: 6px;
+      border: 1.5px solid var(--line-strong);
+      background: var(--surface);
+      display: grid; place-items: center;
+      color: white;
+      transition: background 140ms ease, border-color 140ms ease;
+    }
+    .repo-pick__row[data-on="true"] .repo-pick__check {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-color: transparent;
+    }
+    .repo-pick__row[data-on="true"] .repo-pick__check svg { display: block; }
+    .repo-pick__check svg { display: none; }
+    .repo-pick__name {
+      font-size: 0.92rem;
+      color: var(--ink);
+      font-weight: 600;
+      letter-spacing: -0.005em;
+    }
+    .repo-pick__sub {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      color: var(--muted);
+    }
+    .repo-pick__lang {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      color: var(--muted);
+    }
+
+    .modal__foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 22px;
+      border-top: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+    .modal__hint {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    /* ============================================================
+       Notifications panel (slide-in from the right)
+       ============================================================ */
+    .notif-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 12, 23, 0.4);
+      backdrop-filter: blur(4px);
+      z-index: 90;
+      display: none;
+      animation: fade-in 200ms ease both;
+    }
+    .notif-backdrop[data-open] { display: block; }
+    .notif {
+      position: fixed;
+      top: 16px; right: 16px; bottom: 16px;
+      width: min(420px, calc(100% - 32px));
+      background: var(--surface);
+      border-radius: var(--r-xl);
+      border: 1px solid var(--line);
+      box-shadow: 0 40px 80px -10px rgba(10,12,23,0.4);
+      z-index: 91;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateX(20px);
+      opacity: 0;
+      transition: transform 320ms var(--ease-spring), opacity 240ms ease;
+    }
+    .notif[data-open] { display: flex; transform: translateX(0); opacity: 1; }
+    .notif__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .notif__head h3 { font-size: 1rem; font-weight: 600; color: var(--ink); letter-spacing: -0.005em; }
+    .notif__list { flex: 1; overflow: auto; padding: 8px; }
+    .notif__row {
+      padding: 12px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 140ms ease;
+    }
+    .notif__row:hover { background: var(--surface-2); }
+    .notif__row + .notif__row { border-top: 1px dashed var(--line); }
+    .notif__top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .notif__title { font-size: 0.9rem; color: var(--ink); font-weight: 600; }
+    .notif__time {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--muted-2);
+    }
+    .notif__msg {
+      margin-top: 4px;
+      font-size: 0.84rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .notif__msg b { color: var(--ink-soft); font-weight: 600; }
+
+    /* ============================================================
+       Misc utilities
+       ============================================================ */
+    .row { display: flex; align-items: center; gap: 8px; }
+    .row--gap-4 { gap: 4px; }
+    .row--gap-12 { gap: 12px; }
+    .row--end { justify-content: flex-end; }
+    .row--between { justify-content: space-between; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .stack--sm { display: grid; gap: 8px; }
+
+    [hidden] { display: none !important; }
+
+    .focus-card {
+      padding: 22px;
+      border-radius: var(--r-xl);
+      color: white;
+      background:
+        radial-gradient(120% 80% at 0% 0%, rgba(99, 91, 255, 0.32), transparent 60%),
+        radial-gradient(120% 80% at 100% 100%, rgba(34, 211, 238, 0.22), transparent 55%),
+        linear-gradient(180deg, #0c0f1f 0%, #070914 100%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 32px 70px -20px rgba(10, 12, 23, 0.55);
+      position: relative;
+      overflow: hidden;
+    }
+    .focus-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 50% 0%, black 30%, transparent 80%);
+      pointer-events: none;
+    }
+    .focus-card__body { position: relative; }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out);
+    }
+    .reveal[data-in] { opacity: 1; transform: translateY(0); }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-ribbon" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <span><b>Hosted preview</b> &middot; design mockup of RepoGauge as a managed platform</span>
+    <a href="index.html">Back to site</a>
+  </div>
+
+  <div class="app">
+    <!-- ============================================================
+         Sidebar
+         ============================================================ -->
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="workspace" role="button" tabindex="0">
+        <span class="workspace__mark" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M2.6 11.4 A6 6 0 1 1 13.4 8" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M8 8l3.2-1.9" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+            <circle cx="8" cy="8" r="1.3" fill="white"/>
+          </svg>
+        </span>
+        <div class="workspace__meta">
+          <div class="workspace__name">Acme Engineering <span class="workspace__plan">Team</span></div>
+          <div class="workspace__sub">acme · 14 members</div>
+        </div>
+        <svg class="workspace__chev" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M5 6l3 3 3-3M5 10l3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <button class="nav-search" id="openCmdk" type="button" aria-label="Open command palette">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="7.2" cy="7.2" r="4.2" stroke="currentColor" stroke-width="1.4"/>
+          <path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        Search or jump to&hellip;
+        <span class="nav-search__hint"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </button>
+
+      <nav class="nav" aria-label="App sections">
+        <div class="nav__group">Workspace</div>
+        <button class="nav__item nav__item--active" type="button" data-nav="overview">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="9" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <rect x="14" y="3" width="7" height="5" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <rect x="14" y="12" width="7" height="9" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <rect x="3" y="16" width="7" height="5" rx="2" stroke="currentColor" stroke-width="1.6"/>
+          </svg>
+          Overview
+        </button>
+        <button class="nav__item" type="button" data-nav="repositories">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H18a2 2 0 0 1 2 2v15a1 1 0 0 1-1 1H6.5A1.5 1.5 0 0 1 5 19.5v-15Z" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M5 17.5A1.5 1.5 0 0 1 6.5 16H20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M9 7h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Repositories
+          <span class="nav__count">12</span>
+        </button>
+        <button class="nav__item" type="button" data-nav="runs">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M12 7v5l3.2 1.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Runs
+          <span class="nav__count nav__count--live">4</span>
+        </button>
+        <button class="nav__item" type="button" data-nav="compare">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M3 9h18M9 3v18" stroke="currentColor" stroke-width="1.6"/>
+          </svg>
+          Comparisons
+        </button>
+        <button class="nav__item" type="button" data-nav="reports">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 3.5h8.5L19 8v11.5A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5v-14A1.5 1.5 0 0 1 6.5 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M14 3.5V8h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M9 13h6M9 17h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Reports
+        </button>
+
+        <div class="nav__group">Spend</div>
+        <button class="nav__item" type="button" data-nav="budgets">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v11A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-11Z" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M3 10h18M16 15h2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Budgets &amp; alerts
+        </button>
+        <button class="nav__item" type="button" data-nav="agents">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="9" r="3.5" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M5 19c1.4-3 4-4.5 7-4.5s5.6 1.5 7 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Agents
+        </button>
+
+        <div class="nav__group">Workspace</div>
+        <button class="nav__item" type="button" data-nav="team">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.6"/>
+            <circle cx="17" cy="10.5" r="2.4" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M3 19c1.2-3 3.4-4.5 6-4.5S13.8 16 15 19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M14.5 16c.5-1.4 1.6-2.2 2.8-2.2s2.2.7 2.8 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Team
+        </button>
+        <button class="nav__item" type="button" data-nav="settings">
+          <svg class="nav__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+          Settings
+        </button>
+      </nav>
+
+      <div class="sidebar__footer">
+        <div class="credits-card">
+          <div class="credits-card__head">
+            <span class="credits-card__label">April spend</span>
+            <span class="credits-card__pct" id="creditsPct">64%</span>
+          </div>
+          <div class="credits-card__bar">
+            <div class="credits-card__fill" id="creditsFill"></div>
+          </div>
+          <div class="credits-card__row">
+            <span><b>$3,210</b> of $5,000</span>
+            <span style="color: var(--muted-2);">11d left</span>
+          </div>
+          <a class="credits-card__cta" href="#" data-nav="budgets">
+            Manage budget
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+        </div>
+
+        <div class="user-card">
+          <span class="avatar" aria-hidden="true">DC</span>
+          <div class="user-card__meta">
+            <div class="user-card__name">David Challoner</div>
+            <div class="user-card__email">david@acme.com</div>
+          </div>
+          <button class="icon-btn" type="button" aria-label="Account menu" style="width: 28px; height: 28px;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M5 6l3 3 3-3M5 10l3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============================================================
+         Main content (topbar + views)
+         ============================================================ -->
+    <div class="content">
+      <header class="topbar">
+        <div class="crumbs" id="crumbs">
+          <span>Acme Engineering</span>
+          <svg class="crumbs__sep" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 3.5l4 4.5-4 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="crumbs__current" id="crumbCurrent">Overview</span>
+          <span class="crumbs__chip" id="crumbChip">
+            <span class="chip__dot" style="background: var(--emerald);"></span>
+            All systems normal
+          </span>
+        </div>
+        <div class="topbar__spacer"></div>
+        <button class="icon-btn" type="button" aria-label="Help">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M9.5 9.5a2.5 2.5 0 0 1 4.5-1c.5 1-.2 1.7-1 2.2-1 .6-1 1.3-1 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <circle cx="12" cy="17" r="0.9" fill="currentColor"/>
+          </svg>
+        </button>
+        <button class="icon-btn" type="button" id="openNotif" aria-label="Notifications">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M6 16V11a6 6 0 1 1 12 0v5l1.6 2H4.4L6 16Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+            <path d="M10 21h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          <span class="icon-btn__dot" aria-hidden="true"></span>
+        </button>
+        <button class="btn btn--ghost btn--sm" type="button" id="openConnect">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Connect repository
+        </button>
+        <button class="btn btn--accent btn--sm" type="button" id="newRunBtn">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M5 3l8 5-8 5V3Z" fill="currentColor"/>
+          </svg>
+          Start a run
+        </button>
+      </header>
+
+      <main class="view-stage" id="viewStage">
+        <!-- ============================================================
+             OVERVIEW
+             ============================================================ -->
+        <section class="view" data-view="overview" data-active>
+          <div class="page-head">
+            <div>
+              <span class="kicker">Workspace overview</span>
+              <h1>Good morning, David. Three runs finished overnight.</h1>
+              <p class="page-head__deck">
+                Your benchmark suite ran across <b>12 repositories</b> last night.
+                <b style="color: var(--emerald);">2 wins</b> for <code>claude-sonnet-4-6</code>,
+                one new regression caught on <code>orders-api</code>, and your April spend is on track.
+              </p>
+            </div>
+            <div class="page-head__actions">
+              <div class="seg" role="group" aria-label="Time window">
+                <button class="seg__btn" type="button" data-range="24h">24h</button>
+                <button class="seg__btn seg__btn--active" type="button" data-range="7d">7d</button>
+                <button class="seg__btn" type="button" data-range="30d">30d</button>
+                <button class="seg__btn" type="button" data-range="90d">90d</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI strip -->
+          <div class="kpis reveal">
+            <div class="kpi">
+              <div class="kpi__top">
+                <span class="kpi__label">Pass rate (top agent)</span>
+                <span class="kpi__delta kpi__delta--up">
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 8l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  +3.4%
+                </span>
+              </div>
+              <div class="kpi__value"><span data-countup="71.4" data-suffix="%">0%</span></div>
+              <div class="kpi__sub"><b style="color: var(--ink);">claude-sonnet-4-6</b> across 188 tasks</div>
+              <svg class="kpi__spark" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="sparkA" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#635bff" stop-opacity="0.3"/>
+                    <stop offset="1" stop-color="#635bff" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path d="M0,28 L20,24 L40,26 L60,18 L80,22 L100,16 L120,20 L140,12 L160,14 L180,9 L200,7"
+                      stroke="#635bff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M0,28 L20,24 L40,26 L60,18 L80,22 L100,16 L120,20 L140,12 L160,14 L180,9 L200,7 L200,36 L0,36 Z"
+                      fill="url(#sparkA)"/>
+              </svg>
+            </div>
+
+            <div class="kpi">
+              <div class="kpi__top">
+                <span class="kpi__label">$ per solved task</span>
+                <span class="kpi__delta kpi__delta--up">
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  −18%
+                </span>
+              </div>
+              <div class="kpi__value">$<span data-countup="2.81">0</span></div>
+              <div class="kpi__sub">vs <b style="color: var(--ink);">$3.42</b> last week</div>
+              <svg class="kpi__spark" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="sparkB" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#22d3ee" stop-opacity="0.3"/>
+                    <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path d="M0,12 L20,15 L40,11 L60,17 L80,14 L100,18 L120,16 L140,22 L160,20 L180,26 L200,28"
+                      stroke="#22d3ee" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M0,12 L20,15 L40,11 L60,17 L80,14 L100,18 L120,16 L140,22 L160,20 L180,26 L200,28 L200,36 L0,36 Z"
+                      fill="url(#sparkB)"/>
+              </svg>
+            </div>
+
+            <div class="kpi">
+              <div class="kpi__top">
+                <span class="kpi__label">Runs this week</span>
+                <span class="kpi__delta kpi__delta--up">
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 8l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  +9
+                </span>
+              </div>
+              <div class="kpi__value"><span data-countup="42">0</span><span class="kpi__unit">runs</span></div>
+              <div class="kpi__sub"><b style="color: var(--ink);">3,412</b> tasks scored across 12 repos</div>
+              <svg class="kpi__spark" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true">
+                <g fill="#a78bfa">
+                  <rect x="2"   y="22" width="10" height="14" rx="2"/>
+                  <rect x="18"  y="18" width="10" height="18" rx="2"/>
+                  <rect x="34"  y="24" width="10" height="12" rx="2"/>
+                  <rect x="50"  y="14" width="10" height="22" rx="2"/>
+                  <rect x="66"  y="20" width="10" height="16" rx="2"/>
+                  <rect x="82"  y="16" width="10" height="20" rx="2"/>
+                  <rect x="98"  y="11" width="10" height="25" rx="2"/>
+                  <rect x="114" y="14" width="10" height="22" rx="2"/>
+                  <rect x="130" y="9"  width="10" height="27" rx="2"/>
+                  <rect x="146" y="13" width="10" height="23" rx="2"/>
+                  <rect x="162" y="6"  width="10" height="30" rx="2" fill="#635bff"/>
+                  <rect x="178" y="10" width="10" height="26" rx="2" fill="#635bff"/>
+                </g>
+              </svg>
+            </div>
+
+            <div class="kpi">
+              <div class="kpi__top">
+                <span class="kpi__label">Regressions caught</span>
+                <span class="kpi__delta kpi__delta--down">
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 8l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  +2
+                </span>
+              </div>
+              <div class="kpi__value"><span data-countup="6">0</span><span class="kpi__unit">in 7d</span></div>
+              <div class="kpi__sub">1 unresolved on <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;">orders-api</code></div>
+              <svg class="kpi__spark" viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M0,30 L25,32 L50,28 L75,30 L100,18 L125,22 L150,12 L175,16 L200,8"
+                      stroke="#f43f5e" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2,3"/>
+                <circle cx="200" cy="8" r="3" fill="#f43f5e"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Two-column body: live runs + leaderboard | activity -->
+          <div class="overview-grid">
+            <div class="stack">
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Live runs</div>
+                    <div class="card__sub">4 running · auto-scheduled by branch protection rules</div>
+                  </div>
+                  <div class="row row--gap-4">
+                    <span class="chip chip--live"><span></span>streaming</span>
+                    <button class="btn btn--ghost btn--xs" type="button">View all</button>
+                  </div>
+                </div>
+                <div class="live-runs" id="liveRuns">
+                  <div class="run-row" data-run="r-9821">
+                    <span class="run-row__icon run-row__icon--live" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.6"/>
+                        <path d="M8 5v3l2 1.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                      </svg>
+                    </span>
+                    <div class="run-row__meta">
+                      <div class="run-row__top">
+                        claude-sonnet-4-6 vs <span class="run-row__repo">acme/orders-api</span>
+                        <span class="chip chip--vio">attempt 2</span>
+                      </div>
+                      <div class="run-row__bar"><div class="run-row__bar-fill" style="width: 68%;" data-bar></div></div>
+                      <div class="run-row__sub">
+                        <span class="run-row__sub-item"><b style="color: var(--ink);">128</b>/188 tasks</span>
+                        <span class="run-row__sub-item">$1.92 spent</span>
+                        <span class="run-row__sub-item">~3m left</span>
+                      </div>
+                    </div>
+                    <div class="run-row__pct" data-pct>68%</div>
+                  </div>
+
+                  <div class="run-row" data-run="r-9822">
+                    <span class="run-row__icon run-row__icon--live" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.6"/>
+                        <path d="M8 5v3l2 1.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                      </svg>
+                    </span>
+                    <div class="run-row__meta">
+                      <div class="run-row__top">
+                        gpt-5-codex vs <span class="run-row__repo">acme/billing</span>
+                      </div>
+                      <div class="run-row__bar"><div class="run-row__bar-fill" style="width: 41%;" data-bar></div></div>
+                      <div class="run-row__sub">
+                        <span class="run-row__sub-item"><b style="color: var(--ink);">62</b>/152 tasks</span>
+                        <span class="run-row__sub-item">$3.41 spent</span>
+                        <span class="run-row__sub-item">~7m left</span>
+                      </div>
+                    </div>
+                    <div class="run-row__pct" data-pct>41%</div>
+                  </div>
+
+                  <div class="run-row" data-run="r-9823">
+                    <span class="run-row__icon run-row__icon--live" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.6"/>
+                        <path d="M8 5v3l2 1.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                      </svg>
+                    </span>
+                    <div class="run-row__meta">
+                      <div class="run-row__top">
+                        gemini-2.5-pro vs <span class="run-row__repo">acme/web-app</span>
+                      </div>
+                      <div class="run-row__bar"><div class="run-row__bar-fill" style="width: 22%;" data-bar></div></div>
+                      <div class="run-row__sub">
+                        <span class="run-row__sub-item"><b style="color: var(--ink);">26</b>/118 tasks</span>
+                        <span class="run-row__sub-item">$0.84 spent</span>
+                        <span class="run-row__sub-item">~14m left</span>
+                      </div>
+                    </div>
+                    <div class="run-row__pct" data-pct>22%</div>
+                  </div>
+
+                  <div class="run-row" data-run="r-9824">
+                    <span class="run-row__icon" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <rect x="3.5" y="3.5" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                      </svg>
+                    </span>
+                    <div class="run-row__meta">
+                      <div class="run-row__top">
+                        haiku-4-5 vs <span class="run-row__repo">acme/data-pipeline</span>
+                        <span class="chip">queued</span>
+                      </div>
+                      <div class="run-row__sub" style="margin-top: 6px;">
+                        <span class="run-row__sub-item">waiting for runner · slot 1 of 4</span>
+                      </div>
+                    </div>
+                    <div class="run-row__pct" style="color: var(--muted);">—</div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Top agents this week</div>
+                    <div class="card__sub">Ranked by composite score · pass rate × cost-efficiency</div>
+                  </div>
+                  <div class="seg">
+                    <button class="seg__btn seg__btn--active" type="button">Composite</button>
+                    <button class="seg__btn" type="button">Pass rate</button>
+                    <button class="seg__btn" type="button">$ / solve</button>
+                    <button class="seg__btn" type="button">Latency</button>
+                  </div>
+                </div>
+                <div class="leaderboard">
+                  <div class="lb-row lb-row--win">
+                    <div class="lb-row__rank">1</div>
+                    <div class="lb-row__meta">
+                      <div class="lb-row__name">
+                        <span class="avatar avatar--sm" aria-hidden="true">CS</span>
+                        claude-sonnet-4-6
+                        <span class="chip chip--em"><span class="chip__dot"></span>winner</span>
+                      </div>
+                      <div class="lb-row__bar"><div class="lb-row__bar-fill" style="width: 92%;"></div></div>
+                    </div>
+                    <div class="lb-row__stats">
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">Pass</span><span class="lb-row__stat-value">71.4%</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">$/solve</span><span class="lb-row__stat-value">$2.81</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">P50</span><span class="lb-row__stat-value">38s</span></div>
+                    </div>
+                  </div>
+                  <div class="lb-row">
+                    <div class="lb-row__rank">2</div>
+                    <div class="lb-row__meta">
+                      <div class="lb-row__name">
+                        <span class="avatar avatar--sm avatar--em" aria-hidden="true">GC</span>
+                        gpt-5-codex
+                      </div>
+                      <div class="lb-row__bar"><div class="lb-row__bar-fill" style="width: 84%;"></div></div>
+                    </div>
+                    <div class="lb-row__stats">
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">Pass</span><span class="lb-row__stat-value">68.1%</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">$/solve</span><span class="lb-row__stat-value">$3.45</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">P50</span><span class="lb-row__stat-value">52s</span></div>
+                    </div>
+                  </div>
+                  <div class="lb-row">
+                    <div class="lb-row__rank">3</div>
+                    <div class="lb-row__meta">
+                      <div class="lb-row__name">
+                        <span class="avatar avatar--sm avatar--cyan" aria-hidden="true">G2</span>
+                        gemini-2.5-pro
+                      </div>
+                      <div class="lb-row__bar"><div class="lb-row__bar-fill" style="width: 76%;"></div></div>
+                    </div>
+                    <div class="lb-row__stats">
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">Pass</span><span class="lb-row__stat-value">62.7%</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">$/solve</span><span class="lb-row__stat-value">$2.10</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">P50</span><span class="lb-row__stat-value">44s</span></div>
+                    </div>
+                  </div>
+                  <div class="lb-row">
+                    <div class="lb-row__rank">4</div>
+                    <div class="lb-row__meta">
+                      <div class="lb-row__name">
+                        <span class="avatar avatar--sm avatar--amber" aria-hidden="true">H4</span>
+                        haiku-4-5
+                        <span class="chip chip--cy"><span class="chip__dot"></span>cheapest</span>
+                      </div>
+                      <div class="lb-row__bar"><div class="lb-row__bar-fill" style="width: 64%;"></div></div>
+                    </div>
+                    <div class="lb-row__stats">
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">Pass</span><span class="lb-row__stat-value">54.2%</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">$/solve</span><span class="lb-row__stat-value">$0.41</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">P50</span><span class="lb-row__stat-value">22s</span></div>
+                    </div>
+                  </div>
+                  <div class="lb-row">
+                    <div class="lb-row__rank">5</div>
+                    <div class="lb-row__meta">
+                      <div class="lb-row__name">
+                        <span class="avatar avatar--sm avatar--pink" aria-hidden="true">DR</span>
+                        deepseek-r1
+                      </div>
+                      <div class="lb-row__bar"><div class="lb-row__bar-fill" style="width: 52%;"></div></div>
+                    </div>
+                    <div class="lb-row__stats">
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">Pass</span><span class="lb-row__stat-value">48.9%</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">$/solve</span><span class="lb-row__stat-value">$0.62</span></div>
+                      <div class="lb-row__stat"><span class="lb-row__stat-label">P50</span><span class="lb-row__stat-value">31s</span></div>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Spend by agent · last 30 days</div>
+                    <div class="card__sub">Stacked daily spend with budget threshold (dashed)</div>
+                  </div>
+                  <div class="row row--gap-4">
+                    <button class="btn btn--ghost btn--xs" type="button">Daily</button>
+                    <button class="btn btn--soft btn--xs" type="button">Weekly</button>
+                  </div>
+                </div>
+                <div class="spend-grid">
+                  <div style="position: relative;">
+                    <svg class="chart" id="spendChart" viewBox="0 0 600 220" preserveAspectRatio="none" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="g-violet" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#635bff" stop-opacity="0.55"/>
+                          <stop offset="1" stop-color="#635bff" stop-opacity="0"/>
+                        </linearGradient>
+                        <linearGradient id="g-cyan" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#22d3ee" stop-opacity="0.45"/>
+                          <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+                        </linearGradient>
+                        <linearGradient id="g-pink" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#f472b6" stop-opacity="0.4"/>
+                          <stop offset="1" stop-color="#f472b6" stop-opacity="0"/>
+                        </linearGradient>
+                        <linearGradient id="g-amber" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stop-color="#fbbf24" stop-opacity="0.4"/>
+                          <stop offset="1" stop-color="#fbbf24" stop-opacity="0"/>
+                        </linearGradient>
+                      </defs>
+                      <!-- gridlines -->
+                      <g stroke="rgba(10,12,23,0.06)" stroke-dasharray="2,4">
+                        <line x1="0" y1="40"  x2="600" y2="40"/>
+                        <line x1="0" y1="90"  x2="600" y2="90"/>
+                        <line x1="0" y1="140" x2="600" y2="140"/>
+                        <line x1="0" y1="190" x2="600" y2="190"/>
+                      </g>
+                      <!-- stacked area: see script for path generation; baked in here -->
+                      <g id="spendStacks"></g>
+                      <!-- budget threshold -->
+                      <line x1="0" y1="60" x2="600" y2="60" stroke="#f43f5e" stroke-width="1.4" stroke-dasharray="6,4"/>
+                      <text x="592" y="56" text-anchor="end" font-family="JetBrains Mono" font-size="10" fill="#f43f5e">budget · $200/day</text>
+                      <!-- hover targets -->
+                      <g id="spendHover"></g>
+                    </svg>
+                    <div class="chart-tooltip" id="spendTip"></div>
+                  </div>
+                  <div class="spend-legend">
+                    <div class="spend-legend__row">
+                      <span class="spend-legend__swatch" style="background: var(--accent);"></span>
+                      <span class="spend-legend__label">claude-sonnet-4-6</span>
+                      <span class="spend-legend__val">$1,422</span>
+                    </div>
+                    <div class="spend-legend__row">
+                      <span class="spend-legend__swatch" style="background: var(--emerald);"></span>
+                      <span class="spend-legend__label">gpt-5-codex</span>
+                      <span class="spend-legend__val">$1,108</span>
+                    </div>
+                    <div class="spend-legend__row">
+                      <span class="spend-legend__swatch" style="background: var(--accent-2);"></span>
+                      <span class="spend-legend__label">gemini-2.5-pro</span>
+                      <span class="spend-legend__val">$486</span>
+                    </div>
+                    <div class="spend-legend__row">
+                      <span class="spend-legend__swatch" style="background: var(--amber);"></span>
+                      <span class="spend-legend__label">haiku-4-5</span>
+                      <span class="spend-legend__val">$194</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <!-- Right column: focus + activity -->
+            <div class="stack">
+              <article class="focus-card">
+                <div class="focus-card__body">
+                  <span class="chip" style="background: rgba(34, 211, 238, 0.14); color: #a5f3fc; border-color: rgba(34, 211, 238, 0.22);">
+                    <span class="chip__dot"></span>This week's recommendation
+                  </span>
+                  <h3 style="margin-top: 14px; font-size: 1.2rem; line-height: 1.25; letter-spacing: -0.018em; color: white; font-weight: 600;">
+                    Switch <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.86rem; background: rgba(255,255,255,0.08); padding: 2px 7px; border-radius: 5px; color: white;">orders-api</code> default agent to <b>haiku-4-5</b>.
+                  </h3>
+                  <p style="margin-top: 10px; color: rgba(220, 226, 245, 0.78); font-size: 0.92rem; line-height: 1.6;">
+                    Pass rate is within 4 points of <code style="font-family: 'JetBrains Mono', monospace; color: rgba(220,226,245,0.85);">claude-sonnet-4-6</code> on this slice while costing <b style="color: white;">7× less</b>.
+                    Estimated savings: <b style="color: white;">$680/mo</b>.
+                  </p>
+                  <div class="row" style="margin-top: 16px; gap: 8px;">
+                    <button class="btn btn--accent btn--sm">Apply recommendation</button>
+                    <button class="btn btn--sm" style="background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.14);">View evidence</button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Activity stream</div>
+                    <div class="card__sub">Workspace events · last 12 hours</div>
+                  </div>
+                  <button class="btn btn--ghost btn--xs" type="button">Filter</button>
+                </div>
+                <div class="activity">
+                  <div class="activity__row">
+                    <span class="activity__icon activity__icon--em" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="activity__text">
+                      Run <code>r-9817</code> finished &mdash; <b>claude-sonnet-4-6</b> won on
+                      <b>orders-api</b> with <b>71% pass</b>.
+                    </div>
+                    <span class="activity__time">14m</span>
+                  </div>
+                  <div class="activity__row">
+                    <span class="activity__icon activity__icon--ro" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 13L13 2.5M2.5 2.5L13 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </span>
+                    <div class="activity__text">
+                      <b>Regression detected</b> &mdash; <b>gemini-2.5-pro</b> dropped <b>5.2 points</b> on
+                      <code>billing</code> vs last week.
+                    </div>
+                    <span class="activity__time">38m</span>
+                  </div>
+                  <div class="activity__row">
+                    <span class="activity__icon activity__icon--vio" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </span>
+                    <div class="activity__text">
+                      <b>Sara Lin</b> connected repository <code>acme/data-pipeline</code> and queued initial benchmark.
+                    </div>
+                    <span class="activity__time">1h</span>
+                  </div>
+                  <div class="activity__row">
+                    <span class="activity__icon activity__icon--am" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 4.5v4.2M8 11.2v.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M2 13L8 3l6 10H2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="activity__text">
+                      Budget warning &mdash; <b>billing</b> reached <b>82% of monthly cap</b> ($410/$500).
+                    </div>
+                    <span class="activity__time">3h</span>
+                  </div>
+                  <div class="activity__row">
+                    <span class="activity__icon activity__icon--em" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="activity__text">
+                      Scheduled run <code>weekly-frontier</code> kicked off across <b>5 repos</b>.
+                    </div>
+                    <span class="activity__time">5h</span>
+                  </div>
+                  <div class="activity__row">
+                    <span class="activity__icon" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 5v3l2 1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    </span>
+                    <div class="activity__text">
+                      <b>Marcus Wei</b> exported the <code>web-app</code> April report (PDF, signed).
+                    </div>
+                    <span class="activity__time">8h</span>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card" style="background: linear-gradient(140deg, rgba(99,91,255,0.04), rgba(34,211,238,0.04)); border-style: dashed;">
+                <div class="card__head" style="margin-bottom: 8px;">
+                  <div class="card__title">Suggested next steps</div>
+                </div>
+                <div class="stack--sm">
+                  <div class="row" style="gap: 10px;">
+                    <span class="avatar avatar--sm" style="background: var(--surface); color: var(--accent); box-shadow: inset 0 0 0 1.5px rgba(99,91,255,0.4);" aria-hidden="true">1</span>
+                    <span style="font-size: 0.9rem; color: var(--ink-soft);">Add a task for the <b>"empty cart 500"</b> bug from #2188</span>
+                  </div>
+                  <div class="row" style="gap: 10px;">
+                    <span class="avatar avatar--sm" style="background: var(--surface); color: var(--accent); box-shadow: inset 0 0 0 1.5px rgba(99,91,255,0.4);" aria-hidden="true">2</span>
+                    <span style="font-size: 0.9rem; color: var(--ink-soft);">Re-baseline <b>data-pipeline</b> after schema migration</span>
+                  </div>
+                  <div class="row" style="gap: 10px;">
+                    <span class="avatar avatar--sm" style="background: var(--surface); color: var(--accent); box-shadow: inset 0 0 0 1.5px rgba(99,91,255,0.4);" aria-hidden="true">3</span>
+                    <span style="font-size: 0.9rem; color: var(--ink-soft);">Invite <b>QA team</b> to view <code>web-app</code> reports</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- Other views appended by next edits -->
+      </main>
+    </div>
+  </div>
+
+  <!-- placeholder where command palette, modals, notifications get appended -->
+</body>
+</html>
