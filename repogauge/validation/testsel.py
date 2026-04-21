@@ -1,16 +1,15 @@
-"""Targeted test selection helpers for validation runs."""
+"""Targeted test selection helpers for validation runs.
+
+Target selection is intentionally conservative at dataset/export time.
+We only emit stable file- or directory-level pytest inputs here; concrete
+node IDs are resolved later from the actual checkout under test.
+"""
 
 from __future__ import annotations
 
-import re
 import shlex
 from typing import List, Tuple
 
-
-_TEST_NODE_RE = re.compile(
-    r"^\+\s*(?:async\s+)?def\s+(test_[A-Za-z_][A-Za-z0-9_]*)\s*\("
-)
-_TEST_CLASS_RE = re.compile(r"^\+\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:(]")
 _PYTEST_CMD_PREFIX = "python -m pytest"
 _JUNIT_XML_PLACEHOLDER = "{junit_xml}"
 _JUNIT_XML_FLAGS = ("--junit-xml", "--junitxml")
@@ -41,8 +40,10 @@ def extract_patch_paths(test_patch: str) -> List[str]:
                 candidate = tokens[3]
                 if candidate.startswith("b/"):
                     candidate = candidate[2:]
-                if candidate and candidate != "/dev/null" and not candidate.endswith(
-                    ".rej"
+                if (
+                    candidate
+                    and candidate != "/dev/null"
+                    and not candidate.endswith(".rej")
                 ):
                     paths.append(candidate)
             continue
@@ -120,43 +121,13 @@ def _is_test_support_path(path: str) -> bool:
     )
 
 
-def _extract_test_node_ids(test_patch: str) -> List[str]:
-    """Infer pytest node IDs from added test definitions in the patch."""
-    test_nodes: List[str] = []
-    current_test_file: str | None = None
-    current_class: str | None = None
-
-    for line in test_patch.splitlines():
-        if line.startswith("+++ b/"):
-            current_test_file = line[6:].strip()
-            current_class = None
-            continue
-        if line.startswith("--- a/") or line.startswith("@@ "):
-            continue
-        if not current_test_file:
-            continue
-        if not _is_test_path(current_test_file):
-            continue
-        if line.startswith("-"):
-            continue
-        class_match = _TEST_CLASS_RE.match(line)
-        if class_match:
-            current_class = class_match.group(1)
-            continue
-        func_match = _TEST_NODE_RE.match(line)
-        if not func_match:
-            continue
-        func = func_match.group(1)
-        if current_class:
-            test_nodes.append(f"{current_test_file}::{current_class}::{func}")
-        else:
-            test_nodes.append(f"{current_test_file}::{func}")
-
-    return _dedupe(test_nodes)
-
-
 def build_targeted_test_inputs(test_patch: str) -> List[str]:
-    """Build conservative pytest inputs from changed files in `test_patch`."""
+    """Build conservative pytest inputs from changed files in `test_patch`.
+
+    The returned values are stable file- or directory-level inputs. Runtime
+    validation can refine these to concrete node IDs after checking out the
+    exact tree for each validation pass.
+    """
     changed = extract_patch_paths(test_patch)
     if not changed:
         return []
@@ -166,9 +137,6 @@ def build_targeted_test_inputs(test_patch: str) -> List[str]:
         for path in changed
         if _is_test_path(path) and not _is_test_support_path(path)
     ]
-    test_nodes = _extract_test_node_ids(test_patch)
-    if test_nodes:
-        return test_nodes
     if test_files:
         return _dedupe(test_files)
 

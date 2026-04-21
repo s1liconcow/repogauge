@@ -6,7 +6,7 @@ from repogauge.validation.testsel import (
 )
 
 
-def test_build_targeted_test_plan_prefers_node_ids_from_test_patch() -> None:
+def test_build_targeted_test_plan_targets_changed_test_file_for_added_test() -> None:
     test_patch = (
         "diff --git a/tests/unit/test_thing.py b/tests/unit/test_thing.py\n"
         "--- a/tests/unit/test_thing.py\n"
@@ -20,7 +20,7 @@ def test_build_targeted_test_plan_prefers_node_ids_from_test_patch() -> None:
     cmd, inputs = build_targeted_test_plan("python -m pytest", test_patch)
 
     assert cmd == "python -m pytest --tb=no -q --junit-xml={junit_xml}"
-    assert inputs == ["tests/unit/test_thing.py::test_new"]
+    assert inputs == ["tests/unit/test_thing.py"]
 
 
 def test_build_targeted_test_plan_targets_changed_test_file_when_no_node_ids() -> None:
@@ -108,7 +108,7 @@ def test_build_targeted_test_plan_keeps_existing_junitxml_flag() -> None:
     assert inputs == ["tests/unit/test_thing.py"]
 
 
-def test_build_targeted_test_inputs_prefers_function_nodes() -> None:
+def test_build_targeted_test_inputs_returns_test_file_for_nested_added_test() -> None:
     test_patch = (
         "diff --git a/tests/unit/test_nested.py b/tests/unit/test_nested.py\n"
         "--- a/tests/unit/test_nested.py\n"
@@ -121,7 +121,7 @@ def test_build_targeted_test_inputs_prefers_function_nodes() -> None:
 
     inputs = build_targeted_test_inputs(test_patch)
 
-    assert inputs == ["tests/unit/test_nested.py::TestNested::test_case"]
+    assert inputs == ["tests/unit/test_nested.py"]
 
 
 def test_build_targeted_test_plan_keeps_existing_junit_xml_space_flag() -> None:

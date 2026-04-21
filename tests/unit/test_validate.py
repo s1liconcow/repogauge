@@ -15,6 +15,7 @@ from repogauge.validation.validate import (
     _pytest_command_attempts,
     _run_pytest,
     _run_test,
+    _run_validation_pass,
     _test_command_attempts,
 )
 
@@ -123,9 +124,7 @@ def test_run_test_uses_adapter_env_and_parser(
         observed["env"] = env
         return CommandResult(command=cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(
-        "repogauge.validation.validate.run_command", fake_run_command
-    )
+    monkeypatch.setattr("repogauge.validation.validate.run_command", fake_run_command)
 
     outcomes, raw, attempts = _run_test(
         tmp_path,
@@ -277,7 +276,10 @@ def test_run_test_python_container_uses_container_visible_report_path(
 
     assert outcomes == {"tests/test_mod.py::ok": "pass"}
     assert len(attempts) == 1
-    assert observed["kwargs"]["command"][:2] == ["pytest", "--junit-xml=/testbed/outside-junit.xml"]
+    assert observed["kwargs"]["command"][:2] == [
+        "pytest",
+        "--junit-xml=/testbed/outside-junit.xml",
+    ]
 
 
 def test_run_test_python_retries_with_file_paths_when_node_collection_fails(
@@ -294,6 +296,9 @@ def test_run_test_python_retries_with_file_paths_when_node_collection_fails(
 
         def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
             return [["python", "-m", "pytest"]]
+
+        def test_report_filename(self) -> str | None:
+            return "junit.xml"
 
         def parse_test_output(
             self, report: object, test_spec: object | None
@@ -348,6 +353,177 @@ def test_run_test_python_retries_with_file_paths_when_node_collection_fails(
     assert attempts[0]["status"] == "collector_fallback"
     assert attempts[0]["fallback_test_inputs"] == ["tests/test_example.py"]
     assert attempts[1]["status"] == "success"
+
+
+def test_run_validation_pass_collects_runtime_pytest_nodes_from_file_targets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    checkout = tmp_path / "checkout"
+    test_file = checkout / "tests" / "test_example.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_example():\n    assert True\n", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    class Handle:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def remove(self) -> None:
+            return None
+
+    class Adapter:
+        def name(self) -> str:
+            return "python"
+
+        def env_overrides(self, worktree: Path) -> dict[str, str]:
+            return {}
+
+        def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+            return [["python", "-m", "pytest"]]
+
+        def test_report_filename(self) -> str | None:
+            return "junit.xml"
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.create_checkout",
+        lambda *args, **kwargs: Handle(checkout),
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate.apply_patch_text",
+        lambda *args, **kwargs: None,
+    )
+
+    def fake_run_command(cmd, *, cwd=None, env=None, timeout_seconds=None):  # noqa: ARG001
+        observed["collect_cmd"] = list(cmd)
+        return CommandResult(
+            command=cmd,
+            returncode=0,
+            stdout=(
+                "tests/test_example.py::test_one\ntests/test_example.py::test_two\n"
+            ),
+            stderr="",
+        )
+
+    def fake_run_test(
+        worktree: Path,
+        *,
+        test_files: list[str],
+        test_report_path: Path,
+        timeout_seconds: int = 120,
+        test_cmd_base: str = "",
+        adapter=None,
+        test_spec=None,
+        attempt_id_prefix: str = "eval",
+        container_host: str | None = None,
+        adapter_spec=None,
+        instance_row=None,
+        environment_strategy: str = "default",
+    ):
+        observed["resolved_test_files"] = list(test_files)
+        return (
+            {
+                "tests/test_example.py::test_one": "fail",
+                "tests/test_example.py::test_two": "pass",
+            },
+            "[stdout]\n..\n[stderr]\n",
+            [
+                {
+                    "attempt": 1,
+                    "status": "success",
+                    "command": ["python", "-m", "pytest"],
+                    "returncode": 0,
+                    "timed_out": False,
+                    "elapsed_ms": 1,
+                    "tests_run": 2,
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.run_command",
+        fake_run_command,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_test",
+        fake_run_test,
+    )
+
+    outcome = _run_validation_pass(
+        label="b",
+        temp_root=tmp_path,
+        repo_root=tmp_path,
+        base_commit="deadbeef",
+        test_patch="",
+        pred_patch="",
+        test_files=["tests/test_example.py::legacy_selector"],
+        timeout_seconds=5,
+        test_cmd_base="python -m pytest --junit-xml={junit_xml}",
+        adapter=Adapter(),
+    )
+
+    assert outcome["status"] == "passed"
+    assert observed["collect_cmd"][-1] == "tests/test_example.py"
+    assert observed["resolved_test_files"] == [
+        "tests/test_example.py::test_one",
+        "tests/test_example.py::test_two",
+    ]
+    assert outcome["attempts"][0]["status"] == "collection_resolved"
+
+
+def test_run_validation_pass_skips_missing_targeted_pytest_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    class Handle:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def remove(self) -> None:
+            return None
+
+    class Adapter:
+        def name(self) -> str:
+            return "python"
+
+        def env_overrides(self, worktree: Path) -> dict[str, str]:
+            return {}
+
+        def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+            return [["python", "-m", "pytest"]]
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.create_checkout",
+        lambda *args, **kwargs: Handle(checkout),
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate.apply_patch_text",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_test",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("_run_test should not run")
+        ),
+    )
+
+    outcome = _run_validation_pass(
+        label="a",
+        temp_root=tmp_path,
+        repo_root=tmp_path,
+        base_commit="deadbeef",
+        test_patch="",
+        pred_patch="",
+        test_files=["tests/test_missing.py"],
+        timeout_seconds=5,
+        test_cmd_base="python -m pytest --junit-xml={junit_xml}",
+        adapter=Adapter(),
+    )
+
+    assert outcome["status"] == "passed"
+    assert outcome["outcomes"] == {}
+    assert outcome["attempts"][0]["status"] == "collection_missing"
 
 
 def test_pytest_execution_error_alias_is_preserved() -> None:

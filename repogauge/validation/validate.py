@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, TextIO, Tuple
 
-from repogauge.exec import run_command
+from repogauge.exec import CommandResult, run_command
 from repogauge.lang import LanguageAdapter, find_adapter
 from repogauge.runner.container_exec import (
     prepare_local_eval_image,
@@ -381,7 +381,164 @@ def _should_retry_pytest_with_file_inputs(
     if result.returncode != 4:
         return False
     stderr = str(result.stderr or "")
-    return "found no collectors for" in stderr.lower()
+    stderr_lower = stderr.lower()
+    return (
+        "found no collectors for" in stderr_lower
+        or "not found:" in stderr_lower
+        or "no match in any of" in stderr_lower
+    )
+
+
+def _strip_command_flags(parts: List[str], flags: tuple[str, ...]) -> List[str]:
+    stripped: List[str] = []
+    skip_next = False
+    for part in parts:
+        if skip_next:
+            skip_next = False
+            continue
+        matched = False
+        for flag in flags:
+            if part == flag:
+                skip_next = True
+                matched = True
+                break
+            if part.startswith(f"{flag}="):
+                matched = True
+                break
+        if matched:
+            continue
+        stripped.append(part)
+    return stripped
+
+
+def _pytest_file_inputs(test_inputs: List[str]) -> List[str]:
+    file_inputs: List[str] = []
+    for value in test_inputs:
+        candidate = str(value).strip()
+        if not candidate:
+            continue
+        if "::" in candidate:
+            candidate = candidate.split("::", 1)[0]
+        if candidate not in file_inputs:
+            file_inputs.append(candidate)
+    return file_inputs
+
+
+def _parse_pytest_collected_nodes(output: str) -> List[str]:
+    nodes: List[str] = []
+    for raw_line in output.splitlines():
+        candidate = raw_line.strip()
+        if not candidate:
+            continue
+        if candidate.startswith(("=", "ERROR:", "no tests collected")):
+            continue
+        if "::" not in candidate:
+            continue
+        if candidate not in nodes:
+            nodes.append(candidate)
+    return nodes
+
+
+def _run_pytest_collection(
+    worktree: Path,
+    *,
+    test_inputs: List[str],
+    timeout_seconds: int,
+    test_cmd_base: str,
+    adapter: LanguageAdapter,
+    attempt_id_prefix: str,
+    container_host: str | None,
+    adapter_spec: Mapping[str, Any] | None,
+    instance_row: Mapping[str, Any] | None,
+    environment_strategy: str,
+) -> Tuple[List[str], Dict[str, Any], str]:
+    adapter_env = adapter.env_overrides(worktree)
+    env = (
+        dict(adapter_env)
+        if container_host is not None
+        else {**os.environ, **adapter_env}
+    )
+    command_attempts = _test_command_attempts(test_cmd_base, adapter=adapter)
+    if container_host is not None:
+        command_attempts = _container_safe_command_attempts(
+            command_attempts, adapter=adapter
+        )
+    base_cmd = (
+        list(command_attempts[0]) if command_attempts else shlex.split(test_cmd_base)
+    )
+    collect_cmd = _strip_command_flags(base_cmd, _JUNIT_XML_FLAGS)
+    if "--collect-only" not in collect_cmd:
+        collect_cmd.append("--collect-only")
+    if "-q" not in collect_cmd:
+        collect_cmd.append("-q")
+    if "--tb=no" not in collect_cmd:
+        collect_cmd.append("--tb=no")
+    collect_cmd.extend(test_inputs)
+
+    effective_adapter_spec = (
+        dict(adapter_spec)
+        if isinstance(adapter_spec, Mapping)
+        else _default_container_adapter_spec(
+            dataset_row=instance_row,
+            adapter=adapter,
+            test_cmd_base=test_cmd_base,
+            environment_strategy=environment_strategy,
+        )
+    )
+
+    if container_host is not None:
+        result = run_workspace_command_in_container(
+            attempt_id=f"{attempt_id_prefix}-collect",
+            workspace_path=worktree,
+            command=collect_cmd,
+            timeout_seconds=timeout_seconds,
+            container_host=container_host,
+            artifacts_root=worktree,
+            environment=env,
+            adapter_spec=effective_adapter_spec,
+            instance_row=instance_row,
+        )
+    else:
+        result = run_command(
+            collect_cmd,
+            cwd=str(worktree),
+            env=env,
+            timeout_seconds=timeout_seconds,
+        )
+
+    raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
+    collected_nodes = _parse_pytest_collected_nodes(result.stdout)
+    status = "collection_empty"
+    if collected_nodes:
+        status = "collection_resolved"
+    elif result.timed_out:
+        status = "collection_timeout"
+    elif result.returncode != 0:
+        status = "collection_fallback"
+
+    attempt_entry: Dict[str, Any] = {
+        "attempt": 0,
+        "command": collect_cmd,
+        "returncode": result.returncode,
+        "timed_out": result.timed_out,
+        "elapsed_ms": result.elapsed_ms,
+        "status": status,
+        "tests_run": len(collected_nodes),
+    }
+    if collected_nodes:
+        attempt_entry["resolved_test_inputs"] = collected_nodes
+        return collected_nodes, attempt_entry, raw
+
+    fallback_inputs = [
+        value
+        for value in _pytest_file_inputs(test_inputs)
+        if (worktree / value).exists()
+    ]
+    if fallback_inputs:
+        attempt_entry["fallback_test_inputs"] = fallback_inputs
+        return fallback_inputs, attempt_entry, raw
+
+    return [], attempt_entry, raw
 
 
 def _container_safe_command_attempts(
@@ -409,7 +566,9 @@ def _container_safe_command_attempts(
     return normalized or attempts
 
 
-def _container_visible_report_path(worktree: Path, report_path: Path) -> tuple[Path, Path]:
+def _container_visible_report_path(
+    worktree: Path, report_path: Path
+) -> tuple[Path, Path]:
     host_path = worktree / report_path.name
     container_path = Path(DOCKER_WORKDIR) / host_path.relative_to(worktree)
     return host_path, container_path
@@ -507,8 +666,8 @@ def _run_test(
             report_input: object = test_report_path
             if active_adapter.name() == "python":
                 if containerized:
-                    host_report_path, container_report_path = _container_visible_report_path(
-                        worktree, test_report_path
+                    host_report_path, container_report_path = (
+                        _container_visible_report_path(worktree, test_report_path)
                     )
                     test_cmd, _ = _normalize_junit_output_flag(
                         test_cmd, container_report_path
@@ -521,10 +680,16 @@ def _run_test(
                     report_input = report_path_to_read
             else:
                 report_glob_getter = getattr(active_adapter, "test_report_glob", None)
-                report_filename_getter = getattr(active_adapter, "test_report_filename", None)
-                report_glob = report_glob_getter() if callable(report_glob_getter) else None
+                report_filename_getter = getattr(
+                    active_adapter, "test_report_filename", None
+                )
+                report_glob = (
+                    report_glob_getter() if callable(report_glob_getter) else None
+                )
                 report_filename = (
-                    report_filename_getter() if callable(report_filename_getter) else None
+                    report_filename_getter()
+                    if callable(report_filename_getter)
+                    else None
                 )
                 if report_glob:
                     report_input = worktree / report_glob
@@ -704,6 +869,7 @@ def _run_validation_pass(
     outcomes: Dict[str, str] = {}
     log = ""
     attempts: List[Dict[str, Any]] = []
+    collector_log = ""
     failure_code: str | None = None
     active_adapter = _resolve_adapter(adapter)
 
@@ -714,15 +880,89 @@ def _run_validation_pass(
         if pred_patch.strip():
             apply_patch_text(wt.path, pred_patch)
 
+        effective_test_inputs = list(test_files)
+        target_cmd_tokens = test_cmd_base.split()
+        is_pytest = active_adapter.name() == "python" and (
+            "pytest" in target_cmd_tokens
+            or (
+                target_cmd_tokens[:2] == ["python", "-m"]
+                and len(target_cmd_tokens) > 2
+                and target_cmd_tokens[2] == "pytest"
+            )
+        )
+        if is_pytest:
+            collection_inputs = _pytest_file_inputs(effective_test_inputs)
+            collect_from_files = bool(collection_inputs) and all(
+                value.endswith(".py") for value in collection_inputs
+            )
+            if collect_from_files:
+                existing_collection_inputs = [
+                    value for value in collection_inputs if (wt.path / value).exists()
+                ]
+            else:
+                existing_collection_inputs = []
+            if collect_from_files and not existing_collection_inputs:
+                collector_log = (
+                    "[stdout]\n\n[stderr]\n"
+                    "pytest collection skipped: targeted files are absent in this checkout\n"
+                )
+                attempts.append(
+                    {
+                        "attempt": 0,
+                        "command": [],
+                        "returncode": 0,
+                        "timed_out": False,
+                        "elapsed_ms": 0,
+                        "status": "collection_missing",
+                        "fallback_test_inputs": collection_inputs,
+                        "tests_run": 0,
+                    }
+                )
+                return {
+                    "status": "passed",
+                    "error": None,
+                    "outcomes": {},
+                    "log": collector_log,
+                    "attempts": attempts,
+                }
+            if existing_collection_inputs:
+                (
+                    effective_test_inputs,
+                    collect_attempt,
+                    collector_log,
+                ) = _run_pytest_collection(
+                    wt.path,
+                    test_inputs=existing_collection_inputs,
+                    timeout_seconds=timeout_seconds,
+                    test_cmd_base=test_cmd_base,
+                    adapter=active_adapter,
+                    attempt_id_prefix=(
+                        f"eval-{str((instance_row or {}).get('instance_id', 'instance')).strip() or 'instance'}-{label}"
+                    ),
+                    container_host=container_host,
+                    adapter_spec=adapter_spec,
+                    instance_row=instance_row,
+                    environment_strategy=environment_strategy,
+                )
+                attempts.append(collect_attempt)
+                if not effective_test_inputs:
+                    return {
+                        "status": "passed",
+                        "error": None,
+                        "outcomes": {},
+                        "log": collector_log,
+                        "attempts": attempts,
+                    }
+
         test_report_path = _test_report_path(temp_root, label, active_adapter)
-        outcomes, log, attempts = _run_test(
+        outcomes, test_log, test_attempts = _run_test(
             wt.path,
-            test_files=test_files,
+            test_files=effective_test_inputs,
             test_report_path=test_report_path,
             timeout_seconds=timeout_seconds,
             test_cmd_base=test_cmd_base,
             adapter=active_adapter,
-            test_spec=test_files or None,
+            test_spec=effective_test_inputs or None,
             attempt_id_prefix=(
                 f"eval-{str((instance_row or {}).get('instance_id', 'instance')).strip() or 'instance'}-{label}"
             ),
@@ -731,6 +971,8 @@ def _run_validation_pass(
             instance_row=instance_row,
             environment_strategy=environment_strategy,
         )
+        attempts.extend(test_attempts)
+        log = test_log if not collector_log else f"{collector_log}\n{test_log}"
     except Exception as exc:
         if isinstance(exc, CommandPatchError):
             if apply_pred_patch:
@@ -741,14 +983,14 @@ def _run_validation_pass(
                 failure_code = "unknown_validator_failure"
         elif isinstance(exc, PytestExecutionError):
             failure_code = "missing_junit"
-            attempts = exc.attempts
+            attempts.extend(exc.attempts)
         else:
             failure_code = "unknown_validator_failure"
         return {
             "status": "failed",
             "error": f"{label} failed: {exc}",
             "outcomes": {},
-            "log": log,
+            "log": log if not collector_log else f"{collector_log}\n{log}",
             "attempts": attempts,
             "failure_code": failure_code,
         }
@@ -1336,9 +1578,7 @@ def run_eval(
     environment_strategy = (adapter_spec or {}).get("strategy_name", "default")
     test_cmd_base = (adapter_spec or {}).get("test_cmd_base", "")
     active_adapter = _resolve_adapter(
-        language=(
-            adapter_spec or {}
-        ).get("language")
+        language=(adapter_spec or {}).get("language")
         if isinstance(adapter_spec, dict)
         else None
     )
