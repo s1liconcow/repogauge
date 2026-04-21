@@ -1,11 +1,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import docker.errors
+
 from repogauge.runner.container_exec import (
     WorkspaceContainerError,
     _containerize_environment,
     _ensure_solver_command_available,
     _local_repo_setup_commands,
+    _resolve_image_from_adapter_spec,
     _resolve_host_tool_fallback,
     _solver_shell_command,
 )
@@ -74,6 +77,56 @@ def test_local_repo_setup_commands_strip_remote_clone_bootstrap() -> None:
         "pip install uv",
         "uv sync --active --all-groups",
     )
+
+
+def test_resolve_image_from_adapter_spec_normalizes_python_for_swebench(
+    monkeypatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, str, dict[str, object]]] = []
+
+    class _MissingImages:
+        def get(self, image_name: str):
+            raise docker.errors.ImageNotFound("missing")
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.images = _MissingImages()
+
+    def fake_get_dockerfile_base(platform, arch, language, **kwargs):
+        calls.append(("base", language, dict(kwargs)))
+        return "FROM scratch\n"
+
+    def fake_get_dockerfile_env(platform, arch, language, base_image_key, **kwargs):
+        calls.append(("env", language, dict(kwargs)))
+        return "FROM scratch\n"
+
+    monkeypatch.setattr(
+        "repogauge.runner.container_exec.get_dockerfile_base",
+        fake_get_dockerfile_base,
+    )
+    monkeypatch.setattr(
+        "repogauge.runner.container_exec.get_dockerfile_env",
+        fake_get_dockerfile_env,
+    )
+    monkeypatch.setattr(
+        "repogauge.runner.container_exec.build_image",
+        lambda **kwargs: None,
+    )
+
+    resolved = _resolve_image_from_adapter_spec(
+        attempt_id="attempt-1",
+        attempt_root=tmp_path,
+        instance_row={"repo": "owner/repo"},
+        adapter_spec={
+            "repo": "owner/repo",
+            "language": "python",
+            "docker_specs": {"python_version": "3.11"},
+        },
+        client=_FakeClient(),
+    )
+
+    assert resolved.image.startswith("rg.local.env.owner-repo-python.")
+    assert [call[:2] for call in calls] == [("base", "py"), ("env", "py")]
 
 
 def test_resolve_host_tool_fallback_for_codex(monkeypatch, tmp_path: Path) -> None:

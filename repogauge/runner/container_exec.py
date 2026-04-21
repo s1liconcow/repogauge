@@ -63,6 +63,11 @@ _CONTAINER_ENV_DROP_KEYS = frozenset(
 _CONTAINER_ENV_DROP_PREFIXES = ("CONDA_",)
 _IMAGE_PREP_LOCK = threading.Lock()
 _IMAGE_PREP_LOCKS: dict[str, threading.Lock] = {}
+_SWEBENCH_LANGUAGE_ALIASES = {
+    "python": "py",
+    "javascript": "js",
+    "rust": "rs",
+}
 
 
 class WorkspaceContainerError(RuntimeError):
@@ -104,6 +109,13 @@ def _image_prep_lock(key: str) -> threading.Lock:
             lock = threading.Lock()
             _IMAGE_PREP_LOCKS[key] = lock
         return lock
+
+
+def _swebench_language_name(language: str) -> str:
+    normalized = str(language or "").strip().lower()
+    if not normalized:
+        return "py"
+    return _SWEBENCH_LANGUAGE_ALIASES.get(normalized, normalized)
 
 
 def _resolve_image(
@@ -196,6 +208,7 @@ def _resolve_image_from_adapter_spec(
 
     repo = str(adapter_spec.get("repo") or instance_row.get("repo") or "").strip()
     language = str(adapter_spec.get("language") or "python").strip().lower() or "python"
+    swebench_language = _swebench_language_name(language)
     docker_specs = dict(adapter_spec.get("docker_specs") or {})
     run_args = docker_specs.get("run_args", {})
     cap_add = (
@@ -223,7 +236,7 @@ def _resolve_image_from_adapter_spec(
                     image_name=base_image_key,
                     setup_scripts={},
                     dockerfile=get_dockerfile_base(
-                        platform, arch, language, **merged_specs
+                        platform, arch, swebench_language, **merged_specs
                     ),
                     platform=platform,
                     client=client,
@@ -241,7 +254,7 @@ def _resolve_image_from_adapter_spec(
                     dockerfile=get_dockerfile_env(
                         platform,
                         arch,
-                        language,
+                        swebench_language,
                         base_image_key,
                         **merged_specs,
                     ),
