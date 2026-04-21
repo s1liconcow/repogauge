@@ -280,6 +280,76 @@ def test_run_test_python_container_uses_container_visible_report_path(
     assert observed["kwargs"]["command"][:2] == ["pytest", "--junit-xml=/testbed/outside-junit.xml"]
 
 
+def test_run_test_python_retries_with_file_paths_when_node_collection_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed_cmds: list[list[str]] = []
+
+    class Adapter:
+        def name(self) -> str:
+            return "python"
+
+        def env_overrides(self, worktree: Path) -> dict[str, str]:
+            return {}
+
+        def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+            return [["python", "-m", "pytest"]]
+
+        def parse_test_output(
+            self, report: object, test_spec: object | None
+        ) -> dict[str, str]:
+            assert isinstance(report, Path)
+            if len(observed_cmds) == 1:
+                return {"tests.unit.test_example": "error"}
+            return {"tests/test_example.py::test_ok": "pass"}
+
+        def test_report_filename(self) -> str | None:
+            return None
+
+        def test_report_glob(self) -> str | None:
+            return None
+
+    def fake_run_command(cmd, *, cwd=None, env=None, timeout_seconds=None):  # noqa: ARG001
+        observed_cmds.append(list(cmd))
+        xml_flag = next(arg for arg in cmd if arg.startswith("--junit-xml="))
+        Path(xml_flag.removeprefix("--junit-xml=")).write_text(
+            "<testsuite></testsuite>", encoding="utf-8"
+        )
+        if len(observed_cmds) == 1:
+            return CommandResult(
+                command=cmd,
+                returncode=4,
+                stdout="",
+                stderr=(
+                    "ERROR: found no collectors for "
+                    "/repo/tests/test_example.py::test_ok\n"
+                ),
+            )
+        return CommandResult(command=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.run_command",
+        fake_run_command,
+    )
+
+    outcomes, raw, attempts = _run_test(
+        tmp_path,
+        test_files=["tests/test_example.py::test_ok"],
+        test_report_path=tmp_path / "junit.xml",
+        timeout_seconds=5,
+        test_cmd_base="python -m pytest",
+        adapter=Adapter(),
+    )
+
+    assert outcomes == {"tests/test_example.py::test_ok": "pass"}
+    assert raw == "[stdout]\n\n[stderr]\n"
+    assert observed_cmds[0][-1] == "tests/test_example.py::test_ok"
+    assert observed_cmds[1][-1] == "tests/test_example.py"
+    assert attempts[0]["status"] == "collector_fallback"
+    assert attempts[0]["fallback_test_inputs"] == ["tests/test_example.py"]
+    assert attempts[1]["status"] == "success"
+
+
 def test_pytest_execution_error_alias_is_preserved() -> None:
     assert PytestExecutionError is TestExecutionError
 

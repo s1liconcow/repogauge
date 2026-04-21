@@ -354,6 +354,36 @@ def _pytest_command_attempts(test_cmd_base: str) -> List[List[str]]:
     return _test_command_attempts(test_cmd_base, adapter=adapter)
 
 
+def _pytest_file_fallback_inputs(test_inputs: List[str]) -> List[str]:
+    fallback_inputs: List[str] = []
+    for value in test_inputs:
+        candidate = str(value).strip()
+        if not candidate:
+            continue
+        file_path = candidate.split("::", 1)[0]
+        if file_path and file_path not in fallback_inputs:
+            fallback_inputs.append(file_path)
+    return fallback_inputs
+
+
+def _should_retry_pytest_with_file_inputs(
+    *,
+    adapter: LanguageAdapter,
+    test_inputs: List[str],
+    result: CommandResult,
+) -> bool:
+    if adapter.name() != "python":
+        return False
+    if not test_inputs:
+        return False
+    if not any("::" in str(value) for value in test_inputs):
+        return False
+    if result.returncode != 4:
+        return False
+    stderr = str(result.stderr or "")
+    return "found no collectors for" in stderr.lower()
+
+
 def _container_safe_command_attempts(
     attempts: List[List[str]], *, adapter: LanguageAdapter
 ) -> List[List[str]]:
@@ -467,93 +497,112 @@ def _run_test(
         )
     )
 
-    for index, base_cmd in enumerate(command_attempts):
-        test_cmd = list(base_cmd)
-        report_input: object = test_report_path
-        if active_adapter.name() == "python":
+    attempt_number = 0
+    for base_cmd in command_attempts:
+        pending_test_inputs: List[List[str]] = [list(test_files)]
+        while pending_test_inputs:
+            current_test_inputs = pending_test_inputs.pop(0)
+            attempt_number += 1
+            test_cmd = list(base_cmd)
+            report_input: object = test_report_path
+            if active_adapter.name() == "python":
+                if containerized:
+                    host_report_path, container_report_path = _container_visible_report_path(
+                        worktree, test_report_path
+                    )
+                    test_cmd, _ = _normalize_junit_output_flag(
+                        test_cmd, container_report_path
+                    )
+                    report_input = host_report_path
+                else:
+                    test_cmd, report_path_to_read = _normalize_junit_output_flag(
+                        test_cmd, test_report_path
+                    )
+                    report_input = report_path_to_read
+            else:
+                report_glob_getter = getattr(active_adapter, "test_report_glob", None)
+                report_filename_getter = getattr(active_adapter, "test_report_filename", None)
+                report_glob = report_glob_getter() if callable(report_glob_getter) else None
+                report_filename = (
+                    report_filename_getter() if callable(report_filename_getter) else None
+                )
+                if report_glob:
+                    report_input = worktree / report_glob
+                elif report_filename:
+                    report_input = worktree / report_filename
+                else:
+                    report_input = None
+
+            if isinstance(report_input, Path) and report_input.exists():
+                try:
+                    report_input.unlink()
+                except OSError:
+                    pass
+
+            cmd = list(test_cmd)
+            if active_adapter.name() == "python":
+                cmd += ["--tb=no", "-q"]
+            if current_test_inputs:
+                cmd += current_test_inputs
             if containerized:
-                host_report_path, container_report_path = _container_visible_report_path(
-                    worktree, test_report_path
+                result = run_workspace_command_in_container(
+                    attempt_id=f"{attempt_id_prefix}-attempt-{attempt_number}",
+                    workspace_path=worktree,
+                    command=cmd,
+                    timeout_seconds=timeout_seconds,
+                    container_host=container_host,
+                    artifacts_root=test_report_path.parent,
+                    environment=env,
+                    adapter_spec=effective_adapter_spec,
+                    instance_row=instance_row,
                 )
-                test_cmd, _ = _normalize_junit_output_flag(
-                    test_cmd, container_report_path
-                )
-                report_input = host_report_path
             else:
-                test_cmd, report_path_to_read = _normalize_junit_output_flag(
-                    test_cmd, test_report_path
+                result = run_command(
+                    cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
                 )
-                report_input = report_path_to_read
-        else:
-            report_glob_getter = getattr(active_adapter, "test_report_glob", None)
-            report_filename_getter = getattr(active_adapter, "test_report_filename", None)
-            report_glob = report_glob_getter() if callable(report_glob_getter) else None
-            report_filename = (
-                report_filename_getter() if callable(report_filename_getter) else None
-            )
-            if report_glob:
-                report_input = worktree / report_glob
-            elif report_filename:
-                report_input = worktree / report_filename
-            else:
-                report_input = None
+            raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
 
-        if isinstance(report_input, Path) and report_input.exists():
+            attempt_entry: Dict[str, Any] = {
+                "attempt": attempt_number,
+                "command": cmd,
+                "returncode": result.returncode,
+                "timed_out": result.timed_out,
+                "elapsed_ms": result.elapsed_ms,
+                "status": "unknown",
+            }
+
             try:
-                report_input.unlink()
-            except OSError:
-                pass
+                parse_input = report_input if report_input is not None else raw
+                outcomes = active_adapter.parse_test_output(parse_input, test_spec)
+            except JUnitParseError as exc:
+                last_parse_error = str(exc)
+                attempt_entry.update(
+                    {
+                        "status": "parse_error",
+                        "error": str(exc),
+                    }
+                )
+                attempts.append(attempt_entry)
+                continue
 
-        cmd = list(test_cmd)
-        if active_adapter.name() == "python":
-            cmd += ["--tb=no", "-q"]
-        if test_files:
-            cmd += test_files
-        if containerized:
-            result = run_workspace_command_in_container(
-                attempt_id=f"{attempt_id_prefix}-attempt-{index + 1}",
-                workspace_path=worktree,
-                command=cmd,
-                timeout_seconds=timeout_seconds,
-                container_host=container_host,
-                artifacts_root=test_report_path.parent,
-                environment=env,
-                adapter_spec=effective_adapter_spec,
-                instance_row=instance_row,
-            )
-        else:
-            result = run_command(
-                cmd, cwd=str(worktree), env=env, timeout_seconds=timeout_seconds
-            )
-        raw = f"[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}"
+            if _should_retry_pytest_with_file_inputs(
+                adapter=active_adapter,
+                test_inputs=current_test_inputs,
+                result=result,
+            ):
+                fallback_inputs = _pytest_file_fallback_inputs(current_test_inputs)
+                if fallback_inputs and fallback_inputs != current_test_inputs:
+                    attempt_entry["status"] = "collector_fallback"
+                    attempt_entry["tests_run"] = len(outcomes)
+                    attempt_entry["fallback_test_inputs"] = fallback_inputs
+                    attempts.append(attempt_entry)
+                    pending_test_inputs.append(fallback_inputs)
+                    continue
 
-        attempt_entry: Dict[str, Any] = {
-            "attempt": index + 1,
-            "command": cmd,
-            "returncode": result.returncode,
-            "timed_out": result.timed_out,
-            "elapsed_ms": result.elapsed_ms,
-            "status": "unknown",
-        }
-
-        try:
-            parse_input = report_input if report_input is not None else raw
-            outcomes = active_adapter.parse_test_output(parse_input, test_spec)
-        except JUnitParseError as exc:
-            last_parse_error = str(exc)
-            attempt_entry.update(
-                {
-                    "status": "parse_error",
-                    "error": str(exc),
-                }
-            )
+            attempt_entry["status"] = "success"
+            attempt_entry["tests_run"] = len(outcomes)
             attempts.append(attempt_entry)
-            continue
-
-        attempt_entry["status"] = "success"
-        attempt_entry["tests_run"] = len(outcomes)
-        attempts.append(attempt_entry)
-        return outcomes, raw, attempts
+            return outcomes, raw, attempts
 
     if last_parse_error:
         raise PytestExecutionError(
