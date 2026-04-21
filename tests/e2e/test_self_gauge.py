@@ -823,6 +823,8 @@ class TestGoldEvalAgainstFixture:
         """`repogauge eval --gold` resolves every exported fixture instance."""
         from unittest.mock import patch
 
+        from repogauge.validation.validate import EvalRunSummary
+
         exp_out, dataset_rows = self._setup_export(repo_workspace)
         if not dataset_rows:
             pytest.skip("no exported fixture instances to evaluate")
@@ -837,34 +839,71 @@ class TestGoldEvalAgainstFixture:
         adapter_files = sorted(exp_out.glob("adapter_*.py"))
         assert len(adapter_files) >= 1
 
-        def fake_invoke(
+        validation_path = eval_out / "validation.jsonl"
+        instance_results_path = eval_out / "instance_results.jsonl"
+        resolved_dataset_path = eval_out / "dataset.resolved.jsonl"
+        resolved_predictions_path = eval_out / "predictions.resolved.jsonl"
+
+        def fake_run_containerized_eval(
             *,
             dataset_path: Path,
             predictions_path: Path,
             out_root: Path,
-            workers: int,
+            adapter_path: Path | None,
             timeout_seconds: int,
+            jobs: int,
             container_runtime: str = "podman",
             container_host: str | None = None,
-        ):
+        ) -> EvalRunSummary:
+            assert dataset_path == exp_out / "dataset" / "dataset.jsonl"
+            assert predictions_path == exp_out / "dataset" / "predictions.gold.jsonl"
+            assert out_root == eval_out
+            assert adapter_path in adapter_files
+            assert timeout_seconds == 120
+            assert jobs == 4
+            assert container_runtime == "docker"
+            assert container_host is None
+
             output_rows = [
                 {
                     "instance_id": row["instance_id"],
                     "status": "resolved",
-                    "resolved": 1,
+                    "resolved": True,
                 }
                 for row in dataset_rows
             ]
-            harness_out_dir = out_root / "harness"
-            harness_out_dir.mkdir(parents=True, exist_ok=True)
-            (harness_out_dir / "evaluation_result.json").write_text(
-                json.dumps({"results": output_rows}, sort_keys=True),
+            payload = "".join(
+                json.dumps(row, sort_keys=True) + "\n" for row in output_rows
+            )
+            out_root.mkdir(parents=True, exist_ok=True)
+            validation_path.write_text(payload, encoding="utf-8")
+            instance_results_path.write_text(payload, encoding="utf-8")
+            resolved_dataset_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
                 encoding="utf-8",
             )
-            return {"results": output_rows}
+            resolved_predictions_path.write_text(
+                (
+                    exp_out / "dataset" / "predictions.gold.jsonl"
+                ).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            return EvalRunSummary(
+                validation_path=str(validation_path),
+                total=len(dataset_rows),
+                resolved=len(dataset_rows),
+                not_resolved=0,
+                error=0,
+                skipped=0,
+                resolve_rate=1.0,
+                instance_results_path=str(instance_results_path),
+                dataset_path=str(resolved_dataset_path),
+                predictions_path=str(resolved_predictions_path),
+            )
 
         with patch(
-            "repogauge.runner.judge._invoke_swebench_harness", side_effect=fake_invoke
+            "repogauge.cli._run_containerized_eval",
+            side_effect=fake_run_containerized_eval,
         ):
             rc = _run_main(
                 [
