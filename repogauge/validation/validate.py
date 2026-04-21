@@ -23,7 +23,8 @@ so editable installs are not required.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import nullcontext
 import json
 import os
 import shlex
@@ -36,8 +37,10 @@ from typing import Any, Dict, List, Mapping, Optional, TextIO, Tuple
 from repogauge.exec import CommandResult, run_command
 from repogauge.lang import LanguageAdapter, find_adapter
 from repogauge.runner.container_exec import (
+    WorkspaceContainerSession,
     prepare_local_eval_image,
     run_workspace_command_in_container,
+    workspace_container_session,
 )
 from repogauge.runner.normalize_patch import exclude_patch_paths
 from repogauge.runner.progress import CountedProgressReporter
@@ -100,6 +103,19 @@ def _resolve_dataset(path: Path) -> Tuple[Path, Path]:
         dataset = path
         predictions = path.parent / "predictions.gold.jsonl"
     return dataset, predictions
+
+
+def _shared_container_env(adapter_env: Mapping[str, str]) -> Dict[str, str]:
+    shared_cache_env = {
+        key: value
+        for key in ("UV_CACHE_DIR", "PIP_CACHE_DIR")
+        if (value := os.environ.get(key))
+    }
+    if "UV_CACHE_DIR" in shared_cache_env and "PIP_CACHE_DIR" not in shared_cache_env:
+        shared_cache_env["PIP_CACHE_DIR"] = str(
+            Path(shared_cache_env["UV_CACHE_DIR"]).with_name("codex-pip-cache")
+        )
+    return {**shared_cache_env, **adapter_env}
 
 
 def _prediction_key(row: Dict[str, Any]) -> tuple[str, str]:
@@ -448,13 +464,15 @@ def _run_pytest_collection(
     adapter: LanguageAdapter,
     attempt_id_prefix: str,
     container_host: str | None,
+    artifacts_root: Path,
     adapter_spec: Mapping[str, Any] | None,
     instance_row: Mapping[str, Any] | None,
     environment_strategy: str,
+    workspace_session: WorkspaceContainerSession | None = None,
 ) -> Tuple[List[str], Dict[str, Any], str]:
     adapter_env = adapter.env_overrides(worktree)
     env = (
-        dict(adapter_env)
+        _shared_container_env(adapter_env)
         if container_host is not None
         else {**os.environ, **adapter_env}
     )
@@ -486,14 +504,20 @@ def _run_pytest_collection(
         )
     )
 
-    if container_host is not None:
+    if workspace_session is not None:
+        result = workspace_session.run(
+            command=collect_cmd,
+            timeout_seconds=timeout_seconds,
+            artifacts_root=artifacts_root,
+        )
+    elif container_host is not None:
         result = run_workspace_command_in_container(
             attempt_id=f"{attempt_id_prefix}-collect",
             workspace_path=worktree,
             command=collect_cmd,
             timeout_seconds=timeout_seconds,
             container_host=container_host,
-            artifacts_root=worktree,
+            artifacts_root=artifacts_root,
             environment=env,
             adapter_spec=effective_adapter_spec,
             instance_row=instance_row,
@@ -617,6 +641,7 @@ def _run_test(
     adapter_spec: Mapping[str, Any] | None = None,
     instance_row: Mapping[str, Any] | None = None,
     environment_strategy: str = "default",
+    workspace_session: WorkspaceContainerSession | None = None,
 ) -> Tuple[Dict[str, str], str, List[Dict[str, Any]]]:
     """Run tests in *worktree* with deterministic command retries.
 
@@ -632,7 +657,7 @@ def _run_test(
     active_adapter = _resolve_adapter(adapter)
     adapter_env = active_adapter.env_overrides(worktree)
     env = (
-        dict(adapter_env)
+        _shared_container_env(adapter_env)
         if container_host is not None
         else {**os.environ, **adapter_env}
     )
@@ -709,7 +734,13 @@ def _run_test(
                 cmd += ["--tb=no", "-q"]
             if current_test_inputs:
                 cmd += current_test_inputs
-            if containerized:
+            if workspace_session is not None:
+                result = workspace_session.run(
+                    command=cmd,
+                    timeout_seconds=timeout_seconds,
+                    artifacts_root=test_report_path.parent,
+                )
+            elif containerized:
                 result = run_workspace_command_in_container(
                     attempt_id=f"{attempt_id_prefix}-attempt-{attempt_number}",
                     workspace_path=worktree,
@@ -800,6 +831,52 @@ def _run_pytest(
     )
 
 
+def _path_exists_at_ref(worktree: Path, ref: str, rel_path: str) -> bool:
+    result = run_command(
+        ["git", "-C", str(worktree), "cat-file", "-e", f"{ref}:{rel_path}"]
+    )
+    return result.success
+
+
+def _reset_checkout_for_pass(
+    *,
+    worktree: Path,
+    base_commit: str,
+    cleanup_paths: List[str],
+) -> None:
+    reset_result = run_command(
+        ["git", "-C", str(worktree), "reset", "--hard", base_commit]
+    )
+    if not reset_result.success:
+        raise RuntimeError(
+            f"failed to reset checkout to {base_commit}: "
+            f"{reset_result.stderr.strip() or reset_result.stdout}"
+        )
+
+    clean_result = run_command(["git", "-C", str(worktree), "clean", "-fdx"])
+    if not clean_result.success:
+        raise RuntimeError(
+            f"failed to clean checkout at {base_commit}: "
+            f"{clean_result.stderr.strip() or clean_result.stdout}"
+        )
+
+    for rel_path in cleanup_paths:
+        if _path_exists_at_ref(worktree, base_commit, rel_path):
+            continue
+        target = worktree / rel_path
+        if target.is_dir():
+            try:
+                target.rmdir()
+            except OSError:
+                pass
+            continue
+        if target.exists() or target.is_symlink():
+            try:
+                target.unlink()
+            except OSError:
+                pass
+
+
 def _derive_test_lists(
     run_b: Dict[str, str],
     run_c: Dict[str, str],
@@ -863,9 +940,13 @@ def _run_validation_pass(
     environment_strategy: str = "default",
     apply_test_patch: bool = False,
     apply_pred_patch: bool = False,
+    checkout_path: Path | None = None,
+    workspace_session: WorkspaceContainerSession | None = None,
+    cleanup_paths: List[str] | None = None,
 ) -> Dict[str, Any]:
     """Execute one isolated validation run and return outcomes + telemetry."""
     wt = None
+    worktree = checkout_path
     outcomes: Dict[str, str] = {}
     log = ""
     attempts: List[Dict[str, Any]] = []
@@ -874,11 +955,19 @@ def _run_validation_pass(
     active_adapter = _resolve_adapter(adapter)
 
     try:
-        wt = create_checkout(repo_root, ref=base_commit)
+        if worktree is None:
+            wt = create_checkout(repo_root, ref=base_commit)
+            worktree = wt.path
+        else:
+            _reset_checkout_for_pass(
+                worktree=worktree,
+                base_commit=base_commit,
+                cleanup_paths=list(cleanup_paths or []),
+            )
         if test_patch.strip():
-            apply_patch_text(wt.path, test_patch)
+            apply_patch_text(worktree, test_patch)
         if pred_patch.strip():
-            apply_patch_text(wt.path, pred_patch)
+            apply_patch_text(worktree, pred_patch)
 
         effective_test_inputs = list(test_files)
         target_cmd_tokens = test_cmd_base.split()
@@ -897,7 +986,7 @@ def _run_validation_pass(
             )
             if collect_from_files:
                 existing_collection_inputs = [
-                    value for value in collection_inputs if (wt.path / value).exists()
+                    value for value in collection_inputs if (worktree / value).exists()
                 ]
             else:
                 existing_collection_inputs = []
@@ -931,7 +1020,7 @@ def _run_validation_pass(
                     collect_attempt,
                     collector_log,
                 ) = _run_pytest_collection(
-                    wt.path,
+                    worktree,
                     test_inputs=existing_collection_inputs,
                     timeout_seconds=timeout_seconds,
                     test_cmd_base=test_cmd_base,
@@ -940,9 +1029,11 @@ def _run_validation_pass(
                         f"eval-{str((instance_row or {}).get('instance_id', 'instance')).strip() or 'instance'}-{label}"
                     ),
                     container_host=container_host,
+                    artifacts_root=temp_root,
                     adapter_spec=adapter_spec,
                     instance_row=instance_row,
                     environment_strategy=environment_strategy,
+                    workspace_session=workspace_session,
                 )
                 attempts.append(collect_attempt)
                 if not effective_test_inputs:
@@ -956,7 +1047,7 @@ def _run_validation_pass(
 
         test_report_path = _test_report_path(temp_root, label, active_adapter)
         outcomes, test_log, test_attempts = _run_test(
-            wt.path,
+            worktree,
             test_files=effective_test_inputs,
             test_report_path=test_report_path,
             timeout_seconds=timeout_seconds,
@@ -970,6 +1061,7 @@ def _run_validation_pass(
             adapter_spec=adapter_spec,
             instance_row=instance_row,
             environment_strategy=environment_strategy,
+            workspace_session=workspace_session,
         )
         attempts.extend(test_attempts)
         log = test_log if not collector_log else f"{collector_log}\n{test_log}"
@@ -1183,324 +1275,403 @@ def _eval_instance(
 
     with tempfile.TemporaryDirectory(prefix="repogauge-eval-") as tmpdir:
         tmp = Path(tmpdir)
-
-        run_a = _run_validation_pass(
-            label="a",
-            temp_root=tmp,
-            repo_root=repo_root,
-            base_commit=base_commit,
-            test_patch="",
-            pred_patch="",
-            test_files=test_inputs,
-            timeout_seconds=timeout_seconds,
-            test_cmd_base=targeted_test_cmd,
-            adapter=active_adapter,
-            instance_row=instance_row,
-            adapter_spec=adapter_spec,
-            container_host=container_host,
-            environment_strategy=environment_strategy,
-            apply_test_patch=False,
-            apply_pred_patch=False,
+        checkout_handle = create_checkout(
+            repo_root,
+            ref=base_commit,
+            checkout_path=tmp / "checkout",
         )
-        if run_a["status"] == "failed":
-            return _finalize_eval_result(
-                outcome=_build_eval_result(
-                    status="error",
-                    error=run_a["error"],
-                    failure_code=run_a.get("failure_code"),
-                    reason="run_a_failed",
-                    targeted_test_cmd=targeted_test_cmd,
-                    test_inputs=test_inputs,
-                    log_a=run_a["log"],
-                    run_a=run_a["outcomes"],
-                    run_b={},
-                    run_c={},
-                    run_b_rerun={},
-                    run_c_rerun={},
-                    run_a_attempts=run_a["attempts"],
-                    run_b_attempts=[],
-                    run_c_attempts=[],
-                    run_b_rerun_attempts=[],
-                    run_c_rerun_attempts=[],
-                    flake_runs=0,
-                    FAIL_TO_PASS=[],
-                    PASS_TO_PASS=[],
-                    resolved=False,
-                    test_strategy=test_strategy,
+        checkout_path = checkout_handle.path
+        cleanup_paths = sorted(
+            set(extract_patch_paths(test_patch))
+            | set(extract_patch_paths(sanitized_pred_patch))
+        )
+        effective_adapter_spec = (
+            dict(adapter_spec)
+            if isinstance(adapter_spec, Mapping)
+            else _default_container_adapter_spec(
+                dataset_row=instance_row,
+                adapter=active_adapter,
+                test_cmd_base=targeted_test_cmd,
+                environment_strategy=environment_strategy,
+            )
+        )
+        session_environment = _shared_container_env(
+            active_adapter.env_overrides(checkout_path)
+        )
+        instance_key = (
+            str(instance_id).strip()
+            or str((instance_row or {}).get("instance_id", "")).strip()
+            or "instance"
+        )
+        session_cm = (
+            workspace_container_session(
+                attempt_id=f"eval-{instance_key}-session",
+                workspace_path=checkout_path,
+                timeout_seconds=timeout_seconds,
+                container_host=container_host,
+                artifacts_root=tmp / "_workspace_session",
+                environment=session_environment,
+                adapter_spec=effective_adapter_spec,
+                instance_row=instance_row,
+            )
+            if container_host is not None
+            else nullcontext(None)
+        )
+        try:
+            with session_cm as workspace_session:
+                run_a = _run_validation_pass(
+                    label="a",
+                    temp_root=tmp,
+                    repo_root=repo_root,
+                    base_commit=base_commit,
+                    test_patch="",
+                    pred_patch="",
+                    test_files=test_inputs,
+                    timeout_seconds=timeout_seconds,
+                    test_cmd_base=targeted_test_cmd,
+                    adapter=active_adapter,
+                    instance_row=instance_row,
+                    adapter_spec=adapter_spec,
+                    container_host=container_host,
                     environment_strategy=environment_strategy,
-                    withheld_test_paths=withheld_test_paths,
-                    withheld_test_paths_touched=list(withheld_test_paths_touched),
-                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
-                ),
-                out_root=out_root,
-                instance_id=instance_id,
-            )
+                    apply_test_patch=False,
+                    apply_pred_patch=False,
+                    checkout_path=checkout_path,
+                    workspace_session=workspace_session,
+                    cleanup_paths=cleanup_paths,
+                )
+                if run_a["status"] == "failed":
+                    return _finalize_eval_result(
+                        outcome=_build_eval_result(
+                            status="error",
+                            error=run_a["error"],
+                            failure_code=run_a.get("failure_code"),
+                            reason="run_a_failed",
+                            targeted_test_cmd=targeted_test_cmd,
+                            test_inputs=test_inputs,
+                            log_a=run_a["log"],
+                            run_a=run_a["outcomes"],
+                            run_b={},
+                            run_c={},
+                            run_b_rerun={},
+                            run_c_rerun={},
+                            run_a_attempts=run_a["attempts"],
+                            run_b_attempts=[],
+                            run_c_attempts=[],
+                            run_b_rerun_attempts=[],
+                            run_c_rerun_attempts=[],
+                            flake_runs=0,
+                            FAIL_TO_PASS=[],
+                            PASS_TO_PASS=[],
+                            resolved=False,
+                            test_strategy=test_strategy,
+                            environment_strategy=environment_strategy,
+                            withheld_test_paths=withheld_test_paths,
+                            withheld_test_paths_touched=list(
+                                withheld_test_paths_touched
+                            ),
+                            withheld_test_patch_sanitized=bool(
+                                withheld_test_paths_touched
+                            ),
+                        ),
+                        out_root=out_root,
+                        instance_id=instance_id,
+                    )
 
-        # --- Pass B: base + test_patch --------------------------------------
-        run_b = _run_validation_pass(
-            label="b",
-            temp_root=tmp,
-            repo_root=repo_root,
-            base_commit=base_commit,
-            test_patch=test_patch,
-            pred_patch="",
-            test_files=test_inputs,
-            timeout_seconds=timeout_seconds,
-            test_cmd_base=targeted_test_cmd,
-            adapter=active_adapter,
-            instance_row=instance_row,
-            adapter_spec=adapter_spec,
-            container_host=container_host,
-            environment_strategy=environment_strategy,
-            apply_test_patch=True,
-            apply_pred_patch=False,
-        )
-        if run_b["status"] == "failed":
-            return _finalize_eval_result(
-                outcome=_build_eval_result(
-                    status="error",
-                    error=run_b["error"],
-                    failure_code=run_b.get("failure_code"),
-                    reason="run_b_failed",
-                    targeted_test_cmd=targeted_test_cmd,
-                    test_inputs=test_inputs,
-                    log_a=run_a["log"],
-                    log_b=run_b["log"],
-                    run_a=run_a["outcomes"],
-                    run_b=run_b["outcomes"],
-                    run_c={},
-                    run_b_rerun={},
-                    run_c_rerun={},
-                    run_a_attempts=run_a["attempts"],
-                    run_b_attempts=run_b["attempts"],
-                    run_c_attempts=[],
-                    run_b_rerun_attempts=[],
-                    run_c_rerun_attempts=[],
-                    flake_runs=0,
-                    FAIL_TO_PASS=[],
-                    PASS_TO_PASS=[],
-                    resolved=False,
-                    test_strategy=test_strategy,
+                run_b = _run_validation_pass(
+                    label="b",
+                    temp_root=tmp,
+                    repo_root=repo_root,
+                    base_commit=base_commit,
+                    test_patch=test_patch,
+                    pred_patch="",
+                    test_files=test_inputs,
+                    timeout_seconds=timeout_seconds,
+                    test_cmd_base=targeted_test_cmd,
+                    adapter=active_adapter,
+                    instance_row=instance_row,
+                    adapter_spec=adapter_spec,
+                    container_host=container_host,
                     environment_strategy=environment_strategy,
-                    withheld_test_paths=withheld_test_paths,
-                    withheld_test_paths_touched=list(withheld_test_paths_touched),
-                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
-                ),
-                out_root=out_root,
-                instance_id=instance_id,
-            )
+                    apply_test_patch=True,
+                    apply_pred_patch=False,
+                    checkout_path=checkout_path,
+                    workspace_session=workspace_session,
+                    cleanup_paths=cleanup_paths,
+                )
+                if run_b["status"] == "failed":
+                    return _finalize_eval_result(
+                        outcome=_build_eval_result(
+                            status="error",
+                            error=run_b["error"],
+                            failure_code=run_b.get("failure_code"),
+                            reason="run_b_failed",
+                            targeted_test_cmd=targeted_test_cmd,
+                            test_inputs=test_inputs,
+                            log_a=run_a["log"],
+                            log_b=run_b["log"],
+                            run_a=run_a["outcomes"],
+                            run_b=run_b["outcomes"],
+                            run_c={},
+                            run_b_rerun={},
+                            run_c_rerun={},
+                            run_a_attempts=run_a["attempts"],
+                            run_b_attempts=run_b["attempts"],
+                            run_c_attempts=[],
+                            run_b_rerun_attempts=[],
+                            run_c_rerun_attempts=[],
+                            flake_runs=0,
+                            FAIL_TO_PASS=[],
+                            PASS_TO_PASS=[],
+                            resolved=False,
+                            test_strategy=test_strategy,
+                            environment_strategy=environment_strategy,
+                            withheld_test_paths=withheld_test_paths,
+                            withheld_test_paths_touched=list(
+                                withheld_test_paths_touched
+                            ),
+                            withheld_test_patch_sanitized=bool(
+                                withheld_test_paths_touched
+                            ),
+                        ),
+                        out_root=out_root,
+                        instance_id=instance_id,
+                    )
 
-        # --- Pass C: base + test_patch + pred_patch --------------------------
-        run_c = _run_validation_pass(
-            label="c",
-            temp_root=tmp,
-            repo_root=repo_root,
-            base_commit=base_commit,
-            test_patch=test_patch,
-            pred_patch=sanitized_pred_patch,
-            test_files=test_inputs,
-            timeout_seconds=timeout_seconds,
-            test_cmd_base=targeted_test_cmd,
-            adapter=active_adapter,
-            instance_row=instance_row,
-            adapter_spec=adapter_spec,
-            container_host=container_host,
-            environment_strategy=environment_strategy,
-            apply_test_patch=True,
-            apply_pred_patch=True,
-        )
-        if run_c["status"] == "failed":
-            return _finalize_eval_result(
-                outcome=_build_eval_result(
-                    status="error",
-                    error=run_c["error"],
-                    failure_code=run_c.get("failure_code"),
-                    reason="run_c_failed",
-                    targeted_test_cmd=targeted_test_cmd,
-                    test_inputs=test_inputs,
-                    log_a=run_a["log"],
-                    log_b=run_b["log"],
-                    log_c=run_c["log"],
-                    run_a=run_a["outcomes"],
-                    run_b=run_b["outcomes"],
-                    run_c={},
-                    run_b_rerun={},
-                    run_c_rerun={},
-                    run_a_attempts=run_a["attempts"],
-                    run_b_attempts=run_b["attempts"],
-                    run_c_attempts=run_c["attempts"],
-                    run_b_rerun_attempts=[],
-                    run_c_rerun_attempts=[],
-                    flake_runs=0,
-                    FAIL_TO_PASS=[],
-                    PASS_TO_PASS=[],
-                    resolved=False,
-                    test_strategy=test_strategy,
+                run_c = _run_validation_pass(
+                    label="c",
+                    temp_root=tmp,
+                    repo_root=repo_root,
+                    base_commit=base_commit,
+                    test_patch=test_patch,
+                    pred_patch=sanitized_pred_patch,
+                    test_files=test_inputs,
+                    timeout_seconds=timeout_seconds,
+                    test_cmd_base=targeted_test_cmd,
+                    adapter=active_adapter,
+                    instance_row=instance_row,
+                    adapter_spec=adapter_spec,
+                    container_host=container_host,
                     environment_strategy=environment_strategy,
-                    withheld_test_paths=withheld_test_paths,
-                    withheld_test_paths_touched=list(withheld_test_paths_touched),
-                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
-                ),
-                out_root=out_root,
-                instance_id=instance_id,
-            )
+                    apply_test_patch=True,
+                    apply_pred_patch=True,
+                    checkout_path=checkout_path,
+                    workspace_session=workspace_session,
+                    cleanup_paths=cleanup_paths,
+                )
+                if run_c["status"] == "failed":
+                    return _finalize_eval_result(
+                        outcome=_build_eval_result(
+                            status="error",
+                            error=run_c["error"],
+                            failure_code=run_c.get("failure_code"),
+                            reason="run_c_failed",
+                            targeted_test_cmd=targeted_test_cmd,
+                            test_inputs=test_inputs,
+                            log_a=run_a["log"],
+                            log_b=run_b["log"],
+                            log_c=run_c["log"],
+                            run_a=run_a["outcomes"],
+                            run_b=run_b["outcomes"],
+                            run_c={},
+                            run_b_rerun={},
+                            run_c_rerun={},
+                            run_a_attempts=run_a["attempts"],
+                            run_b_attempts=run_b["attempts"],
+                            run_c_attempts=run_c["attempts"],
+                            run_b_rerun_attempts=[],
+                            run_c_rerun_attempts=[],
+                            flake_runs=0,
+                            FAIL_TO_PASS=[],
+                            PASS_TO_PASS=[],
+                            resolved=False,
+                            test_strategy=test_strategy,
+                            environment_strategy=environment_strategy,
+                            withheld_test_paths=withheld_test_paths,
+                            withheld_test_paths_touched=list(
+                                withheld_test_paths_touched
+                            ),
+                            withheld_test_patch_sanitized=bool(
+                                withheld_test_paths_touched
+                            ),
+                        ),
+                        out_root=out_root,
+                        instance_id=instance_id,
+                    )
 
-        # --- Pass D: reruns for flake detection ------------------------------
-        run_b_rerun = _run_validation_pass(
-            label="b_rerun",
-            temp_root=tmp,
-            repo_root=repo_root,
-            base_commit=base_commit,
-            test_patch=test_patch,
-            pred_patch="",
-            test_files=test_inputs,
-            timeout_seconds=timeout_seconds,
-            test_cmd_base=targeted_test_cmd,
-            adapter=active_adapter,
-            instance_row=instance_row,
-            adapter_spec=adapter_spec,
-            container_host=container_host,
-            environment_strategy=environment_strategy,
-            apply_test_patch=True,
-            apply_pred_patch=False,
-        )
-        run_c_rerun = _run_validation_pass(
-            label="c_rerun",
-            temp_root=tmp,
-            repo_root=repo_root,
-            base_commit=base_commit,
-            test_patch=test_patch,
-            pred_patch=sanitized_pred_patch,
-            test_files=test_inputs,
-            timeout_seconds=timeout_seconds,
-            test_cmd_base=targeted_test_cmd,
-            adapter=active_adapter,
-            instance_row=instance_row,
-            adapter_spec=adapter_spec,
-            container_host=container_host,
-            environment_strategy=environment_strategy,
-            apply_test_patch=True,
-            apply_pred_patch=True,
-        )
-
-        if run_b_rerun["status"] == "failed" or run_c_rerun["status"] == "failed":
-            rerun_error = (
-                run_b_rerun["error"]
-                if run_b_rerun["status"] == "failed"
-                else run_c_rerun["error"]
-            )
-            reason = (
-                "run_b_rerun_failed"
-                if run_b_rerun["status"] == "failed"
-                else "run_c_rerun_failed"
-            )
-            return _finalize_eval_result(
-                outcome=_build_eval_result(
-                    status="error",
-                    error=rerun_error,
-                    failure_code=(
-                        run_b_rerun.get("failure_code")
+                run_b_rerun = _run_validation_pass(
+                    label="b_rerun",
+                    temp_root=tmp,
+                    repo_root=repo_root,
+                    base_commit=base_commit,
+                    test_patch=test_patch,
+                    pred_patch="",
+                    test_files=test_inputs,
+                    timeout_seconds=timeout_seconds,
+                    test_cmd_base=targeted_test_cmd,
+                    adapter=active_adapter,
+                    instance_row=instance_row,
+                    adapter_spec=adapter_spec,
+                    container_host=container_host,
+                    environment_strategy=environment_strategy,
+                    apply_test_patch=True,
+                    apply_pred_patch=False,
+                    checkout_path=checkout_path,
+                    workspace_session=workspace_session,
+                    cleanup_paths=cleanup_paths,
+                )
+                run_c_rerun = _run_validation_pass(
+                    label="c_rerun",
+                    temp_root=tmp,
+                    repo_root=repo_root,
+                    base_commit=base_commit,
+                    test_patch=test_patch,
+                    pred_patch=sanitized_pred_patch,
+                    test_files=test_inputs,
+                    timeout_seconds=timeout_seconds,
+                    test_cmd_base=targeted_test_cmd,
+                    adapter=active_adapter,
+                    instance_row=instance_row,
+                    adapter_spec=adapter_spec,
+                    container_host=container_host,
+                    environment_strategy=environment_strategy,
+                    apply_test_patch=True,
+                    apply_pred_patch=True,
+                    checkout_path=checkout_path,
+                    workspace_session=workspace_session,
+                    cleanup_paths=cleanup_paths,
+                )
+                if run_b_rerun["status"] == "failed" or run_c_rerun["status"] == "failed":
+                    rerun_error = (
+                        run_b_rerun["error"]
                         if run_b_rerun["status"] == "failed"
-                        else run_c_rerun.get("failure_code")
-                    ),
-                    reason=reason,
-                    targeted_test_cmd=targeted_test_cmd,
-                    test_inputs=test_inputs,
-                    log_a=run_a["log"],
-                    log_b=run_b["log"],
-                    log_c=run_c["log"],
-                    log_b_rerun=run_b_rerun["log"],
-                    log_c_rerun=run_c_rerun["log"],
-                    run_a=run_a["outcomes"],
-                    run_b=run_b["outcomes"],
-                    run_c=run_c["outcomes"],
-                    run_b_rerun=run_b_rerun["outcomes"],
-                    run_c_rerun=run_c_rerun["outcomes"],
-                    run_a_attempts=run_a["attempts"],
-                    run_b_attempts=run_b["attempts"],
-                    run_c_attempts=run_c["attempts"],
-                    run_b_rerun_attempts=run_b_rerun["attempts"],
-                    run_c_rerun_attempts=run_c_rerun["attempts"],
-                    flake_runs=2,
-                    FAIL_TO_PASS=[],
-                    PASS_TO_PASS=[],
-                    resolved=False,
-                    test_strategy=test_strategy,
-                    environment_strategy=environment_strategy,
-                    withheld_test_paths=withheld_test_paths,
-                    withheld_test_paths_touched=list(withheld_test_paths_touched),
-                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
-                ),
-                out_root=out_root,
-                instance_id=instance_id,
-            )
+                        else run_c_rerun["error"]
+                    )
+                    reason = (
+                        "run_b_rerun_failed"
+                        if run_b_rerun["status"] == "failed"
+                        else "run_c_rerun_failed"
+                    )
+                    return _finalize_eval_result(
+                        outcome=_build_eval_result(
+                            status="error",
+                            error=rerun_error,
+                            failure_code=(
+                                run_b_rerun.get("failure_code")
+                                if run_b_rerun["status"] == "failed"
+                                else run_c_rerun.get("failure_code")
+                            ),
+                            reason=reason,
+                            targeted_test_cmd=targeted_test_cmd,
+                            test_inputs=test_inputs,
+                            log_a=run_a["log"],
+                            log_b=run_b["log"],
+                            log_c=run_c["log"],
+                            log_b_rerun=run_b_rerun["log"],
+                            log_c_rerun=run_c_rerun["log"],
+                            run_a=run_a["outcomes"],
+                            run_b=run_b["outcomes"],
+                            run_c=run_c["outcomes"],
+                            run_b_rerun=run_b_rerun["outcomes"],
+                            run_c_rerun=run_c_rerun["outcomes"],
+                            run_a_attempts=run_a["attempts"],
+                            run_b_attempts=run_b["attempts"],
+                            run_c_attempts=run_c["attempts"],
+                            run_b_rerun_attempts=run_b_rerun["attempts"],
+                            run_c_rerun_attempts=run_c_rerun["attempts"],
+                            flake_runs=2,
+                            FAIL_TO_PASS=[],
+                            PASS_TO_PASS=[],
+                            resolved=False,
+                            test_strategy=test_strategy,
+                            environment_strategy=environment_strategy,
+                            withheld_test_paths=withheld_test_paths,
+                            withheld_test_paths_touched=list(
+                                withheld_test_paths_touched
+                            ),
+                            withheld_test_patch_sanitized=bool(
+                                withheld_test_paths_touched
+                            ),
+                        ),
+                        out_root=out_root,
+                        instance_id=instance_id,
+                    )
 
-        if _is_flaky(
-            run_b["outcomes"],
-            run_b_rerun["outcomes"],
-            run_c["outcomes"],
-            run_c_rerun["outcomes"],
-        ):
-            if run_b["outcomes"] != run_b_rerun["outcomes"]:
-                reason = "run_b_rerun_mismatch"
-            elif run_c["outcomes"] != run_c_rerun["outcomes"]:
-                reason = "run_c_rerun_mismatch"
-            else:
-                reason = "unstable_reruns"
-            return _finalize_eval_result(
-                outcome=_build_eval_result(
-                    status="flaky",
-                    error="rerun outcomes changed",
-                    failure_code="flaky_outcomes",
-                    reason=reason,
-                    targeted_test_cmd=targeted_test_cmd,
-                    test_inputs=test_inputs,
-                    log_a=run_a["log"],
-                    log_b=run_b["log"],
-                    log_c=run_c["log"],
-                    log_b_rerun=run_b_rerun["log"],
-                    log_c_rerun=run_c_rerun["log"],
-                    run_a=run_a["outcomes"],
-                    run_b=run_b["outcomes"],
-                    run_c=run_c["outcomes"],
-                    run_b_rerun=run_b_rerun["outcomes"],
-                    run_c_rerun=run_c_rerun["outcomes"],
-                    run_a_attempts=run_a["attempts"],
-                    run_b_attempts=run_b["attempts"],
-                    run_c_attempts=run_c["attempts"],
-                    run_b_rerun_attempts=run_b_rerun["attempts"],
-                    run_c_rerun_attempts=run_c_rerun["attempts"],
-                    flake_runs=2,
-                    FAIL_TO_PASS=[],
-                    PASS_TO_PASS=[],
-                    resolved=False,
-                    test_strategy=test_strategy,
-                    environment_strategy=environment_strategy,
-                    withheld_test_paths=withheld_test_paths,
-                    withheld_test_paths_touched=list(withheld_test_paths_touched),
-                    withheld_test_patch_sanitized=bool(withheld_test_paths_touched),
-                ),
-                out_root=out_root,
-                instance_id=instance_id,
-            )
+                if _is_flaky(
+                    run_b["outcomes"],
+                    run_b_rerun["outcomes"],
+                    run_c["outcomes"],
+                    run_c_rerun["outcomes"],
+                ):
+                    if run_b["outcomes"] != run_b_rerun["outcomes"]:
+                        reason = "run_b_rerun_mismatch"
+                    elif run_c["outcomes"] != run_c_rerun["outcomes"]:
+                        reason = "run_c_rerun_mismatch"
+                    else:
+                        reason = "unstable_reruns"
+                    return _finalize_eval_result(
+                        outcome=_build_eval_result(
+                            status="flaky",
+                            error="rerun outcomes changed",
+                            failure_code="flaky_outcomes",
+                            reason=reason,
+                            targeted_test_cmd=targeted_test_cmd,
+                            test_inputs=test_inputs,
+                            log_a=run_a["log"],
+                            log_b=run_b["log"],
+                            log_c=run_c["log"],
+                            log_b_rerun=run_b_rerun["log"],
+                            log_c_rerun=run_c_rerun["log"],
+                            run_a=run_a["outcomes"],
+                            run_b=run_b["outcomes"],
+                            run_c=run_c["outcomes"],
+                            run_b_rerun=run_b_rerun["outcomes"],
+                            run_c_rerun=run_c_rerun["outcomes"],
+                            run_a_attempts=run_a["attempts"],
+                            run_b_attempts=run_b["attempts"],
+                            run_c_attempts=run_c["attempts"],
+                            run_b_rerun_attempts=run_b_rerun["attempts"],
+                            run_c_rerun_attempts=run_c_rerun["attempts"],
+                            flake_runs=2,
+                            FAIL_TO_PASS=[],
+                            PASS_TO_PASS=[],
+                            resolved=False,
+                            test_strategy=test_strategy,
+                            environment_strategy=environment_strategy,
+                            withheld_test_paths=withheld_test_paths,
+                            withheld_test_paths_touched=list(
+                                withheld_test_paths_touched
+                            ),
+                            withheld_test_patch_sanitized=bool(
+                                withheld_test_paths_touched
+                            ),
+                        ),
+                        out_root=out_root,
+                        instance_id=instance_id,
+                    )
 
-        ftp, ptp = _derive_test_lists(
-            run_b["outcomes"], run_c["outcomes"], declared_ftp, declared_ptp
-        )
-        resolved = _is_resolved(ftp, run_c["outcomes"], declared_ftp)
-        if _has_pass_to_pass_regression(
-            run_b["outcomes"], run_c["outcomes"], declared_ptp
-        ):
-            resolved = False
-            rejection_reason = "pass_to_pass_regression"
-        elif _declared_ftp_not_resolved(run_c["outcomes"], declared_ftp):
-            resolved = False
-            rejection_reason = "declared_ftp_not_resolved"
-        elif not ftp:
-            rejection_reason = "no_fail_to_pass"
-        else:
-            rejection_reason = None
-        status = "resolved" if resolved else "not_resolved"
+                ftp, ptp = _derive_test_lists(
+                    run_b["outcomes"],
+                    run_c["outcomes"],
+                    declared_ftp,
+                    declared_ptp,
+                )
+                resolved = _is_resolved(ftp, run_c["outcomes"], declared_ftp)
+                if _has_pass_to_pass_regression(
+                    run_b["outcomes"], run_c["outcomes"], declared_ptp
+                ):
+                    resolved = False
+                    rejection_reason = "pass_to_pass_regression"
+                elif _declared_ftp_not_resolved(run_c["outcomes"], declared_ftp):
+                    resolved = False
+                    rejection_reason = "declared_ftp_not_resolved"
+                elif not ftp:
+                    rejection_reason = "no_fail_to_pass"
+                else:
+                    rejection_reason = None
+                status = "resolved" if resolved else "not_resolved"
+        finally:
+            checkout_handle.remove()
 
     return _finalize_eval_result(
         outcome=_build_eval_result(
@@ -1659,53 +1830,70 @@ def run_eval(
         future_map: Dict[Any, tuple[int, Dict[str, Any], Dict[str, Any]]] = {}
         max_workers = max(1, jobs)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for index, (ds, pred) in enumerate(eval_items, start=1):
-                iid = str(ds["instance_id"])
-                progress.start(f"starting [{index}/{total}] {iid}")
-                if pred is None:
-                    skipped_count += 1
+            pending_items = iter(enumerate(eval_items, start=1))
+
+            def _submit_next() -> bool:
+                nonlocal skipped_count
+                for index, (ds, pred) in pending_items:
+                    iid = str(ds["instance_id"])
+                    if pred is None:
+                        skipped_count += 1
+                        results_by_index[index] = _result_row_from_outcome(
+                            ds=ds,
+                            pred=None,
+                            outcome=None,
+                            environment_strategy=environment_strategy,
+                        )
+                        elapsed_s = time.monotonic() - started_at
+                        progress.advance(
+                            status="skipped",
+                            message=(
+                                f"[{index}/{total}] {iid} skipped (missing prediction) "
+                                f"| resolved={resolved_count} errors={error_count} "
+                                f"skipped={skipped_count} elapsed={elapsed_s:.1f}s"
+                            ),
+                        )
+                        continue
+                    progress.start(f"starting [{index}/{total}] {iid}")
+                    future = pool.submit(_evaluate, ds, pred)
+                    future_map[future] = (index, ds, pred)
+                    return True
+                return False
+
+            while len(future_map) < max_workers and _submit_next():
+                pass
+
+            while future_map:
+                done, _pending = wait(
+                    set(future_map),
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in done:
+                    index, ds, pred = future_map.pop(future)
+                    iid = str(ds["instance_id"])
+                    outcome = future.result()
+                    if outcome["status"] == "error":
+                        error_count += 1
+                    elif outcome["resolved"]:
+                        resolved_count += 1
                     results_by_index[index] = _result_row_from_outcome(
                         ds=ds,
-                        pred=None,
-                        outcome=None,
+                        pred=pred,
+                        outcome=outcome,
                         environment_strategy=environment_strategy,
                     )
                     elapsed_s = time.monotonic() - started_at
                     progress.advance(
-                        status="skipped",
+                        status=str(outcome["status"]),
                         message=(
-                            f"[{index}/{total}] {iid} skipped (missing prediction) "
+                            f"[{index}/{total}] {iid} {outcome['status']} "
                             f"| resolved={resolved_count} errors={error_count} "
                             f"skipped={skipped_count} elapsed={elapsed_s:.1f}s"
                         ),
                     )
-                    continue
-                future = pool.submit(_evaluate, ds, pred)
-                future_map[future] = (index, ds, pred)
 
-            for future in as_completed(future_map):
-                index, ds, pred = future_map[future]
-                iid = str(ds["instance_id"])
-                outcome = future.result()
-                if outcome["status"] == "error":
-                    error_count += 1
-                elif outcome["resolved"]:
-                    resolved_count += 1
-                results_by_index[index] = _result_row_from_outcome(
-                    ds=ds,
-                    pred=pred,
-                    outcome=outcome,
-                    environment_strategy=environment_strategy,
-                )
-                elapsed_s = time.monotonic() - started_at
-                progress.advance(
-                    status=str(outcome["status"]),
-                    message=(
-                        f"[{index}/{total}] {iid} {outcome['status']} "
-                        f"| resolved={resolved_count} errors={error_count} "
-                        f"skipped={skipped_count} elapsed={elapsed_s:.1f}s"
-                    ),
-                )
+                while len(future_map) < max_workers and _submit_next():
+                    pass
     finally:
         progress.close(
             summary=(

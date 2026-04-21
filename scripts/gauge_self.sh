@@ -2,6 +2,7 @@
 # Run repogauge against this repository.
 # Usage: scripts/gauge_self.sh [--out DIR] [--max-commits N] [--decisions FILE]
 #                               [--jobs N] [--eval-workers N]
+#                               [--max-instances N]
 #                               [--eval-timeout SECONDS]
 #                               [--eval-container-runtime docker|podman]
 #                               [--eval-container-host URI]
@@ -18,6 +19,7 @@ OUT_DIR="$REPO_ROOT/out"
 MAX_COMMITS=300
 DECISIONS_FILE=""
 JOBS=4
+MAX_INSTANCES=0
 EVAL_TIMEOUT=120
 EVAL_CONTAINER_RUNTIME="podman"
 EVAL_CONTAINER_HOST=""
@@ -28,6 +30,7 @@ while [[ $# -gt 0 ]]; do
         --max-commits) MAX_COMMITS="$2"; shift 2 ;;
         --decisions) DECISIONS_FILE="$2"; shift 2 ;;
         --jobs|--eval-workers) JOBS="$2"; shift 2 ;;
+        --max-instances) MAX_INSTANCES="$2"; shift 2 ;;
         --eval-batch-size|--eval-max-parallel-batches|--eval-workers-per-batch)
             echo "WARNING: $1 is deprecated and ignored; repogauge eval now uses --jobs." >&2
             shift 2
@@ -48,10 +51,67 @@ rg_run_mine_review_export "$REPO_ROOT_ABS" "$OUT_DIR_ABS" "$MAX_COMMITS" "$DECIS
 
 EXPORT_OUT="$OUT_DIR_ABS/export"
 EVAL_OUT="$OUT_DIR_ABS/eval"
+EVAL_DATASET_ROOT="$EXPORT_OUT"
+
+if [[ "$MAX_INSTANCES" -gt 0 ]]; then
+    EVAL_DATASET_ROOT="$OUT_DIR_ABS/eval_dataset"
+    mkdir -p "$EVAL_DATASET_ROOT"
+    echo "==> eval: selecting first $MAX_INSTANCES exported instance(s)"
+    SELECTED_COUNT="$(
+        UV_CACHE_DIR="$UV_CACHE_DIR" uv run python - <<'PY' \
+            "$EXPORT_OUT/dataset/dataset.jsonl" \
+            "$EXPORT_OUT/dataset/predictions.gold.jsonl" \
+            "$EVAL_DATASET_ROOT/dataset.jsonl" \
+            "$EVAL_DATASET_ROOT/predictions.gold.jsonl" \
+            "$MAX_INSTANCES"
+import json
+import sys
+from pathlib import Path
+
+dataset_in = Path(sys.argv[1])
+predictions_in = Path(sys.argv[2])
+dataset_out = Path(sys.argv[3])
+predictions_out = Path(sys.argv[4])
+limit = max(1, int(sys.argv[5]))
+
+dataset_rows = []
+with dataset_in.open(encoding="utf-8") as stream:
+    for line in stream:
+        value = line.strip()
+        if not value:
+            continue
+        dataset_rows.append(json.loads(value))
+        if len(dataset_rows) >= limit:
+            break
+
+selected_ids = {str(row.get("instance_id", "")).strip() for row in dataset_rows}
+prediction_rows = []
+with predictions_in.open(encoding="utf-8") as stream:
+    for line in stream:
+        value = line.strip()
+        if not value:
+            continue
+        row = json.loads(value)
+        if str(row.get("instance_id", "")).strip() in selected_ids:
+            prediction_rows.append(row)
+
+dataset_out.write_text(
+    "".join(json.dumps(row, sort_keys=True) + "\n" for row in dataset_rows),
+    encoding="utf-8",
+)
+predictions_out.write_text(
+    "".join(json.dumps(row, sort_keys=True) + "\n" for row in prediction_rows),
+    encoding="utf-8",
+)
+print(len(dataset_rows))
+PY
+    )"
+    echo "==> eval: selected $SELECTED_COUNT instance(s)"
+fi
 
 echo "==> eval: running gold evaluation"
 if rg_run_eval_gold \
-    "$EXPORT_OUT" \
+    "$EVAL_DATASET_ROOT" \
     "$EVAL_OUT" \
     "$JOBS" \
     "$EVAL_TIMEOUT" \

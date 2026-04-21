@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -12,7 +13,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Iterator, Mapping
 
 from repogauge.exec import CommandResult
 from repogauge.runner.runtime import docker_client
@@ -61,6 +62,7 @@ _CONTAINER_ENV_DROP_KEYS = frozenset(
     }
 )
 _CONTAINER_ENV_DROP_PREFIXES = ("CONDA_",)
+_CONTAINER_CACHE_ENV_KEYS = ("UV_CACHE_DIR", "PIP_CACHE_DIR")
 _IMAGE_PREP_LOCK = threading.Lock()
 _IMAGE_PREP_LOCKS: dict[str, threading.Lock] = {}
 _SWEBENCH_LANGUAGE_ALIASES = {
@@ -79,6 +81,57 @@ class _ExecOutcome:
     exit_code: int
     timed_out: bool
     elapsed_ms: int
+
+
+@dataclass
+class WorkspaceContainerSession:
+    """Reusable container session for repeated commands against one workspace."""
+
+    container: object
+    workspace_path: Path
+    artifacts_root: Path
+
+    def run(
+        self,
+        *,
+        command: list[str],
+        timeout_seconds: int,
+        artifacts_root: Path,
+    ) -> CommandResult:
+        mounted_root = self.artifacts_root.resolve()
+        mounted_root.mkdir(parents=True, exist_ok=True)
+        artifacts_root = artifacts_root.resolve()
+        artifacts_root.mkdir(parents=True, exist_ok=True)
+        stdout_path = mounted_root / "stdout.txt"
+        stderr_path = mounted_root / "stderr.txt"
+        for path in (stdout_path, stderr_path):
+            if path.exists():
+                path.unlink()
+
+        shell_cmd = _workspace_command_shell(
+            command,
+            stdout_path=_CONTAINER_STDOUT_PATH,
+            stderr_path=_CONTAINER_STDERR_PATH,
+        )
+        outcome = _exec_in_container(
+            self.container,
+            f"/bin/bash -lc {shlex.quote(shell_cmd)}",
+            timeout_seconds,
+        )
+        stdout = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
+        stderr = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
+        if artifacts_root != mounted_root:
+            (artifacts_root / "stdout.txt").write_text(stdout, encoding="utf-8")
+            (artifacts_root / "stderr.txt").write_text(stderr, encoding="utf-8")
+        return CommandResult(
+            command=tuple(command),
+            returncode=outcome.exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=outcome.timed_out,
+            elapsed_ms=outcome.elapsed_ms,
+            cwd=str(self.workspace_path),
+        )
 
 
 @dataclass(frozen=True)
@@ -179,11 +232,35 @@ def _local_repo_setup_commands(test_spec) -> tuple[str, ...]:
         command = str(raw_command).strip()
         if not command:
             continue
-        if command.startswith("git clone -o origin https://github.com/"):
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            parts = []
+        if (
+            len(parts) >= 4
+            and parts[0] == "git"
+            and parts[1] == "clone"
+            and parts[-1] == DOCKER_WORKDIR
+            and any(part.startswith("https://github.com/") for part in parts[2:-1])
+        ):
             continue
         if command.startswith("git reset --hard "):
             continue
         if command == "git remote remove origin":
+            continue
+        if command.startswith("TARGET_TIMESTAMP="):
+            continue
+        if command.startswith("git tag -l | while read tag; do "):
+            continue
+        if command == "git reflog expire --expire=now --all":
+            continue
+        if command == "git gc --prune=now --aggressive":
+            continue
+        if command.startswith("AFTER_TIMESTAMP="):
+            continue
+        if command.startswith("COMMIT_COUNT="):
+            continue
+        if command.startswith('[ "$COMMIT_COUNT" -eq 0 ]'):
             continue
         if command == f"chmod -R 777 {DOCKER_WORKDIR}":
             command = f"chmod -R a+rwX {DOCKER_WORKDIR}"
@@ -495,6 +572,18 @@ def _containerize_environment(
     return command_env
 
 
+def _shared_cache_mounts(environment: Mapping[str, str] | None) -> dict[str, dict[str, str]]:
+    mounts: dict[str, dict[str, str]] = {}
+    for key in _CONTAINER_CACHE_ENV_KEYS:
+        raw_value = str((environment or {}).get(key, "")).strip()
+        if not raw_value or not os.path.isabs(raw_value):
+            continue
+        host_path = Path(raw_value)
+        host_path.mkdir(parents=True, exist_ok=True)
+        mounts[str(host_path)] = {"bind": raw_value, "mode": "rw"}
+    return mounts
+
+
 def _coerce_shell_commands(value: object) -> list[str]:
     if value is None:
         return []
@@ -683,6 +772,12 @@ def _run_workspace_setup_in_container(
     )
 
 
+def _workspace_setup_timeout(timeout_seconds: int | None) -> int | None:
+    if timeout_seconds is None:
+        return None
+    return max(timeout_seconds, 600)
+
+
 def _workspace_command_shell(command: list[str], *, stdout_path: str, stderr_path: str) -> str:
     prep_steps = [
         f"if [ -e {shlex.quote(DOCKER_WORKDIR)} ]; then chmod -R a+rwX {shlex.quote(DOCKER_WORKDIR)}; fi"
@@ -701,11 +796,11 @@ def _workspace_command_shell(command: list[str], *, stdout_path: str, stderr_pat
     )
 
 
-def run_workspace_command_in_container(
+@contextmanager
+def workspace_container_session(
     *,
     attempt_id: str,
     workspace_path: Path,
-    command: list[str],
     timeout_seconds: int,
     container_host: str | None,
     artifacts_root: Path | None = None,
@@ -713,14 +808,9 @@ def run_workspace_command_in_container(
     image_override: str | None = None,
     instance_row: Mapping[str, object] | None = None,
     adapter_spec: Mapping[str, object] | None = None,
-) -> CommandResult:
+) -> Iterator[WorkspaceContainerSession]:
     attempt_root = (artifacts_root or workspace_path.parent).resolve()
     attempt_root.mkdir(parents=True, exist_ok=True)
-    stdout_path = attempt_root / "stdout.txt"
-    stderr_path = attempt_root / "stderr.txt"
-    for path in (stdout_path, stderr_path):
-        if path.exists():
-            path.unlink()
 
     client = docker_client(container_host=container_host)
     container = None
@@ -764,6 +854,7 @@ def run_workspace_command_in_container(
             "volumes": {
                 str(workspace_path): {"bind": DOCKER_WORKDIR, "mode": "rw"},
                 str(attempt_root): {"bind": _CONTAINER_ATTEMPT_ROOT, "mode": "rw"},
+                **_shared_cache_mounts(environment),
             },
             "environment": _containerize_environment(
                 environment=environment,
@@ -782,33 +873,48 @@ def run_workspace_command_in_container(
             container=container,
             image=resolved.image,
             setup_commands=resolved.setup_commands,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=_workspace_setup_timeout(timeout_seconds),
         )
-
-        shell_cmd = _workspace_command_shell(
-            command,
-            stdout_path=_CONTAINER_STDOUT_PATH,
-            stderr_path=_CONTAINER_STDERR_PATH,
-        )
-        outcome = _exec_in_container(
-            container,
-            f"/bin/bash -lc {shlex.quote(shell_cmd)}",
-            timeout_seconds,
-        )
-        stdout = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
-        stderr = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
-        return CommandResult(
-            command=tuple(command),
-            returncode=outcome.exit_code,
-            stdout=stdout,
-            stderr=stderr,
-            timed_out=outcome.timed_out,
-            elapsed_ms=outcome.elapsed_ms,
-            cwd=str(workspace_path),
+        yield WorkspaceContainerSession(
+            container=container,
+            workspace_path=workspace_path,
+            artifacts_root=attempt_root,
         )
     finally:
         cleanup_container(client, container, logger)
         close_logger(logger)
+
+
+def run_workspace_command_in_container(
+    *,
+    attempt_id: str,
+    workspace_path: Path,
+    command: list[str],
+    timeout_seconds: int,
+    container_host: str | None,
+    artifacts_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+    image_override: str | None = None,
+    instance_row: Mapping[str, object] | None = None,
+    adapter_spec: Mapping[str, object] | None = None,
+) -> CommandResult:
+    attempt_root = (artifacts_root or workspace_path.parent).resolve()
+    with workspace_container_session(
+        attempt_id=attempt_id,
+        workspace_path=workspace_path,
+        timeout_seconds=timeout_seconds,
+        container_host=container_host,
+        artifacts_root=attempt_root,
+        environment=environment,
+        image_override=image_override,
+        instance_row=instance_row,
+        adapter_spec=adapter_spec,
+    ) as session:
+        return session.run(
+            command=command,
+            timeout_seconds=timeout_seconds,
+            artifacts_root=attempt_root,
+        )
 
 
 def run_solver_command_in_container(
@@ -855,6 +961,7 @@ def run_solver_command_in_container(
         volumes = {
             str(workspace_path): {"bind": DOCKER_WORKDIR, "mode": "rw"},
             str(attempt_root): {"bind": _CONTAINER_ATTEMPT_ROOT, "mode": "rw"},
+            **_shared_cache_mounts(environment),
         }
         create_kwargs = {
             "image": resolved.image,
@@ -899,7 +1006,7 @@ def run_solver_command_in_container(
             container=container,
             image=resolved.image,
             setup_commands=resolved.setup_commands,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=_workspace_setup_timeout(timeout_seconds),
         )
         shell_cmd = _solver_shell_command(resolved_command)
         outcome = _exec_in_container(

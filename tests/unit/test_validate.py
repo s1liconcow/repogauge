@@ -1,8 +1,10 @@
 """Validation module regression tests."""
 
+from contextlib import contextmanager
 import json
 from io import StringIO
 from pathlib import Path
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -10,6 +12,7 @@ from repogauge.exec import CommandResult
 from repogauge.validation.validate import (
     PytestExecutionError,
     TestExecutionError,
+    _reset_checkout_for_pass,
     run_eval,
     _eval_instance,
     _pytest_command_attempts,
@@ -18,6 +21,26 @@ from repogauge.validation.validate import (
     _run_validation_pass,
     _test_command_attempts,
 )
+
+
+def _stub_eval_instance_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Path:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir(exist_ok=True)
+
+    class Handle:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def remove(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.create_checkout",
+        lambda *args, **kwargs: Handle(checkout),
+    )
+    return checkout
 
 
 def test_pytest_command_attempts_falls_back_to_interpreter_invocation() -> None:
@@ -308,9 +331,6 @@ def test_run_test_python_retries_with_file_paths_when_node_collection_fails(
                 return {"tests.unit.test_example": "error"}
             return {"tests/test_example.py::test_ok": "pass"}
 
-        def test_report_filename(self) -> str | None:
-            return None
-
         def test_report_glob(self) -> str | None:
             return None
 
@@ -418,8 +438,10 @@ def test_run_validation_pass_collects_runtime_pytest_nodes_from_file_targets(
         adapter_spec=None,
         instance_row=None,
         environment_strategy: str = "default",
+        workspace_session=None,
     ):
         observed["resolved_test_files"] = list(test_files)
+        observed["workspace_session"] = workspace_session
         return (
             {
                 "tests/test_example.py::test_one": "fail",
@@ -467,7 +489,151 @@ def test_run_validation_pass_collects_runtime_pytest_nodes_from_file_targets(
         "tests/test_example.py::test_one",
         "tests/test_example.py::test_two",
     ]
+    assert observed["workspace_session"] is None
     assert outcome["attempts"][0]["status"] == "collection_resolved"
+
+
+def test_run_validation_pass_container_collection_uses_separate_artifacts_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    checkout = tmp_path / "checkout"
+    test_file = checkout / "tests" / "test_example.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_example():\n    assert True\n", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    class Handle:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def remove(self) -> None:
+            return None
+
+    class Adapter:
+        def name(self) -> str:
+            return "python"
+
+        def env_overrides(self, worktree: Path) -> dict[str, str]:
+            return {}
+
+        def test_command_attempts(self, test_cmd_base: str) -> list[list[str]]:
+            return [["python", "-m", "pytest"]]
+
+        def test_report_filename(self) -> str | None:
+            return "junit.xml"
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.create_checkout",
+        lambda *args, **kwargs: Handle(checkout),
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate.apply_patch_text",
+        lambda *args, **kwargs: None,
+    )
+
+    def fake_container_exec(**kwargs):
+        observed["collection_artifacts_root"] = kwargs["artifacts_root"]
+        observed["collection_workspace_path"] = kwargs["workspace_path"]
+        observed["collection_command"] = list(kwargs["command"])
+        return CommandResult(
+            command=kwargs["command"],
+            returncode=0,
+            stdout="tests/test_example.py::test_one\n",
+            stderr="",
+        )
+
+    def fake_run_test(
+        worktree: Path,
+        *,
+        test_files: list[str],
+        test_report_path: Path,
+        timeout_seconds: int = 120,
+        test_cmd_base: str = "",
+        adapter=None,
+        test_spec=None,
+        attempt_id_prefix: str = "eval",
+        container_host: str | None = None,
+        adapter_spec=None,
+        instance_row=None,
+        environment_strategy: str = "default",
+        workspace_session=None,
+    ):
+        observed["resolved_test_files"] = list(test_files)
+        observed["workspace_session"] = workspace_session
+        return (
+            {"tests/test_example.py::test_one": "pass"},
+            "[stdout]\n.\n[stderr]\n",
+            [
+                {
+                    "attempt": 1,
+                    "status": "success",
+                    "command": ["python", "-m", "pytest"],
+                    "returncode": 0,
+                    "timed_out": False,
+                    "elapsed_ms": 1,
+                    "tests_run": 1,
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.run_workspace_command_in_container",
+        fake_container_exec,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_test",
+        fake_run_test,
+    )
+
+    outcome = _run_validation_pass(
+        label="b",
+        temp_root=tmp_path,
+        repo_root=tmp_path,
+        base_commit="deadbeef",
+        test_patch="",
+        pred_patch="",
+        test_files=["tests/test_example.py"],
+        timeout_seconds=5,
+        test_cmd_base="python -m pytest --junit-xml={junit_xml}",
+        adapter=Adapter(),
+        container_host="unix:///tmp/podman.sock",
+        adapter_spec={"language": "python", "repo": "owner/repo", "version": "1.0"},
+        instance_row={"instance_id": "inst-1", "repo": "owner/repo", "version": "1.0"},
+    )
+
+    assert outcome["status"] == "passed"
+    assert observed["collection_workspace_path"] == checkout
+    assert observed["collection_artifacts_root"] == tmp_path
+    assert observed["collection_artifacts_root"] != observed["collection_workspace_path"]
+    assert observed["resolved_test_files"] == ["tests/test_example.py::test_one"]
+    assert observed["workspace_session"] is None
+
+
+def test_reset_checkout_for_pass_cleans_untracked_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], **kwargs: object):
+        commands.append(command)
+        return CommandResult(command=tuple(command), returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("repogauge.validation.validate.run_command", fake_run_command)
+    monkeypatch.setattr(
+        "repogauge.validation.validate._path_exists_at_ref",
+        lambda worktree, ref, rel_path: True,
+    )
+
+    _reset_checkout_for_pass(
+        worktree=tmp_path,
+        base_commit="deadbeef",
+        cleanup_paths=[],
+    )
+
+    assert commands == [
+        ["git", "-C", str(tmp_path), "reset", "--hard", "deadbeef"],
+        ["git", "-C", str(tmp_path), "clean", "-fdx"],
+    ]
 
 
 def test_run_validation_pass_skips_missing_targeted_pytest_files(
@@ -534,6 +700,7 @@ def test_eval_instance_executes_four_passes_in_order(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[str] = []
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
 
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
@@ -598,6 +765,7 @@ def test_eval_instance_strips_prediction_edits_to_withheld_test_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     observed_pred_patches: dict[str, str] = {}
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
 
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
@@ -648,9 +816,114 @@ def test_eval_instance_strips_prediction_edits_to_withheld_test_files(
     assert outcome["withheld_test_paths_touched"] == ["tests/test_eval.py"]
 
 
+def test_eval_instance_reuses_checkout_and_workspace_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: dict[str, object] = {
+        "create_checkout_calls": [],
+        "workspace_session_kwargs": None,
+        "pass_calls": [],
+        "removed": False,
+    }
+
+    class Handle:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def remove(self) -> None:
+            observed["removed"] = True
+
+    session = object()
+
+    def fake_create_checkout(path: Path, *, ref: str, checkout_path: Path) -> Handle:
+        checkout_path.mkdir(parents=True, exist_ok=True)
+        observed["create_checkout_calls"].append((path, ref, checkout_path))
+        return Handle(checkout_path)
+
+    @contextmanager
+    def fake_workspace_container_session(**kwargs):
+        observed["workspace_session_kwargs"] = kwargs
+        yield session
+
+    def fake_build_targeted_test_plan(
+        test_cmd: str, test_patch: str
+    ) -> tuple[str, list[str]]:
+        return ("python -m pytest", ["tests/test_eval.py"])
+
+    def fake_run_validation_pass(*, label: str, **kwargs: object) -> dict[str, object]:
+        observed["pass_calls"].append(
+            (
+                label,
+                kwargs["checkout_path"],
+                kwargs["workspace_session"],
+                tuple(kwargs["cleanup_paths"]),
+            )
+        )
+        if label in {"b", "b_rerun"}:
+            outcomes = {"tests/test_eval.py::regression": "fail"}
+        else:
+            outcomes = {"tests/test_eval.py::regression": "pass"}
+        return {
+            "status": "passed",
+            "error": None,
+            "outcomes": outcomes,
+            "log": label,
+            "attempts": [],
+        }
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate.create_checkout", fake_create_checkout
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate.workspace_container_session",
+        fake_workspace_container_session,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate.build_targeted_test_plan",
+        fake_build_targeted_test_plan,
+    )
+    monkeypatch.setattr(
+        "repogauge.validation.validate._run_validation_pass", fake_run_validation_pass
+    )
+
+    outcome = _eval_instance(
+        repo_root=tmp_path,
+        base_commit="deadbeef",
+        pred_patch="diff --git a/src.py b/src.py\n+ok\n",
+        test_patch="diff --git a/tests/test_eval.py b/tests/test_eval.py\n+ok\n",
+        declared_ftp=[],
+        declared_ptp=[],
+        timeout_seconds=120,
+        test_cmd_base="pytest --config",
+        container_host="unix:///tmp/podman.sock",
+        instance_id="inst-1",
+    )
+
+    assert outcome["status"] == "resolved"
+    assert len(observed["create_checkout_calls"]) == 1
+    assert observed["removed"] is True
+    session_kwargs = observed["workspace_session_kwargs"]
+    assert session_kwargs is not None
+    assert session_kwargs["attempt_id"] == "eval-inst-1-session"
+    checkout_path = observed["create_checkout_calls"][0][2]
+    assert session_kwargs["workspace_path"] == checkout_path
+    assert [call[0] for call in observed["pass_calls"]] == [
+        "a",
+        "b",
+        "c",
+        "b_rerun",
+        "c_rerun",
+    ]
+    assert all(call[1] == checkout_path for call in observed["pass_calls"])
+    assert all(call[2] is session for call in observed["pass_calls"])
+    assert all(call[3] == ("src.py", "tests/test_eval.py") for call in observed["pass_calls"])
+
+
 def test_eval_instance_marks_flaky_when_reruns_differ(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
+
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
     ) -> tuple[str, list[str]]:
@@ -728,6 +1001,8 @@ def test_eval_instance_marks_flaky_when_reruns_differ(
 def test_eval_instance_errors_before_run_c_on_pass_b_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
+
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
     ) -> tuple[str, list[str]]:
@@ -782,6 +1057,8 @@ def test_eval_instance_errors_before_run_c_on_pass_b_failure(
 def test_eval_instance_rejects_without_fail_to_pass(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
+
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
     ) -> tuple[str, list[str]]:
@@ -857,6 +1134,8 @@ def test_eval_instance_rejects_without_fail_to_pass(
 def test_eval_instance_rejects_on_pass_to_pass_regression(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
+
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
     ) -> tuple[str, list[str]]:
@@ -947,6 +1226,8 @@ def test_eval_instance_rejects_on_pass_to_pass_regression(
 def test_eval_instance_rejects_when_declared_ftp_not_resolved(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
+
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
     ) -> tuple[str, list[str]]:
@@ -1022,6 +1303,8 @@ def test_eval_instance_rejects_when_declared_ftp_not_resolved(
 def test_eval_instance_marks_flaky_reason_for_b_rerun_mismatch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _stub_eval_instance_checkout(monkeypatch, tmp_path)
+
     def fake_build_targeted_test_plan(
         test_cmd: str, test_patch: str
     ) -> tuple[str, list[str]]:
@@ -1544,5 +1827,120 @@ def test_run_eval_emits_progress_updates(
     assert lines[0] == "repogauge eval: evaluating 2 instances locally via containers"
     assert "repogauge eval: starting [1/2] i-1" in lines
     assert any("[1/2] i-1 resolved" in line for line in lines)
-    assert "repogauge eval: starting [2/2] i-2" in lines
     assert any("[2/2] i-2 skipped (missing prediction)" in line for line in lines)
+
+
+def test_run_eval_only_reports_started_jobs_when_worker_slot_opens(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dataset_path = tmp_path / "dataset.jsonl"
+    predictions_path = tmp_path / "predictions.jsonl"
+    out_root = tmp_path / "out"
+
+    dataset_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "instance_id": iid,
+                    "base_commit": "deadbeef",
+                    "problem_statement": "broken",
+                    "FAIL_TO_PASS": [],
+                    "PASS_TO_PASS": [],
+                    "test_patch": "",
+                    "patch": "",
+                    "version": "v1",
+                    "repo": "r",
+                }
+            )
+            for iid in ("i-1", "i-2")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    predictions_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "instance_id": iid,
+                    "model_name_or_path": "gold",
+                    "model_patch": "diff --git a.py b.py\n+ok",
+                }
+            )
+            for iid in ("i-1", "i-2")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    call_order: list[str] = []
+
+    def fake_eval_instance(*, instance_id: str | None = None, **kwargs: object) -> dict[str, object]:
+        assert instance_id is not None
+        call_order.append(instance_id)
+        if instance_id == "i-1":
+            first_entered.set()
+            release_first.wait(timeout=5)
+        return {
+            "status": "resolved",
+            "reason": None,
+            "error": None,
+            "failure_code": None,
+            "environment_strategy": "default",
+            "test_strategy": "full_pytest",
+            "targeted_test_cmd": "python -m pytest",
+            "targeted_test_inputs": [],
+            "log_a": "",
+            "log_b": "",
+            "log_c": "",
+            "log_b_rerun": "",
+            "log_c_rerun": "",
+            "run_a": {},
+            "run_b": {},
+            "run_c": {},
+            "run_b_rerun": {},
+            "run_c_rerun": {},
+            "run_a_attempts": [],
+            "run_b_attempts": [],
+            "run_c_attempts": [],
+            "run_b_rerun_attempts": [],
+            "run_c_rerun_attempts": [],
+            "flake_runs": 0,
+            "FAIL_TO_PASS": [],
+            "PASS_TO_PASS": [],
+            "resolved": True,
+        }
+
+    monkeypatch.setattr(
+        "repogauge.validation.validate._eval_instance", fake_eval_instance
+    )
+
+    progress = StringIO()
+    runner = threading.Thread(
+        target=run_eval,
+        kwargs={
+            "dataset_path": dataset_path,
+            "predictions_path": predictions_path,
+            "out_root": out_root,
+            "repo_root": tmp_path,
+            "progress_stream": progress,
+            "jobs": 1,
+        },
+    )
+    runner.start()
+    assert first_entered.wait(timeout=5)
+    pre_release_lines = [line for line in progress.getvalue().splitlines() if line.strip()]
+    assert "repogauge eval: starting [1/2] i-1" in pre_release_lines
+    assert "repogauge eval: starting [2/2] i-2" not in pre_release_lines
+
+    release_first.set()
+    runner.join(timeout=5)
+    assert not runner.is_alive()
+
+    lines = [line for line in progress.getvalue().splitlines() if line.strip()]
+    start_1 = lines.index("repogauge eval: starting [1/2] i-1")
+    resolved_1 = next(i for i, line in enumerate(lines) if "[1/2] i-1 resolved" in line)
+    start_2 = lines.index("repogauge eval: starting [2/2] i-2")
+    assert start_1 < resolved_1 < start_2
+    assert call_order == ["i-1", "i-2"]

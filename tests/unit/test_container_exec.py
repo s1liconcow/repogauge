@@ -1,9 +1,11 @@
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import docker.errors
 
 from repogauge.runner.container_exec import (
+    WorkspaceContainerSession,
     WorkspaceContainerError,
     _adapter_setup_commands,
     _containerize_environment,
@@ -11,7 +13,9 @@ from repogauge.runner.container_exec import (
     _local_repo_setup_commands,
     _resolve_image_from_adapter_spec,
     _resolve_host_tool_fallback,
+    _shared_cache_mounts,
     _solver_shell_command,
+    _workspace_setup_timeout,
 )
 
 
@@ -62,10 +66,18 @@ def test_local_repo_setup_commands_strip_remote_clone_bootstrap() -> None:
     test_spec = SimpleNamespace(
         repo_script_list=[
             "git clone -o origin https://github.com/owner/repo /testbed",
+            "git clone -o origin --single-branch https://github.com/owner/repo /testbed",
             "chmod -R 777 /testbed",
             "cd /testbed",
             "git reset --hard deadbeef",
             "git remote remove origin",
+            "TARGET_TIMESTAMP=$(git show -s --format=%ci deadbeef)",
+            'git tag -l | while read tag; do TAG_COMMIT=$(git rev-list -n 1 "$tag"); done',
+            "git reflog expire --expire=now --all",
+            "git gc --prune=now --aggressive",
+            "AFTER_TIMESTAMP=$(date -d \"$TARGET_TIMESTAMP + 1 second\" '+%Y-%m-%d %H:%M:%S')",
+            'COMMIT_COUNT=$(git log --oneline --all --since="$AFTER_TIMESTAMP" | wc -l)',
+            '[ "$COMMIT_COUNT" -eq 0 ] || exit 1',
             "pip install uv",
             "uv sync --active --all-groups",
         ]
@@ -268,6 +280,66 @@ def test_containerize_environment_rewrites_attempt_root_paths(tmp_path: Path) ->
         "GOCACHE": "/testbed/.gocache",
         "OPENAI_API_KEY": "test-key",
     }
+
+
+def test_shared_cache_mounts_include_absolute_cache_dirs(tmp_path: Path) -> None:
+    uv_cache = tmp_path / "uv-cache"
+    pip_cache = tmp_path / "pip-cache"
+
+    mounts = _shared_cache_mounts(
+        {
+            "UV_CACHE_DIR": str(uv_cache),
+            "PIP_CACHE_DIR": str(pip_cache),
+            "RELATIVE_CACHE": "cache",
+        }
+    )
+
+    assert mounts == {
+        str(uv_cache): {"bind": str(uv_cache), "mode": "rw"},
+        str(pip_cache): {"bind": str(pip_cache), "mode": "rw"},
+    }
+    assert uv_cache.is_dir()
+    assert pip_cache.is_dir()
+
+
+def test_workspace_setup_timeout_has_higher_floor_than_test_timeout() -> None:
+    assert _workspace_setup_timeout(None) is None
+    assert _workspace_setup_timeout(120) == 600
+    assert _workspace_setup_timeout(900) == 900
+
+
+def test_workspace_container_session_reads_from_mounted_root_and_copies_outputs(
+    tmp_path: Path,
+) -> None:
+    mounted_root = tmp_path / "mounted"
+    requested_root = tmp_path / "requested"
+    mounted_root.mkdir()
+
+    def fake_exec_in_container(container, cmd: str, timeout_seconds: int):
+        (mounted_root / "stdout.txt").write_text("hello\n", encoding="utf-8")
+        (mounted_root / "stderr.txt").write_text("warning\n", encoding="utf-8")
+        return SimpleNamespace(exit_code=0, timed_out=False, elapsed_ms=17)
+
+    session = WorkspaceContainerSession(
+        container=object(),
+        workspace_path=tmp_path / "workspace",
+        artifacts_root=mounted_root,
+    )
+
+    with patch(
+        "repogauge.runner.container_exec._exec_in_container",
+        side_effect=fake_exec_in_container,
+    ):
+        result = session.run(
+            command=["python", "-V"],
+            timeout_seconds=30,
+            artifacts_root=requested_root,
+        )
+
+    assert result.stdout == "hello\n"
+    assert result.stderr == "warning\n"
+    assert (requested_root / "stdout.txt").read_text(encoding="utf-8") == "hello\n"
+    assert (requested_root / "stderr.txt").read_text(encoding="utf-8") == "warning\n"
 
 
 def test_solver_shell_command_runs_solver_as_nonroot_with_redirection() -> None:

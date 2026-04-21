@@ -33,10 +33,10 @@ solvers:
       template: concise
     tool_policy:
       safe: true
-  - id: opencode-kimi-k2p5
+  - id: opencode-kimi-k2p6
     provider: opencode
     adapter: opencode_cli
-    model: fireworks-ai/accounts/fireworks/models/kimi-k2p5
+    model: fireworks-ai/accounts/fireworks/models/kimi-k2p6
     agent: build
     timeout_seconds: 300
     prompt_policy:
