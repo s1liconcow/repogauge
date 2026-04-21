@@ -225,6 +225,7 @@ def create_checkout(
             "git",
             "clone",
             "--local",
+            "--no-hardlinks",
             "--quiet",
             "--no-checkout",
             str(repo),

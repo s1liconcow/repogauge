@@ -5,6 +5,7 @@ import docker.errors
 
 from repogauge.runner.container_exec import (
     WorkspaceContainerError,
+    _adapter_setup_commands,
     _containerize_environment,
     _ensure_solver_command_available,
     _local_repo_setup_commands,
@@ -76,6 +77,23 @@ def test_local_repo_setup_commands_strip_remote_clone_bootstrap() -> None:
         "cd /testbed",
         "pip install uv",
         "uv sync --active --all-groups",
+    )
+
+
+def test_adapter_setup_commands_install_uv_when_needed() -> None:
+    assert _adapter_setup_commands(
+        {
+            "pre_install": [],
+            "install": ["uv sync --active --all-groups", "python -m pip install pytest"],
+            "build": [],
+        }
+    ) == (
+        "git config --global --add safe.directory /testbed || true",
+        "chmod -R 777 /testbed || true",
+        "cd /testbed",
+        "pip install uv",
+        "uv sync --active --all-groups",
+        "python -m pip install pytest",
     )
 
 

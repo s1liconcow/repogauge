@@ -122,6 +122,38 @@ def test_create_checkout_is_self_contained_without_origin_and_ignores_filemode(
         handle.remove()
 
 
+def test_create_checkout_uses_local_clone_without_hardlinks(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    checkout_path = tmp_path / "checkout"
+
+    with (
+        mock.patch("repogauge.utils.git.get_repo_root", return_value=repo),
+        mock.patch("repogauge.utils.git.run_command") as mock_run_command,
+    ):
+        mock_run_command.side_effect = [
+            CommandResult(command=["git"], returncode=0, stdout="", stderr=""),
+            CommandResult(command=["git"], returncode=0, stdout="", stderr=""),
+            CommandResult(command=["git"], returncode=0, stdout="", stderr=""),
+            CommandResult(command=["git"], returncode=1, stdout="", stderr=""),
+        ]
+
+        handle = create_checkout(repo, ref="deadbeef", checkout_path=checkout_path)
+
+    assert handle.path == checkout_path
+    calls = [call.args[0] for call in mock_run_command.call_args_list]
+    assert calls[0] == [
+        "git",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--quiet",
+        "--no-checkout",
+        str(repo),
+        str(checkout_path),
+    ]
+
+
 def test_create_worktree_prunes_and_retries_stale_registration(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

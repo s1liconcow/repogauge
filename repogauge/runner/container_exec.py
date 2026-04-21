@@ -515,13 +515,22 @@ def _coerce_shell_commands(value: object) -> list[str]:
 
 
 def _adapter_setup_commands(adapter_spec: Mapping[str, object]) -> tuple[str, ...]:
+    pre_install = _coerce_shell_commands(adapter_spec.get("pre_install"))
+    install = _coerce_shell_commands(adapter_spec.get("install"))
+    build = _coerce_shell_commands(adapter_spec.get("build"))
+
+    install_text = "\n".join([*pre_install, *install, *build])
+    if "uv" in install_text and "pip install uv" not in pre_install:
+        pre_install = ["pip install uv", *pre_install]
+
     commands: list[str] = [
         f"git config --global --add safe.directory {shlex.quote(DOCKER_WORKDIR)} || true",
         f"chmod -R 777 {shlex.quote(DOCKER_WORKDIR)} || true",
         f"cd {shlex.quote(DOCKER_WORKDIR)}",
     ]
-    for field in ("pre_install", "install", "build"):
-        commands.extend(_coerce_shell_commands(adapter_spec.get(field)))
+    commands.extend(pre_install)
+    commands.extend(install)
+    commands.extend(build)
     return tuple(commands)
 
 
