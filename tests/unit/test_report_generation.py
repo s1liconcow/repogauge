@@ -283,6 +283,8 @@ def test_analysis_report_includes_budget_and_failure_sections(tmp_path: Path) ->
     assert "Attempt Browser" in html
     assert "LLM Judge included" in html
     assert "solver-tab" in html
+    assert "https://esm.sh/@pierre/diffs" in html
+    assert "data-diff-viewer" in html
     assert "task_cluster" in html
     assert "Solver" in html
 

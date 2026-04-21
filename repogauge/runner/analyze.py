@@ -1754,35 +1754,31 @@ def write_summary_html(
             )
         line_html: list[str] = []
         for raw_line in patch.splitlines():
-            if raw_line.startswith("diff --git"):
-                cls = "diff__file"
-            elif raw_line.startswith("+++ ") or raw_line.startswith("--- "):
-                cls = "diff__path"
-            elif raw_line.startswith("@@"):
-                cls = "diff__hunk"
-            elif raw_line.startswith("+") and not raw_line.startswith("+++"):
-                cls = "diff__add"
-            elif raw_line.startswith("-") and not raw_line.startswith("---"):
-                cls = "diff__del"
-            elif (
-                raw_line.startswith("index ")
-                or raw_line.startswith("new file")
-                or raw_line.startswith("deleted file")
-            ):
-                cls = "diff__meta"
-            else:
-                cls = "diff__ctx"
-            line_html.append(
-                f'<span class="{cls}">{html_escape(raw_line) or "&nbsp;"}</span>'
-            )
+            line_html.append(html_escape(raw_line) or "&nbsp;")
         trailer = (
-            '<div class="diff__truncated">Diff truncated for display — '
+            '<div class="diff-viewer__truncated">Diff truncated for display — '
             "download the run artifacts for the full patch.</div>"
             if truncated
             else ""
         )
         diff_body = "".join(f"{line}\n" for line in line_html)
-        return f'<pre class="diff">{diff_body}</pre>{trailer}'
+        payload = json.dumps({"patch": patch, "truncated": truncated}).replace(
+            "</", "<\\/"
+        )
+        return (
+            '<div class="diff-viewer" data-diff-viewer>'
+            '<div class="diff-viewer__loading" data-diff-loading>'
+            "Loading Diffs viewer…</div>"
+            '<div class="diff-viewer__mount" data-diff-mount hidden></div>'
+            '<div class="diff-viewer__fallback" data-diff-fallback hidden>'
+            '<div class="diff-viewer__fallback-note">'
+            "Diffs failed to load, showing the raw patch instead.</div>"
+            f'<pre class="diff-viewer__fallback-pre">{diff_body}</pre>'
+            "</div>"
+            f'<script type="application/json" data-diff-payload>{payload}</script>'
+            "</div>"
+            f"{trailer}"
+        )
 
     def render_judge_block(judge: Mapping[str, Any] | None) -> str:
         if not judge:
@@ -3186,7 +3182,36 @@ def write_summary_html(
       gap: 16px;
       align-items: start;
     }}
-    .diff {{
+    .diff-viewer {{
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 220px;
+    }}
+    .diff-viewer__loading,
+    .diff-viewer__fallback-note {{
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+    }}
+    .diff-viewer__mount {{
+      min-height: 220px;
+      border-radius: var(--r-md);
+      overflow: hidden;
+      background: var(--night);
+      border: 1px solid rgba(255,255,255,0.06);
+    }}
+    .diff-viewer__mount[hidden],
+    .diff-viewer__fallback[hidden],
+    .diff-viewer__loading[hidden] {{
+      display: none;
+    }}
+    .diff-viewer__fallback {{
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }}
+    .diff-viewer__fallback-pre {{
       margin: 0;
       padding: 14px 16px;
       background: var(--night);
@@ -3200,15 +3225,7 @@ def write_summary_html(
       overflow: auto;
       white-space: pre;
     }}
-    .diff span {{ display: block; padding: 0 6px; }}
-    .diff__file {{ color: #f472b6; font-weight: 600; margin-top: 4px; }}
-    .diff__path {{ color: #a78bfa; }}
-    .diff__hunk {{ color: #fbbf24; background: rgba(251,191,36,0.08); }}
-    .diff__add {{ color: #86efac; background: rgba(16,185,129,0.12); }}
-    .diff__del {{ color: #fda4af; background: rgba(244,63,94,0.12); }}
-    .diff__meta {{ color: #8b93b0; }}
-    .diff__ctx {{ color: #c6cce0; }}
-    .diff__truncated {{
+    .diff-viewer__truncated {{
       margin-top: 8px;
       font-family: var(--font-mono);
       font-size: 0.72rem;
@@ -3467,8 +3484,68 @@ def write_summary_html(
       {render_attempt_browser(attempt_browser)}
     </section>
   </main>
-  <script>
+  <script type="module">
     (() => {{
+      const initDiffViewers = async () => {{
+        const viewers = Array.from(document.querySelectorAll("[data-diff-viewer]"));
+        let FileDiff;
+        let parsePatchFiles;
+        try {{
+          ({{ FileDiff, parsePatchFiles }} = await import("https://esm.sh/@pierre/diffs"));
+        }} catch (error) {{
+          viewers.forEach((viewer) => {{
+            const loading = viewer.querySelector("[data-diff-loading]");
+            const fallback = viewer.querySelector("[data-diff-fallback]");
+            if (loading) loading.hidden = true;
+            if (fallback) fallback.hidden = false;
+          }});
+          console.error("Failed to load Diffs viewer bundle", error);
+          return;
+        }}
+        for (const viewer of viewers) {{
+          const loading = viewer.querySelector("[data-diff-loading]");
+          const mount = viewer.querySelector("[data-diff-mount]");
+          const fallback = viewer.querySelector("[data-diff-fallback]");
+          const payloadEl = viewer.querySelector("[data-diff-payload]");
+          if (!(mount instanceof HTMLElement) || !(payloadEl instanceof HTMLScriptElement)) {{
+            continue;
+          }}
+          try {{
+            const payload = JSON.parse(payloadEl.textContent || "{{}}");
+            const patch = typeof payload.patch === "string" ? payload.patch : "";
+            const parsedGroups = parsePatchFiles(patch);
+            const fileDiffs = parsedGroups.flatMap((group) =>
+              Array.isArray(group?.files) ? group.files : []
+            );
+            if (!fileDiffs.length) {{
+              throw new Error("No file diffs parsed from patch");
+            }}
+            mount.innerHTML = "";
+            for (const fileDiff of fileDiffs) {{
+              const fileMount = document.createElement("div");
+              fileMount.className = "diff-viewer__file";
+              mount.appendChild(fileMount);
+              const diff = new FileDiff({{
+                theme: "pierre-dark",
+                diffStyle: "split",
+                overflow: "scroll",
+              }});
+              diff.render({{
+                fileDiff,
+                containerWrapper: fileMount,
+              }});
+            }}
+            mount.hidden = false;
+            if (loading) loading.hidden = true;
+            if (fallback) fallback.hidden = true;
+          }} catch (error) {{
+            if (loading) loading.hidden = true;
+            if (fallback) fallback.hidden = false;
+            console.error("Failed to initialize Diffs viewer", error);
+          }}
+        }}
+      }};
+
       const parseValue = (raw) => {{
         if (raw === undefined || raw === null || raw === "") return Number.NEGATIVE_INFINITY;
         const numeric = Number(raw);
@@ -3554,6 +3631,8 @@ def write_summary_html(
           }});
         }});
       }});
+
+      initDiffViewers();
     }})();
   </script>
 </body>
