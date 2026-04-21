@@ -2810,11 +2810,1654 @@
           </div>
         </section>
 
-        <!-- Other views appended by next edits -->
+        <!-- ============================================================
+             REPOSITORIES
+             ============================================================ -->
+        <section class="view" data-view="repositories">
+          <div class="page-head">
+            <div>
+              <span class="kicker">Connected repositories</span>
+              <h1>12 repositories under continuous benchmark.</h1>
+              <p class="page-head__deck">
+                Each repo is a living benchmark &mdash; built from commits your team has actually shipped.
+                Schedules, baselines and budgets are scoped per repo so each codebase gets the agent it deserves.
+              </p>
+            </div>
+            <div class="page-head__actions">
+              <div class="seg" role="group" aria-label="Filter">
+                <button class="seg__btn seg__btn--active" type="button">All · 12</button>
+                <button class="seg__btn" type="button">Healthy · 9</button>
+                <button class="seg__btn" type="button">Warnings · 2</button>
+                <button class="seg__btn" type="button">Stale · 1</button>
+              </div>
+              <button class="btn btn--accent btn--sm" type="button" data-open-connect>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                </svg>
+                Connect
+              </button>
+            </div>
+          </div>
+
+          <div class="repo-grid">
+            <article class="repo-card">
+              <div class="repo-card__head">
+                <div>
+                  <div class="repo-card__title">
+                    <span class="repo-card__lang" style="background: #3178c6;"></span>
+                    orders-api
+                    <span class="chip chip--em chip--live"><span></span>running</span>
+                  </div>
+                  <div class="repo-card__path">acme/orders-api · main</div>
+                </div>
+                <button class="icon-btn" type="button" aria-label="More" style="width: 28px; height: 28px;">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <circle cx="3" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="13" cy="8" r="1.4" fill="currentColor"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="repo-card__metrics">
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Pass rate</div>
+                  <div class="repo-card__metric-value">71<span style="font-size: 0.7em; color: var(--muted);">%</span></div>
+                  <div class="repo-card__metric-sub" style="color: var(--emerald);">▲ 3.4</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">$/solve</div>
+                  <div class="repo-card__metric-value">$2.81</div>
+                  <div class="repo-card__metric-sub" style="color: var(--emerald);">▼ 18%</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Tasks</div>
+                  <div class="repo-card__metric-value">188</div>
+                  <div class="repo-card__metric-sub">last build</div>
+                </div>
+              </div>
+              <div class="repo-card__foot">
+                <div class="repo-card__top-agent">
+                  <span class="avatar avatar--sm" aria-hidden="true">CS</span>
+                  <div>
+                    <div class="repo-card__agent-name">claude-sonnet-4-6</div>
+                    <div class="repo-card__agent-sub">winner · last 7 runs</div>
+                  </div>
+                </div>
+                <button class="repo-card__action" type="button" aria-label="Open">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-card__head">
+                <div>
+                  <div class="repo-card__title">
+                    <span class="repo-card__lang" style="background: #f1e05a;"></span>
+                    web-app
+                    <span class="chip chip--em"><span class="chip__dot"></span>healthy</span>
+                  </div>
+                  <div class="repo-card__path">acme/web-app · main</div>
+                </div>
+                <button class="icon-btn" type="button" aria-label="More" style="width: 28px; height: 28px;">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <circle cx="3" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="13" cy="8" r="1.4" fill="currentColor"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="repo-card__metrics">
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Pass rate</div>
+                  <div class="repo-card__metric-value">68<span style="font-size: 0.7em; color: var(--muted);">%</span></div>
+                  <div class="repo-card__metric-sub" style="color: var(--emerald);">▲ 1.1</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">$/solve</div>
+                  <div class="repo-card__metric-value">$1.92</div>
+                  <div class="repo-card__metric-sub" style="color: var(--emerald);">▼ 6%</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Tasks</div>
+                  <div class="repo-card__metric-value">142</div>
+                  <div class="repo-card__metric-sub">last build</div>
+                </div>
+              </div>
+              <div class="repo-card__foot">
+                <div class="repo-card__top-agent">
+                  <span class="avatar avatar--sm avatar--em" aria-hidden="true">GC</span>
+                  <div>
+                    <div class="repo-card__agent-name">gpt-5-codex</div>
+                    <div class="repo-card__agent-sub">winner · last 4 runs</div>
+                  </div>
+                </div>
+                <button class="repo-card__action" type="button" aria-label="Open">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-card__head">
+                <div>
+                  <div class="repo-card__title">
+                    <span class="repo-card__lang" style="background: #00ADD8;"></span>
+                    billing
+                    <span class="chip chip--am"><span class="chip__dot"></span>warning</span>
+                  </div>
+                  <div class="repo-card__path">acme/billing · main</div>
+                </div>
+                <button class="icon-btn" type="button" aria-label="More" style="width: 28px; height: 28px;">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <circle cx="3" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="13" cy="8" r="1.4" fill="currentColor"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="repo-card__metrics">
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Pass rate</div>
+                  <div class="repo-card__metric-value">58<span style="font-size: 0.7em; color: var(--muted);">%</span></div>
+                  <div class="repo-card__metric-sub" style="color: var(--rose);">▼ 5.2</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">$/solve</div>
+                  <div class="repo-card__metric-value">$3.45</div>
+                  <div class="repo-card__metric-sub" style="color: var(--rose);">▲ 12%</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Tasks</div>
+                  <div class="repo-card__metric-value">152</div>
+                  <div class="repo-card__metric-sub">last build</div>
+                </div>
+              </div>
+              <div class="repo-card__foot">
+                <div class="repo-card__top-agent">
+                  <span class="avatar avatar--sm avatar--cyan" aria-hidden="true">G2</span>
+                  <div>
+                    <div class="repo-card__agent-name">gemini-2.5-pro</div>
+                    <div class="repo-card__agent-sub">regression flagged</div>
+                  </div>
+                </div>
+                <button class="repo-card__action" type="button" aria-label="Open">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-card__head">
+                <div>
+                  <div class="repo-card__title">
+                    <span class="repo-card__lang" style="background: #dea584;"></span>
+                    inference-rs
+                    <span class="chip chip--em"><span class="chip__dot"></span>healthy</span>
+                  </div>
+                  <div class="repo-card__path">acme/inference-rs · main</div>
+                </div>
+                <button class="icon-btn" type="button" aria-label="More" style="width: 28px; height: 28px;">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <circle cx="3" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="13" cy="8" r="1.4" fill="currentColor"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="repo-card__metrics">
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Pass rate</div>
+                  <div class="repo-card__metric-value">54<span style="font-size: 0.7em; color: var(--muted);">%</span></div>
+                  <div class="repo-card__metric-sub" style="color: var(--emerald);">▲ 0.8</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">$/solve</div>
+                  <div class="repo-card__metric-value">$4.12</div>
+                  <div class="repo-card__metric-sub">stable</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Tasks</div>
+                  <div class="repo-card__metric-value">96</div>
+                  <div class="repo-card__metric-sub">last build</div>
+                </div>
+              </div>
+              <div class="repo-card__foot">
+                <div class="repo-card__top-agent">
+                  <span class="avatar avatar--sm" aria-hidden="true">CS</span>
+                  <div>
+                    <div class="repo-card__agent-name">claude-sonnet-4-6</div>
+                    <div class="repo-card__agent-sub">winner · last 3 runs</div>
+                  </div>
+                </div>
+                <button class="repo-card__action" type="button" aria-label="Open">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-card__head">
+                <div>
+                  <div class="repo-card__title">
+                    <span class="repo-card__lang" style="background: #3572A5;"></span>
+                    data-pipeline
+                    <span class="chip"><span class="chip__dot"></span>baselining</span>
+                  </div>
+                  <div class="repo-card__path">acme/data-pipeline · main</div>
+                </div>
+                <button class="icon-btn" type="button" aria-label="More" style="width: 28px; height: 28px;">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <circle cx="3" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="13" cy="8" r="1.4" fill="currentColor"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="repo-card__metrics">
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Pass rate</div>
+                  <div class="repo-card__metric-value">—</div>
+                  <div class="repo-card__metric-sub">first run</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">$/solve</div>
+                  <div class="repo-card__metric-value">—</div>
+                  <div class="repo-card__metric-sub">first run</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Tasks</div>
+                  <div class="repo-card__metric-value">74</div>
+                  <div class="repo-card__metric-sub">queued</div>
+                </div>
+              </div>
+              <div class="repo-card__foot">
+                <div class="repo-card__top-agent">
+                  <span class="avatar avatar--sm avatar--amber" aria-hidden="true">H4</span>
+                  <div>
+                    <div class="repo-card__agent-name">haiku-4-5</div>
+                    <div class="repo-card__agent-sub">first attempt</div>
+                  </div>
+                </div>
+                <button class="repo-card__action" type="button" aria-label="Open">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-card__head">
+                <div>
+                  <div class="repo-card__title">
+                    <span class="repo-card__lang" style="background: #b07219;"></span>
+                    legacy-monolith
+                    <span class="chip chip--ro"><span class="chip__dot"></span>stale</span>
+                  </div>
+                  <div class="repo-card__path">acme/legacy-monolith · master</div>
+                </div>
+                <button class="icon-btn" type="button" aria-label="More" style="width: 28px; height: 28px;">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <circle cx="3" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="13" cy="8" r="1.4" fill="currentColor"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="repo-card__metrics">
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Pass rate</div>
+                  <div class="repo-card__metric-value">42<span style="font-size: 0.7em; color: var(--muted);">%</span></div>
+                  <div class="repo-card__metric-sub">14d ago</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">$/solve</div>
+                  <div class="repo-card__metric-value">$5.78</div>
+                  <div class="repo-card__metric-sub">14d ago</div>
+                </div>
+                <div class="repo-card__metric">
+                  <div class="repo-card__metric-label">Tasks</div>
+                  <div class="repo-card__metric-value">220</div>
+                  <div class="repo-card__metric-sub">last build</div>
+                </div>
+              </div>
+              <div class="repo-card__foot">
+                <div class="repo-card__top-agent">
+                  <span class="avatar avatar--sm avatar--em" aria-hidden="true">GC</span>
+                  <div>
+                    <div class="repo-card__agent-name">gpt-5-codex</div>
+                    <div class="repo-card__agent-sub">needs re-baseline</div>
+                  </div>
+                </div>
+                <button class="repo-card__action" type="button" aria-label="Open">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+            </article>
+
+            <button class="repo-card repo-card--add" type="button" data-open-connect>
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3,3"/>
+                <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              <strong style="color: var(--ink); font-size: 0.96rem; font-weight: 600;">Connect a repository</strong>
+              <span style="font-size: 0.84rem;">GitHub, GitLab, or self-hosted via SSH key</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- ============================================================
+             COMPARISONS — heatmap matrix
+             ============================================================ -->
+        <section class="view" data-view="compare">
+          <div class="page-head">
+            <div>
+              <span class="kicker">Agent face-off</span>
+              <h1>Compare every agent across every repo, on the same evidence.</h1>
+              <p class="page-head__deck">
+                Each cell is a real, reproducible measurement. Hover for build artifacts.
+                Toggle the metric to flip the picture &mdash; the cheapest agent isn't always the best, but sometimes it's both.
+              </p>
+            </div>
+            <div class="page-head__actions">
+              <button class="btn btn--ghost btn--sm" type="button">Export PNG</button>
+              <button class="btn btn--soft btn--sm" type="button">Share view</button>
+            </div>
+          </div>
+
+          <div class="compare-toolbar">
+            <div class="compare-toolbar__group">
+              <span class="compare-toolbar__label">Metric</span>
+              <div class="seg" id="hmMetric">
+                <button class="seg__btn seg__btn--active" data-metric="pass">Pass rate</button>
+                <button class="seg__btn" data-metric="cost">$/solve</button>
+                <button class="seg__btn" data-metric="lat">P50 latency</button>
+              </div>
+            </div>
+            <div class="compare-toolbar__group">
+              <span class="compare-toolbar__label">Window</span>
+              <div class="seg">
+                <button class="seg__btn" type="button">24h</button>
+                <button class="seg__btn seg__btn--active" type="button">7d</button>
+                <button class="seg__btn" type="button">30d</button>
+              </div>
+            </div>
+            <div style="margin-left: auto;">
+              <span class="hm-scale">
+                low
+                <span class="hm-scale__bar"></span>
+                high
+              </span>
+            </div>
+          </div>
+
+          <article class="card" style="padding: 18px;">
+            <div class="heatmap-wrap">
+              <table class="heatmap" id="heatmap">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>claude-sonnet-4-6</th>
+                    <th>gpt-5-codex</th>
+                    <th>gemini-2.5-pro</th>
+                    <th>haiku-4-5</th>
+                    <th>deepseek-r1</th>
+                    <th>qwen-coder</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </article>
+
+          <div class="overview-grid" style="margin-top: 16px;">
+            <article class="card card--dark">
+              <div class="card__head">
+                <div>
+                  <div class="card__title">Frontier · pass rate vs $/solve</div>
+                  <div class="card__sub">7-day window across all repos</div>
+                </div>
+                <div class="seg">
+                  <button class="seg__btn seg__btn--active">Bubble</button>
+                  <button class="seg__btn">Pareto</button>
+                </div>
+              </div>
+              <svg viewBox="0 0 600 280" style="width: 100%; height: auto; display: block;" aria-hidden="true">
+                <!-- axis -->
+                <g stroke="rgba(255,255,255,0.08)">
+                  <line x1="50" y1="240" x2="580" y2="240"/>
+                  <line x1="50" y1="20" x2="50" y2="240"/>
+                  <line x1="50" y1="60"  x2="580" y2="60"  stroke-dasharray="2,4" opacity="0.6"/>
+                  <line x1="50" y1="100" x2="580" y2="100" stroke-dasharray="2,4" opacity="0.6"/>
+                  <line x1="50" y1="140" x2="580" y2="140" stroke-dasharray="2,4" opacity="0.6"/>
+                  <line x1="50" y1="180" x2="580" y2="180" stroke-dasharray="2,4" opacity="0.6"/>
+                </g>
+                <g font-family="JetBrains Mono" font-size="9" fill="rgba(220,226,245,0.5)">
+                  <text x="44" y="64"  text-anchor="end">90%</text>
+                  <text x="44" y="104" text-anchor="end">75%</text>
+                  <text x="44" y="144" text-anchor="end">60%</text>
+                  <text x="44" y="184" text-anchor="end">45%</text>
+                  <text x="44" y="244" text-anchor="end">30%</text>
+                  <text x="50"  y="258">$0.50</text>
+                  <text x="170" y="258">$1.50</text>
+                  <text x="290" y="258">$2.50</text>
+                  <text x="410" y="258">$3.50</text>
+                  <text x="530" y="258">$4.50</text>
+                </g>
+                <!-- pareto curve -->
+                <path d="M70 220 C 160 130, 280 80, 430 60" stroke="rgba(167,139,250,0.4)" stroke-width="1.6" fill="none" stroke-dasharray="4,5"/>
+                <!-- bubbles -->
+                <g>
+                  <circle cx="380" cy="78"  r="22" fill="#635bff" opacity="0.85"/>
+                  <text x="380" y="82" text-anchor="middle" font-family="Inter" font-size="11" font-weight="600" fill="white">cs-4-6</text>
+                  <circle cx="430" cy="92"  r="20" fill="#10b981" opacity="0.8"/>
+                  <text x="430" y="96" text-anchor="middle" font-family="Inter" font-size="11" font-weight="600" fill="white">gpt5</text>
+                  <circle cx="290" cy="118" r="18" fill="#22d3ee" opacity="0.8"/>
+                  <text x="290" y="122" text-anchor="middle" font-family="Inter" font-size="11" font-weight="600" fill="white">g-2.5</text>
+                  <circle cx="98"  cy="158" r="22" fill="#fbbf24" opacity="0.85"/>
+                  <text x="98" y="162" text-anchor="middle" font-family="Inter" font-size="11" font-weight="600" fill="#1a1f33">h-4.5</text>
+                  <circle cx="140" cy="190" r="14" fill="#f472b6" opacity="0.8"/>
+                  <text x="140" y="194" text-anchor="middle" font-family="Inter" font-size="10" font-weight="600" fill="white">dsr1</text>
+                  <circle cx="195" cy="208" r="12" fill="#a78bfa" opacity="0.8"/>
+                  <text x="195" y="212" text-anchor="middle" font-family="Inter" font-size="10" font-weight="600" fill="white">qwn</text>
+                </g>
+                <text x="316" y="276" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="rgba(220,226,245,0.5)">$ per solved task →</text>
+                <text x="14" y="130" transform="rotate(-90 14 130)" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="rgba(220,226,245,0.5)">pass rate →</text>
+              </svg>
+            </article>
+
+            <div class="stack">
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Failure modes</div>
+                    <div class="card__sub">claude-sonnet-4-6 · 7d</div>
+                  </div>
+                </div>
+                <div class="stack--sm">
+                  <div class="row row--between">
+                    <div class="row" style="gap: 10px;">
+                      <span style="width: 8px; height: 8px; border-radius: 999px; background: var(--rose);"></span>
+                      <span style="font-size: 0.88rem;">Compile / type error</span>
+                    </div>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink); font-weight: 600;">42%</span>
+                  </div>
+                  <div class="row row--between">
+                    <div class="row" style="gap: 10px;">
+                      <span style="width: 8px; height: 8px; border-radius: 999px; background: var(--amber);"></span>
+                      <span style="font-size: 0.88rem;">Wrong test fixture</span>
+                    </div>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink); font-weight: 600;">28%</span>
+                  </div>
+                  <div class="row row--between">
+                    <div class="row" style="gap: 10px;">
+                      <span style="width: 8px; height: 8px; border-radius: 999px; background: var(--accent);"></span>
+                      <span style="font-size: 0.88rem;">Out-of-scope edit</span>
+                    </div>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink); font-weight: 600;">19%</span>
+                  </div>
+                  <div class="row row--between">
+                    <div class="row" style="gap: 10px;">
+                      <span style="width: 8px; height: 8px; border-radius: 999px; background: var(--accent-2);"></span>
+                      <span style="font-size: 0.88rem;">Timeout</span>
+                    </div>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink); font-weight: 600;">7%</span>
+                  </div>
+                  <div class="row row--between">
+                    <div class="row" style="gap: 10px;">
+                      <span style="width: 8px; height: 8px; border-radius: 999px; background: var(--muted);"></span>
+                      <span style="font-size: 0.88rem;">Other</span>
+                    </div>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink); font-weight: 600;">4%</span>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Where each agent shines</div>
+                    <div class="card__sub">By repo &amp; task category</div>
+                  </div>
+                </div>
+                <div class="stack--sm">
+                  <div class="row" style="gap: 10px;">
+                    <span class="avatar avatar--sm" aria-hidden="true">CS</span>
+                    <span style="font-size: 0.88rem;"><b style="color: var(--ink);">claude-sonnet-4-6</b> &mdash; long-horizon refactors, multi-file edits</span>
+                  </div>
+                  <div class="row" style="gap: 10px;">
+                    <span class="avatar avatar--sm avatar--em" aria-hidden="true">GC</span>
+                    <span style="font-size: 0.88rem;"><b style="color: var(--ink);">gpt-5-codex</b> &mdash; tricky regex / parser bugs, schema migrations</span>
+                  </div>
+                  <div class="row" style="gap: 10px;">
+                    <span class="avatar avatar--sm avatar--cyan" aria-hidden="true">G2</span>
+                    <span style="font-size: 0.88rem;"><b style="color: var(--ink);">gemini-2.5-pro</b> &mdash; UI polish, accessibility fixes</span>
+                  </div>
+                  <div class="row" style="gap: 10px;">
+                    <span class="avatar avatar--sm avatar--amber" aria-hidden="true">H4</span>
+                    <span style="font-size: 0.88rem;"><b style="color: var(--ink);">haiku-4-5</b> &mdash; small bugs &amp; ticket triage at <b>7× lower cost</b></span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================================
+             RUNS — single run detail + history
+             ============================================================ -->
+        <section class="view" data-view="runs">
+          <div class="page-head">
+            <div>
+              <div class="row" style="gap: 10px; flex-wrap: wrap;">
+                <span class="kicker">Live run</span>
+                <span class="chip chip--live"><span></span>streaming</span>
+                <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-soft);">run_r9821</code>
+              </div>
+              <h1>claude-sonnet-4-6 vs orders-api</h1>
+              <p class="page-head__deck">
+                Started <b>3m ago</b> from manual trigger. <b>128 of 188 tasks complete.</b>
+                Each task is sandboxed with deterministic fixtures and verified against the same hidden test set used in CI.
+              </p>
+            </div>
+            <div class="page-head__actions">
+              <button class="btn btn--ghost btn--sm" type="button">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+                Cancel
+              </button>
+              <button class="btn btn--soft btn--sm" type="button">Re-run failed</button>
+              <button class="btn btn--primary btn--sm" type="button">Open report</button>
+            </div>
+          </div>
+
+          <div class="kpis reveal" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="kpi">
+              <div class="kpi__top">
+                <span class="kpi__label">Progress</span>
+                <span class="kpi__delta kpi__delta--up">live</span>
+              </div>
+              <div class="kpi__value"><span id="runProg">68%</span></div>
+              <div class="kpi__sub">128 / 188 tasks</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi__top"><span class="kpi__label">Pass rate (so far)</span></div>
+              <div class="kpi__value">72.6<span class="kpi__unit">%</span></div>
+              <div class="kpi__sub">93 of 128 verified</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi__top"><span class="kpi__label">Spent</span></div>
+              <div class="kpi__value">$1.92</div>
+              <div class="kpi__sub">budget cap $5.00</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi__top"><span class="kpi__label">Time elapsed</span></div>
+              <div class="kpi__value">3:14</div>
+              <div class="kpi__sub">~3m 02s remaining</div>
+            </div>
+          </div>
+
+          <div class="run-detail-grid">
+            <article class="card">
+              <div class="card__head">
+                <div>
+                  <div class="card__title">Pipeline</div>
+                  <div class="card__sub">7 stages · each emits a signed artifact</div>
+                </div>
+                <div class="row row--gap-4">
+                  <span class="chip chip--em"><span class="chip__dot"></span>4 done</span>
+                  <span class="chip chip--vio"><span class="chip__dot"></span>1 running</span>
+                  <span class="chip"><span class="chip__dot"></span>2 queued</span>
+                </div>
+              </div>
+              <div class="pipeline">
+                <div class="stage stage--done">
+                  <div class="stage__rail"><div class="stage__node">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div></div>
+                  <div class="stage__body">
+                    <div class="stage__head">
+                      <div>
+                        <div class="stage__title">discover</div>
+                        <div class="stage__sub">Mined commit history for solver-style fixes · 412 candidates</div>
+                      </div>
+                      <span class="stage__meta">12s &middot; <code style="background: var(--surface-2); padding: 1px 5px; border-radius: 4px;">discover.json</code></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="stage stage--done">
+                  <div class="stage__rail"><div class="stage__node">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div></div>
+                  <div class="stage__body">
+                    <div class="stage__head">
+                      <div>
+                        <div class="stage__title">curate</div>
+                        <div class="stage__sub">Filtered for tractable single-PR fixes · 188 tasks selected</div>
+                      </div>
+                      <span class="stage__meta">04s &middot; <code style="background: var(--surface-2); padding: 1px 5px; border-radius: 4px;">tasks.parquet</code></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="stage stage--done">
+                  <div class="stage__rail"><div class="stage__node">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div></div>
+                  <div class="stage__body">
+                    <div class="stage__head">
+                      <div>
+                        <div class="stage__title">materialize</div>
+                        <div class="stage__sub">Reproducible workspaces with frozen deps · 188 sandboxes</div>
+                      </div>
+                      <span class="stage__meta">38s &middot; <code style="background: var(--surface-2); padding: 1px 5px; border-radius: 4px;">workspaces/</code></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="stage stage--done">
+                  <div class="stage__rail"><div class="stage__node">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div></div>
+                  <div class="stage__body">
+                    <div class="stage__head">
+                      <div>
+                        <div class="stage__title">validate</div>
+                        <div class="stage__sub">Confirmed every task is solvable from the failing baseline</div>
+                      </div>
+                      <span class="stage__meta">22s &middot; <code style="background: var(--surface-2); padding: 1px 5px; border-radius: 4px;">validation.json</code></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="stage stage--running">
+                  <div class="stage__rail"><div class="stage__node">5</div></div>
+                  <div class="stage__body">
+                    <div class="stage__head">
+                      <div>
+                        <div class="stage__title">execute</div>
+                        <div class="stage__sub">Running claude-sonnet-4-6 against each task in isolation</div>
+                      </div>
+                      <span class="stage__meta">running &middot; ~3m left</span>
+                    </div>
+                    <div class="stage__bar"><div class="stage__bar-fill" id="execBar" style="width: 68%;"></div></div>
+                  </div>
+                </div>
+
+                <div class="stage stage--queued">
+                  <div class="stage__rail"><div class="stage__node">6</div></div>
+                  <div class="stage__body">
+                    <div class="stage__head">
+                      <div>
+                        <div class="stage__title">analyze</div>
+                        <div class="stage__sub">Score patches, attribute cost, classify failure modes</div>
+                      </div>
+                      <span class="stage__meta">queued</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="stage stage--queued">
+                  <div class="stage__rail"><div class="stage__node">7</div></div>
+                  <div class="stage__body">
+                    <div class="stage__head">
+                      <div>
+                        <div class="stage__title">report</div>
+                        <div class="stage__sub">Publish signed PDF + machine-readable artifact</div>
+                      </div>
+                      <span class="stage__meta">queued</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <div class="stack">
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Live log</div>
+                    <div class="card__sub">stage: execute &middot; tail -f</div>
+                  </div>
+                  <button class="btn btn--ghost btn--xs" type="button">Pause</button>
+                </div>
+                <div class="log" id="logTail">
+                  <div class="log__line"><span class="log__time">00:03:11</span><span class="log__lvl log__lvl--ok">OK</span><span class="log__msg">task <b>t-0127</b> &mdash; pass &middot; patch applied, tests green &middot; 1 file, +12 −4 &middot; $0.014</span></div>
+                  <div class="log__line"><span class="log__time">00:03:09</span><span class="log__lvl log__lvl--info">RUN</span><span class="log__msg">task <b>t-0128</b> started &mdash; <code style="color: rgba(220,226,245,0.7);">fix(billing): nil-safe currency code</code></span></div>
+                  <div class="log__line"><span class="log__time">00:03:04</span><span class="log__lvl log__lvl--ok">OK</span><span class="log__msg">task <b>t-0126</b> &mdash; pass &middot; 2 files, +28 −9 &middot; $0.021</span></div>
+                  <div class="log__line"><span class="log__time">00:02:58</span><span class="log__lvl log__lvl--warn">FAIL</span><span class="log__msg">task <b>t-0125</b> &mdash; tests red &middot; <code style="color: rgba(220,226,245,0.7);">test_refund_partial</code> mismatch on rounding</span></div>
+                  <div class="log__line"><span class="log__time">00:02:48</span><span class="log__lvl log__lvl--ok">OK</span><span class="log__msg">task <b>t-0124</b> &mdash; pass &middot; 1 file, +6 −2 &middot; $0.011</span></div>
+                  <div class="log__line"><span class="log__time">00:02:41</span><span class="log__lvl log__lvl--ok">OK</span><span class="log__msg">task <b>t-0123</b> &mdash; pass &middot; 4 files, +52 −18 &middot; $0.034</span></div>
+                  <div class="log__line"><span class="log__time">00:02:30</span><span class="log__lvl log__lvl--err">ERR</span><span class="log__msg">task <b>t-0122</b> &mdash; sandbox timeout (90s) &middot; rolled back</span></div>
+                  <div class="log__line"><span class="log__time">00:02:24</span><span class="log__lvl log__lvl--info">RUN</span><span class="log__msg">task <b>t-0123</b> started &mdash; <code style="color: rgba(220,226,245,0.7);">fix(orders): handle empty cart 500</code></span></div>
+                  <div class="log__line"><span class="log__time">00:02:18</span><span class="log__lvl log__lvl--ok">OK</span><span class="log__msg">task <b>t-0121</b> &mdash; pass &middot; 1 file, +9 −3 &middot; $0.009</span></div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Last 5 tasks</div>
+                    <div class="card__sub">Click a task to inspect the patch &amp; fixture</div>
+                  </div>
+                </div>
+                <table class="task-table">
+                  <thead>
+                    <tr><th>ID</th><th>Title</th><th>Outcome</th><th>$</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>t-0127</code></td>
+                      <td><div class="task-table__title">fix(orders): null user agent crash</div></td>
+                      <td><span class="chip chip--em"><span class="chip__dot"></span>pass</span></td>
+                      <td style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink);">$0.014</td>
+                    </tr>
+                    <tr>
+                      <td><code>t-0126</code></td>
+                      <td><div class="task-table__title">fix(orders): retry on transient 502</div></td>
+                      <td><span class="chip chip--em"><span class="chip__dot"></span>pass</span></td>
+                      <td style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink);">$0.021</td>
+                    </tr>
+                    <tr>
+                      <td><code>t-0125</code></td>
+                      <td><div class="task-table__title">fix(billing): refund rounding</div></td>
+                      <td><span class="chip chip--ro"><span class="chip__dot"></span>fail</span></td>
+                      <td style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink);">$0.018</td>
+                    </tr>
+                    <tr>
+                      <td><code>t-0124</code></td>
+                      <td><div class="task-table__title">fix(orders): empty country code</div></td>
+                      <td><span class="chip chip--em"><span class="chip__dot"></span>pass</span></td>
+                      <td style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink);">$0.011</td>
+                    </tr>
+                    <tr>
+                      <td><code>t-0123</code></td>
+                      <td><div class="task-table__title">fix(orders): handle empty cart 500</div></td>
+                      <td><span class="chip chip--em"><span class="chip__dot"></span>pass</span></td>
+                      <td style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink);">$0.034</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================================
+             BUDGETS
+             ============================================================ -->
+        <section class="view" data-view="budgets">
+          <div class="page-head">
+            <div>
+              <span class="kicker">Spend &amp; alerts</span>
+              <h1>$3,210 spent in April · 64% of monthly cap.</h1>
+              <p class="page-head__deck">
+                Budgets are enforced per-repo and per-agent. Overruns pause new runs, never silently swallow them &mdash;
+                you'll always see the artifact that wasn't worth the spend.
+              </p>
+            </div>
+            <div class="page-head__actions">
+              <button class="btn btn--ghost btn--sm" type="button">Export CSV</button>
+              <button class="btn btn--accent btn--sm" type="button">Adjust caps</button>
+            </div>
+          </div>
+
+          <div class="budget-grid">
+            <article class="card">
+              <div class="card__head">
+                <div>
+                  <div class="card__title">Spend by repository</div>
+                  <div class="card__sub">April · ranked by cost · cap visible</div>
+                </div>
+                <div class="seg">
+                  <button class="seg__btn seg__btn--active">$ spent</button>
+                  <button class="seg__btn">$ / solve</button>
+                  <button class="seg__btn">runs</button>
+                </div>
+              </div>
+
+              <div class="stack--sm">
+                <!-- Repo budget bars -->
+                <div>
+                  <div class="row row--between" style="margin-bottom: 6px;">
+                    <span style="font-size: 0.9rem; font-weight: 600; color: var(--ink);">acme/orders-api</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink);">$842 <span style="color: var(--muted);">/ $1,000</span></span>
+                  </div>
+                  <div style="height: 10px; border-radius: 999px; background: rgba(10,12,23,0.05); overflow: hidden; position: relative;">
+                    <div style="height: 100%; width: 84%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: inherit;"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="row row--between" style="margin-bottom: 6px;">
+                    <span style="font-size: 0.9rem; font-weight: 600; color: var(--ink);">acme/billing</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink);">$680 <span style="color: var(--muted);">/ $750</span></span>
+                  </div>
+                  <div style="height: 10px; border-radius: 999px; background: rgba(10,12,23,0.05); overflow: hidden; position: relative;">
+                    <div style="height: 100%; width: 91%; background: linear-gradient(90deg, var(--amber), var(--coral)); border-radius: inherit;"></div>
+                  </div>
+                  <div style="margin-top: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--coral);">⚠ within 10% of cap</div>
+                </div>
+                <div>
+                  <div class="row row--between" style="margin-bottom: 6px;">
+                    <span style="font-size: 0.9rem; font-weight: 600; color: var(--ink);">acme/web-app</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink);">$510 <span style="color: var(--muted);">/ $1,000</span></span>
+                  </div>
+                  <div style="height: 10px; border-radius: 999px; background: rgba(10,12,23,0.05); overflow: hidden; position: relative;">
+                    <div style="height: 100%; width: 51%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: inherit;"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="row row--between" style="margin-bottom: 6px;">
+                    <span style="font-size: 0.9rem; font-weight: 600; color: var(--ink);">acme/inference-rs</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink);">$412 <span style="color: var(--muted);">/ $750</span></span>
+                  </div>
+                  <div style="height: 10px; border-radius: 999px; background: rgba(10,12,23,0.05); overflow: hidden; position: relative;">
+                    <div style="height: 100%; width: 55%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: inherit;"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="row row--between" style="margin-bottom: 6px;">
+                    <span style="font-size: 0.9rem; font-weight: 600; color: var(--ink);">acme/data-pipeline</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink);">$284 <span style="color: var(--muted);">/ $500</span></span>
+                  </div>
+                  <div style="height: 10px; border-radius: 999px; background: rgba(10,12,23,0.05); overflow: hidden; position: relative;">
+                    <div style="height: 100%; width: 57%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: inherit;"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="row row--between" style="margin-bottom: 6px;">
+                    <span style="font-size: 0.9rem; font-weight: 600; color: var(--ink);">acme/legacy-monolith</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: var(--ink);">$92 <span style="color: var(--muted);">/ $1,000</span></span>
+                  </div>
+                  <div style="height: 10px; border-radius: 999px; background: rgba(10,12,23,0.05); overflow: hidden; position: relative;">
+                    <div style="height: 100%; width: 9%; background: linear-gradient(90deg, var(--muted-2), var(--muted)); border-radius: inherit;"></div>
+                  </div>
+                  <div style="margin-top: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--muted);">stale · last run 14d ago</div>
+                </div>
+              </div>
+            </article>
+
+            <div class="stack">
+              <article class="card">
+                <div class="card__head">
+                  <div>
+                    <div class="card__title">Alerts</div>
+                    <div class="card__sub">Live policies on this workspace</div>
+                  </div>
+                </div>
+                <div class="stack--sm">
+                  <div class="budget-rule">
+                    <span class="budget-rule__icon" style="background: rgba(244, 63, 94, 0.1); color: var(--rose);">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 4.5v4.2M8 11.2v.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M2 13L8 3l6 10H2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div>
+                      <div class="budget-rule__title">Pause runs at 100% of monthly cap</div>
+                      <div class="budget-rule__sub">Across all repos · notifies #engineering</div>
+                    </div>
+                    <div class="switch" role="switch" data-on="true" tabindex="0" aria-checked="true"></div>
+                  </div>
+                  <div class="budget-rule">
+                    <span class="budget-rule__icon" style="background: rgba(251, 191, 36, 0.12); color: #b45309;">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 4.5v4.2M8 11.2v.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/></svg>
+                    </span>
+                    <div>
+                      <div class="budget-rule__title">Warn at 80% per-repo cap</div>
+                      <div class="budget-rule__sub">Slack DM to repo owners</div>
+                    </div>
+                    <div class="switch" role="switch" data-on="true" tabindex="0" aria-checked="true"></div>
+                  </div>
+                  <div class="budget-rule">
+                    <span class="budget-rule__icon" style="background: rgba(99, 91, 255, 0.12); color: var(--accent);">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.6"/><path d="M8 5v3l2 1.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    </span>
+                    <div>
+                      <div class="budget-rule__title">Auto-downgrade to cheapest passing model</div>
+                      <div class="budget-rule__sub">When budget at 90% &middot; rollback on regression</div>
+                    </div>
+                    <div class="switch" role="switch" data-on="false" tabindex="0" aria-checked="false"></div>
+                  </div>
+                  <div class="budget-rule">
+                    <span class="budget-rule__icon" style="background: rgba(34, 211, 238, 0.12); color: #0e7490;">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 6h10M3 10h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    </span>
+                    <div>
+                      <div class="budget-rule__title">Weekly digest to finance@</div>
+                      <div class="budget-rule__sub">CSV + signed PDF every Monday 09:00 PT</div>
+                    </div>
+                    <div class="switch" role="switch" data-on="true" tabindex="0" aria-checked="true"></div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card focus-card" style="background: linear-gradient(160deg, #0c0f1f, #050714);">
+                <div class="focus-card__body">
+                  <span class="chip" style="background: rgba(99, 91, 255, 0.18); color: #c4b5fd; border-color: rgba(99, 91, 255, 0.28);">
+                    <span class="chip__dot"></span>Forecast
+                  </span>
+                  <h3 style="margin-top: 12px; font-size: 1.1rem; line-height: 1.3; letter-spacing: -0.015em; color: white; font-weight: 600;">
+                    On track for <b>$4,610</b> this month.
+                  </h3>
+                  <p style="margin-top: 8px; color: rgba(220, 226, 245, 0.7); font-size: 0.88rem; line-height: 1.55;">
+                    Linear trend through the next 11 days. <b style="color: white;">8% under cap</b>, mostly from the
+                    <b style="color: white;">data-pipeline</b> baseline costs front-loaded earlier this week.
+                  </p>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================================
+             Coming-soon stubs for the remaining nav items
+             ============================================================ -->
+        <section class="view" data-view="reports">
+          <div class="page-head">
+            <div>
+              <span class="kicker">Reports</span>
+              <h1>Signed, shareable benchmark reports.</h1>
+              <p class="page-head__deck">
+                Every run produces a PDF + machine-readable artifact you can hand to a CTO, an engineering manager, or your own future self.
+                Below: the most recent published report.
+              </p>
+            </div>
+            <div class="page-head__actions">
+              <a class="btn btn--accent btn--sm" href="sample_report.html" target="_blank" rel="noopener">
+                Open sample report
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </a>
+            </div>
+          </div>
+
+          <div class="empty">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 3.5h8.5L19 8v11.5A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5v-14A1.5 1.5 0 0 1 6.5 4" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M14 3.5V8h5M9 13h6M9 17h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <h3>Reports inbox lives here.</h3>
+            <p style="max-width: 38ch;">Scheduled and one-off reports queue here for review and PDF export. The sample report shows what each run produces.</p>
+          </div>
+        </section>
+
+        <section class="view" data-view="agents">
+          <div class="page-head">
+            <div>
+              <span class="kicker">Agents</span>
+              <h1>Manage agent fleet &amp; credentials.</h1>
+              <p class="page-head__deck">Connect models &amp; harnesses, set per-agent rate limits, and pin model versions for reproducibility.</p>
+            </div>
+          </div>
+          <div class="empty">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="9" r="3.5" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M5 19c1.4-3 4-4.5 7-4.5s5.6 1.5 7 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <h3>Agent registry preview.</h3>
+            <p>Wire up Anthropic, OpenAI, Google, DeepSeek, or a self-hosted endpoint. Each agent gets versioned harness config + observability.</p>
+          </div>
+        </section>
+
+        <section class="view" data-view="team">
+          <div class="page-head">
+            <div>
+              <span class="kicker">Team</span>
+              <h1>14 members in this workspace.</h1>
+              <p class="page-head__deck">Roles, SSO, and audit log live here. Single-pane visibility into who triggered what and approved which spend.</p>
+            </div>
+          </div>
+          <div class="empty">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="17" cy="10.5" r="2.4" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M3 19c1.2-3 3.4-4.5 6-4.5S13.8 16 15 19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <h3>Roster preview.</h3>
+            <p>Per-role permissions: viewer, runner, owner. SSO via Okta, Google, or generic SAML.</p>
+          </div>
+        </section>
+
+        <section class="view" data-view="settings">
+          <div class="page-head">
+            <div>
+              <span class="kicker">Settings</span>
+              <h1>Workspace settings &amp; integrations.</h1>
+              <p class="page-head__deck">Slack &amp; PagerDuty webhooks, S3 artifact mirror, signing keys, and data residency.</p>
+            </div>
+          </div>
+          <div class="empty">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3,3"/>
+            </svg>
+            <h3>Settings preview.</h3>
+            <p>Mockup placeholder &mdash; the live product threads workspace, security, and data-export controls here.</p>
+          </div>
+        </section>
       </main>
     </div>
   </div>
 
-  <!-- placeholder where command palette, modals, notifications get appended -->
+  <!-- ============================================================
+       Command palette (⌘K)
+       ============================================================ -->
+  <div class="cmdk-backdrop" id="cmdkBackdrop" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="cmdk">
+      <div class="cmdk__input-wrap">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="7.2" cy="7.2" r="4.2" stroke="currentColor" stroke-width="1.4"/>
+          <path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <input class="cmdk__input" id="cmdkInput" type="text" placeholder="Search runs, repos, agents, or jump to a page…" autocomplete="off">
+        <span class="cmdk__esc">esc</span>
+      </div>
+      <div class="cmdk__list" id="cmdkList"></div>
+      <div class="cmdk__foot">
+        <span><kbd>↑</kbd><kbd>↓</kbd> navigate &middot; <kbd>↵</kbd> select &middot; <kbd>esc</kbd> close</span>
+        <span style="color: var(--accent);">RepoGauge command bar</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Connect repository modal (3-step wizard)
+       ============================================================ -->
+  <div class="modal-backdrop" id="connectBackdrop" role="dialog" aria-modal="true" aria-label="Connect repository">
+    <div class="modal">
+      <div class="modal__head">
+        <div>
+          <div class="modal__title">Connect a repository</div>
+          <div class="modal__sub">Build a private benchmark from your own commits in under five minutes.</div>
+        </div>
+        <button class="modal__close" id="connectClose" type="button" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal__body">
+        <div class="modal__steps">
+          <div class="modal__step modal__step--active">
+            <span class="modal__step-num">01</span>
+            <span class="modal__step-title">Pick repos</span>
+            <span class="modal__step-sub">From your VCS</span>
+          </div>
+          <div class="modal__step">
+            <span class="modal__step-num">02</span>
+            <span class="modal__step-title">Choose agents</span>
+            <span class="modal__step-sub">Models &amp; harnesses</span>
+          </div>
+          <div class="modal__step">
+            <span class="modal__step-num">03</span>
+            <span class="modal__step-title">Set budget</span>
+            <span class="modal__step-sub">Caps &amp; alerts</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="row" style="gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
+            <button class="btn btn--ghost btn--xs" type="button" style="font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em;">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 .5a7.5 7.5 0 0 0-2.4 14.6c.4.1.5-.2.5-.4v-1.4c-2.1.5-2.5-1-2.5-1-.3-.9-.8-1.1-.8-1.1-.7-.5 0-.5 0-.5.7 0 1.1.7 1.1.7.7 1.1 1.7.8 2.1.6.1-.5.3-.8.5-1-1.6-.2-3.4-.8-3.4-3.7 0-.8.3-1.5.7-2-.1-.2-.3-.9.1-1.9 0 0 .6-.2 2 .8.6-.2 1.2-.2 1.9-.2.6 0 1.3.1 1.9.2 1.4-1 2-.8 2-.8.4 1 .2 1.7.1 1.9.5.5.7 1.2.7 2 0 2.9-1.7 3.5-3.4 3.7.3.2.5.7.5 1.5v2.2c0 .2.1.5.5.4A7.5 7.5 0 0 0 8 .5Z" fill="currentColor"/></svg>
+              GitHub
+            </button>
+            <button class="btn btn--soft btn--xs" type="button" style="font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em;">GitLab</button>
+            <button class="btn btn--soft btn--xs" type="button" style="font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em;">Bitbucket</button>
+            <button class="btn btn--soft btn--xs" type="button" style="font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em;">Self-hosted SSH</button>
+          </div>
+          <div class="repo-pick">
+            <div class="repo-pick__row" data-on="true">
+              <span class="repo-pick__check">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <div>
+                <div class="repo-pick__name">acme/checkout-web</div>
+                <div class="repo-pick__sub">main · last commit 2h ago · 14 contributors</div>
+              </div>
+              <span class="repo-pick__lang"><span class="repo-card__lang" style="background: #f1e05a;"></span>JS · 184k LOC</span>
+            </div>
+            <div class="repo-pick__row" data-on="true">
+              <span class="repo-pick__check">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <div>
+                <div class="repo-pick__name">acme/auth-service</div>
+                <div class="repo-pick__sub">main · last commit 1d ago · 6 contributors</div>
+              </div>
+              <span class="repo-pick__lang"><span class="repo-card__lang" style="background: #00ADD8;"></span>Go · 22k LOC</span>
+            </div>
+            <div class="repo-pick__row" data-on="false">
+              <span class="repo-pick__check">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <div>
+                <div class="repo-pick__name">acme/notifications-rs</div>
+                <div class="repo-pick__sub">main · last commit 3d ago · 4 contributors</div>
+              </div>
+              <span class="repo-pick__lang"><span class="repo-card__lang" style="background: #dea584;"></span>Rust · 18k LOC</span>
+            </div>
+            <div class="repo-pick__row" data-on="false">
+              <span class="repo-pick__check">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <div>
+                <div class="repo-pick__name">acme/internal-tools</div>
+                <div class="repo-pick__sub">main · last commit 6h ago · 11 contributors</div>
+              </div>
+              <span class="repo-pick__lang"><span class="repo-card__lang" style="background: #3178c6;"></span>TS · 64k LOC</span>
+            </div>
+            <div class="repo-pick__row" data-on="false">
+              <span class="repo-pick__check">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <div>
+                <div class="repo-pick__name">acme/edge-router</div>
+                <div class="repo-pick__sub">main · last commit 4d ago · 3 contributors</div>
+              </div>
+              <span class="repo-pick__lang"><span class="repo-card__lang" style="background: #00ADD8;"></span>Go · 8k LOC</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal__foot">
+        <span class="modal__hint"><b style="color: var(--ink); font-weight: 600;">2</b> repositories selected · estimated first-build cost <b style="color: var(--ink); font-weight: 600;">~$3.40</b></span>
+        <div class="row">
+          <button class="btn btn--ghost btn--sm" type="button" id="connectCancel">Cancel</button>
+          <button class="btn btn--accent btn--sm" type="button">
+            Continue
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Notifications panel
+       ============================================================ -->
+  <div class="notif-backdrop" id="notifBackdrop"></div>
+  <aside class="notif" id="notifPanel" aria-label="Notifications">
+    <div class="notif__head">
+      <div>
+        <h3>Notifications</h3>
+        <div style="font-size: 0.78rem; color: var(--muted); margin-top: 2px;">3 unread &middot; 12 in last 24h</div>
+      </div>
+      <div class="row row--gap-4">
+        <button class="btn btn--ghost btn--xs" type="button">Mark all read</button>
+        <button class="modal__close" id="notifClose" type="button" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="notif__list">
+      <div class="notif__row">
+        <div class="notif__top">
+          <div class="row" style="gap: 8px;">
+            <span class="chip chip--ro"><span class="chip__dot"></span>regression</span>
+            <span class="notif__title">Pass rate dropped on billing</span>
+          </div>
+          <span class="notif__time">38m</span>
+        </div>
+        <p class="notif__msg"><b>gemini-2.5-pro</b> dropped <b>5.2 points</b> on <code>billing</code> vs last week. Investigation queued.</p>
+      </div>
+      <div class="notif__row">
+        <div class="notif__top">
+          <div class="row" style="gap: 8px;">
+            <span class="chip chip--am"><span class="chip__dot"></span>budget</span>
+            <span class="notif__title">billing approaching cap</span>
+          </div>
+          <span class="notif__time">3h</span>
+        </div>
+        <p class="notif__msg"><b>$680/$750</b> spent this month. Auto-pause will trigger at 100%.</p>
+      </div>
+      <div class="notif__row">
+        <div class="notif__top">
+          <div class="row" style="gap: 8px;">
+            <span class="chip chip--em"><span class="chip__dot"></span>recommendation</span>
+            <span class="notif__title">Switch orders-api to haiku-4-5</span>
+          </div>
+          <span class="notif__time">5h</span>
+        </div>
+        <p class="notif__msg">Estimated savings <b>$680/mo</b> with under <b>4 points</b> pass-rate drop.</p>
+      </div>
+      <div class="notif__row">
+        <div class="notif__top">
+          <div class="row" style="gap: 8px;">
+            <span class="chip chip--vio"><span class="chip__dot"></span>run</span>
+            <span class="notif__title">Weekly frontier finished</span>
+          </div>
+          <span class="notif__time">7h</span>
+        </div>
+        <p class="notif__msg">5 repos benchmarked, 4 winners shifted, 1 unchanged. Report ready in inbox.</p>
+      </div>
+      <div class="notif__row">
+        <div class="notif__top">
+          <div class="row" style="gap: 8px;">
+            <span class="chip"><span class="chip__dot"></span>team</span>
+            <span class="notif__title">Sara Lin joined the workspace</span>
+          </div>
+          <span class="notif__time">11h</span>
+        </div>
+        <p class="notif__msg">Invited by you · role <b>runner</b>.</p>
+      </div>
+    </div>
+  </aside>
+
+  <script>
+    /* ============================================================
+       Lightweight, vanilla JS — view switching, count-up,
+       command palette, modals, and a faux live run loop.
+       ============================================================ */
+    (function () {
+      const $  = (sel, root = document) => root.querySelector(sel);
+      const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+      /* ---------- View switching ---------- */
+      const labels = {
+        overview:     'Overview',
+        repositories: 'Repositories',
+        runs:         'Run · r-9821',
+        compare:      'Comparisons',
+        reports:      'Reports',
+        budgets:      'Budgets & alerts',
+        agents:       'Agents',
+        team:         'Team',
+        settings:     'Settings',
+      };
+      const setView = (name) => {
+        $$('.view').forEach((v) => v.toggleAttribute('data-active', v.dataset.view === name));
+        $$('.nav__item').forEach((b) => b.classList.toggle('nav__item--active', b.dataset.nav === name));
+        const crumb = $('#crumbCurrent');
+        if (crumb) crumb.textContent = labels[name] || name;
+        // scroll to top of stage
+        const stage = $('#viewStage');
+        if (stage) stage.scrollTop = 0;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+      $$('[data-nav]').forEach((el) => {
+        el.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          setView(el.dataset.nav);
+        });
+      });
+
+      /* ---------- Count-up on KPIs ---------- */
+      const animateCount = (el) => {
+        const target = parseFloat(el.dataset.countup);
+        const isInt = Number.isInteger(target) && !el.dataset.countup.includes('.');
+        const suffix = el.dataset.suffix || '';
+        const dur = 1100;
+        const t0 = performance.now();
+        const tick = (now) => {
+          const t = Math.min(1, (now - t0) / dur);
+          const eased = 1 - Math.pow(1 - t, 3);
+          const v = target * eased;
+          el.textContent = (isInt ? Math.round(v).toString() : v.toFixed(target >= 10 ? 1 : 2)) + suffix;
+          if (t < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      };
+      $$('[data-countup]').forEach(animateCount);
+
+      /* ---------- Reveal on view ---------- */
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => { if (e.isIntersecting) e.target.setAttribute('data-in', ''); });
+      }, { threshold: 0.05 });
+      $$('.reveal').forEach((el) => io.observe(el));
+
+      /* ---------- Spend chart (stacked area) ---------- */
+      const buildSpend = () => {
+        const W = 600, H = 220, pad = 0;
+        const days = 30;
+        // Pseudo-deterministic data for 4 series
+        const seed = (a) => {
+          let x = a; return () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
+        };
+        const r = seed(7);
+        const series = [
+          { color: '#fbbf24', grad: 'g-amber', label: 'haiku' },
+          { color: '#22d3ee', grad: 'g-cyan',  label: 'gemini' },
+          { color: '#10b981', grad: 'none',    label: 'gpt-5-codex' },
+          { color: '#635bff', grad: 'g-violet',label: 'claude' },
+        ];
+        const baseVals = [
+          () => 2 + r() * 4,
+          () => 6 + r() * 8,
+          () => 18 + r() * 18,
+          () => 24 + r() * 28,
+        ];
+        const data = series.map((_, i) => Array.from({ length: days }, baseVals[i]));
+        const stack = data.map(() => Array(days).fill(0));
+        const totals = Array(days).fill(0);
+        for (let d = 0; d < days; d++) {
+          let acc = 0;
+          for (let s = 0; s < series.length; s++) {
+            acc += data[s][d];
+            stack[s][d] = acc;
+            totals[d] = acc;
+          }
+        }
+        const maxY = Math.max(...totals, 230);
+        const x = (i) => (i / (days - 1)) * (W - 12) + 6;
+        const y = (v) => H - 8 - (v / maxY) * (H - 28);
+
+        const stacks = $('#spendStacks');
+        if (!stacks) return;
+        let svg = '';
+        // draw from top (highest stack) down so visible layering builds nicely
+        for (let s = series.length - 1; s >= 0; s--) {
+          const top = stack[s];
+          const bot = s === 0 ? Array(days).fill(0) : stack[s - 1];
+          let path = `M ${x(0)} ${y(top[0])}`;
+          for (let i = 1; i < days; i++) path += ` L ${x(i)} ${y(top[i])}`;
+          for (let i = days - 1; i >= 0; i--) path += ` L ${x(i)} ${y(bot[i])}`;
+          path += ' Z';
+          const fill = series[s].grad === 'none' ? series[s].color : `url(#${series[s].grad})`;
+          const op = series[s].grad === 'none' ? '0.55' : '1';
+          svg += `<path d="${path}" fill="${fill}" opacity="${op}"/>`;
+          // top stroke
+          let strokePath = `M ${x(0)} ${y(top[0])}`;
+          for (let i = 1; i < days; i++) strokePath += ` L ${x(i)} ${y(top[i])}`;
+          svg += `<path d="${strokePath}" fill="none" stroke="${series[s].color}" stroke-width="1.4" opacity="0.85"/>`;
+        }
+        stacks.innerHTML = svg;
+
+        // Hover zones for tooltip
+        const hover = $('#spendHover');
+        const tip = $('#spendTip');
+        if (!hover || !tip) return;
+        const zoneW = (W - 12) / days;
+        let z = '';
+        for (let i = 0; i < days; i++) {
+          z += `<rect x="${x(i) - zoneW/2}" y="0" width="${zoneW}" height="${H}" fill="transparent" data-i="${i}" pointer-events="all" />`;
+          z += `<line x1="${x(i)}" x2="${x(i)}" y1="0" y2="${H}" stroke="rgba(99,91,255,0.22)" stroke-width="1.2" data-line="${i}" opacity="0"/>`;
+          z += `<circle cx="${x(i)}" cy="${y(totals[i])}" r="3.5" fill="#635bff" stroke="white" stroke-width="1.5" data-dot="${i}" opacity="0"/>`;
+        }
+        hover.innerHTML = z;
+        const lines = $$('#spendHover [data-line]');
+        const dots  = $$('#spendHover [data-dot]');
+        $$('#spendHover [data-i]').forEach((rect, idx) => {
+          rect.addEventListener('mouseenter', () => {
+            lines.forEach((l) => l.setAttribute('opacity', '0'));
+            dots.forEach((d)  => d.setAttribute('opacity',  '0'));
+            lines[idx].setAttribute('opacity', '1');
+            dots[idx].setAttribute('opacity', '1');
+            const total = totals[idx];
+            const day = days - idx;
+            tip.innerHTML = `<b>$${total.toFixed(0)} spent</b><code>${day === 1 ? 'today' : day + 'd ago'}</code>`;
+            tip.setAttribute('data-show', '');
+            const parent = tip.parentElement.getBoundingClientRect();
+            const svgEl = $('#spendChart').getBoundingClientRect();
+            const scale = svgEl.width / W;
+            tip.style.left = (svgEl.left - parent.left + x(idx) * scale) + 'px';
+            tip.style.top  = (svgEl.top  - parent.top  + y(total) * (svgEl.height / H)) + 'px';
+          });
+          rect.addEventListener('mouseleave', () => {
+            tip.removeAttribute('data-show');
+            lines.forEach((l) => l.setAttribute('opacity', '0'));
+            dots.forEach((d)  => d.setAttribute('opacity',  '0'));
+          });
+        });
+      };
+      buildSpend();
+      window.addEventListener('resize', () => requestAnimationFrame(buildSpend));
+
+      /* ---------- Heatmap ---------- */
+      const repos = ['orders-api', 'web-app', 'billing', 'inference-rs', 'data-pipeline', 'legacy-monolith'];
+      const langs = ['#3178c6', '#f1e05a', '#00ADD8', '#dea584', '#3572A5', '#b07219'];
+      // [pass%, $/solve, p50 sec] per [repo][agent]
+      const grid = [
+        // orders-api
+        [[71,2.81,38],[68,3.45,52],[63,2.10,44],[54,0.41,22],[49,0.62,31],[null,null,null]],
+        // web-app
+        [[68,1.92,36],[72,2.92,48],[66,2.00,42],[58,0.38,21],[52,0.55,29],[44,0.30,28]],
+        // billing
+        [[58,3.45,48],[61,3.80,56],[53,2.40,52],[46,0.52,28],[null,null,null],[39,0.42,38]],
+        // inference-rs
+        [[54,4.12,68],[51,4.28,72],[null,null,null],[42,0.78,46],[44,0.92,52],[null,null,null]],
+        // data-pipeline
+        [[null,null,null],[null,null,null],[null,null,null],[null,null,null],[null,null,null],[null,null,null]],
+        // legacy-monolith
+        [[42,5.78,82],[48,5.40,76],[44,4.20,68],[36,1.10,38],[33,1.40,46],[28,0.92,42]],
+      ];
+      // color scale (ramp from rose -> amber -> emerald)
+      const lerp = (a, b, t) => a + (b - a) * t;
+      const lerpRGB = (a, b, t) => `rgb(${Math.round(lerp(a[0],b[0],t))},${Math.round(lerp(a[1],b[1],t))},${Math.round(lerp(a[2],b[2],t))})`;
+      const colorFor = (norm) => {
+        if (norm < 0.5) return lerpRGB([244,63,94],[251,191,36], norm * 2);
+        return lerpRGB([251,191,36],[16,185,129], (norm - 0.5) * 2);
+      };
+      const renderHeatmap = (metric = 'pass') => {
+        const tbody = $('#heatmap tbody');
+        if (!tbody) return;
+        const idx = metric === 'pass' ? 0 : metric === 'cost' ? 1 : 2;
+        const allValues = grid.flat().map((c) => c[idx]).filter((v) => v != null);
+        const lo = Math.min(...allValues);
+        const hi = Math.max(...allValues);
+        const invert = metric !== 'pass'; // lower = better for cost & latency
+        let html = '';
+        repos.forEach((repo, rIdx) => {
+          html += `<tr><th><span class="repo-card__lang" style="background: ${langs[rIdx]};"></span>${repo}</th>`;
+          grid[rIdx].forEach((cell, cIdx) => {
+            const v = cell[idx];
+            if (v == null) {
+              html += `<td><div class="hm-cell hm-cell--na"><div class="hm-cell__value">—</div><div class="hm-cell__sub">no data</div></div></td>`;
+              return;
+            }
+            const norm = (v - lo) / (hi - lo || 1);
+            const score = invert ? 1 - norm : norm;
+            const bg = colorFor(score);
+            const colMax = Math.max(...grid.map((r) => r[cIdx][idx]).filter((x) => x != null));
+            const colMin = Math.min(...grid.map((r) => r[cIdx][idx]).filter((x) => x != null));
+            const isBest = (invert ? v === colMin : v === colMax);
+            const valueStr = metric === 'pass' ? `${v}%` : metric === 'cost' ? `$${v.toFixed(2)}` : `${v}s`;
+            const subStr = metric === 'pass' ? `${cell[1] != null ? '$'+cell[1].toFixed(2) : '—'} · ${cell[2] != null ? cell[2]+'s' : '—'}`
+                         : metric === 'cost' ? `${cell[0]}% pass` : `${cell[0]}% pass`;
+            html += `<td><div class="hm-cell ${isBest ? 'hm-cell--best' : ''}" style="background: ${bg};"><div class="hm-cell__value">${valueStr}</div><div class="hm-cell__sub">${subStr}</div></div></td>`;
+          });
+          html += '</tr>';
+        });
+        tbody.innerHTML = html;
+      };
+      renderHeatmap('pass');
+      $$('#hmMetric .seg__btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          $$('#hmMetric .seg__btn').forEach((x) => x.classList.toggle('seg__btn--active', x === b));
+          renderHeatmap(b.dataset.metric);
+        });
+      });
+
+      /* ---------- Generic seg toggle (visual only) ---------- */
+      $$('.seg').forEach((seg) => {
+        if (seg.id === 'hmMetric') return;
+        $$('.seg__btn', seg).forEach((b) => {
+          b.addEventListener('click', () => {
+            $$('.seg__btn', seg).forEach((x) => x.classList.toggle('seg__btn--active', x === b));
+          });
+        });
+      });
+
+      /* ---------- Switches ---------- */
+      $$('.switch').forEach((sw) => {
+        const toggle = () => {
+          const on = sw.dataset.on === 'true';
+          sw.dataset.on = String(!on);
+          sw.setAttribute('aria-checked', String(!on));
+        };
+        sw.addEventListener('click', toggle);
+        sw.addEventListener('keydown', (e) => {
+          if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); }
+        });
+      });
+
+      /* ---------- Live run progress (simulated) ---------- */
+      const runs = [
+        { sel: 'r-9821', val: 68, max: 96, step: 0.55 },
+        { sel: 'r-9822', val: 41, max: 78, step: 0.42 },
+        { sel: 'r-9823', val: 22, max: 60, step: 0.35 },
+      ];
+      setInterval(() => {
+        runs.forEach((r) => {
+          if (r.val < r.max) {
+            r.val = Math.min(r.max, r.val + r.step + Math.random() * 0.4);
+            const row = document.querySelector(`[data-run="${r.sel}"]`);
+            if (!row) return;
+            row.querySelector('[data-bar]').style.width = r.val.toFixed(1) + '%';
+            row.querySelector('[data-pct]').textContent = Math.round(r.val) + '%';
+          }
+        });
+        const exec = $('#execBar');
+        const prog = $('#runProg');
+        if (exec) {
+          const cur = parseFloat(exec.style.width) || 68;
+          const next = Math.min(96, cur + 0.5);
+          exec.style.width = next.toFixed(1) + '%';
+          if (prog) prog.textContent = Math.round(next) + '%';
+        }
+      }, 1400);
+
+      /* ---------- Command palette ---------- */
+      const cmdkBackdrop = $('#cmdkBackdrop');
+      const cmdkInput    = $('#cmdkInput');
+      const cmdkList     = $('#cmdkList');
+
+      const cmds = [
+        { group: 'Pages',   title: 'Overview',                 sub: 'workspace dashboard',  icon: 'home',  action: () => setView('overview') },
+        { group: 'Pages',   title: 'Repositories',             sub: '12 connected',         icon: 'repo',  action: () => setView('repositories') },
+        { group: 'Pages',   title: 'Live runs',                sub: '4 running',            icon: 'play',  action: () => setView('runs') },
+        { group: 'Pages',   title: 'Comparisons',              sub: 'agent face-off',       icon: 'grid',  action: () => setView('compare') },
+        { group: 'Pages',   title: 'Budgets & alerts',         sub: 'spend controls',       icon: 'card',  action: () => setView('budgets') },
+        { group: 'Pages',   title: 'Reports',                  sub: 'signed PDFs',          icon: 'file',  action: () => setView('reports') },
+        { group: 'Actions', title: 'Connect repository',       sub: 'GitHub, GitLab, SSH',  icon: 'plus',  action: () => openConnect() },
+        { group: 'Actions', title: 'Start a new run',          sub: 'pick a repo & agents', icon: 'play',  action: () => openConnect() },
+        { group: 'Actions', title: 'Open notifications',       sub: '3 unread',             icon: 'bell',  action: () => openNotif() },
+        { group: 'Repos',   title: 'orders-api',               sub: 'acme/orders-api',      icon: 'repo',  action: () => setView('repositories') },
+        { group: 'Repos',   title: 'web-app',                  sub: 'acme/web-app',         icon: 'repo',  action: () => setView('repositories') },
+        { group: 'Repos',   title: 'billing',                  sub: 'acme/billing',         icon: 'repo',  action: () => setView('repositories') },
+        { group: 'Repos',   title: 'inference-rs',             sub: 'acme/inference-rs',    icon: 'repo',  action: () => setView('repositories') },
+        { group: 'Agents',  title: 'claude-sonnet-4-6',        sub: 'top performer',        icon: 'agent', action: () => setView('compare') },
+        { group: 'Agents',  title: 'gpt-5-codex',              sub: 'second place',         icon: 'agent', action: () => setView('compare') },
+        { group: 'Agents',  title: 'gemini-2.5-pro',           sub: 'third place',          icon: 'agent', action: () => setView('compare') },
+        { group: 'Agents',  title: 'haiku-4-5',                sub: 'cheapest passing',     icon: 'agent', action: () => setView('compare') },
+      ];
+
+      const ICONS = {
+        home:  '<rect x="3" y="3" width="7" height="9" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="3" width="7" height="5" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="12" width="7" height="9" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="16" width="7" height="5" rx="2" stroke="currentColor" stroke-width="1.6"/>',
+        repo:  '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H18a2 2 0 0 1 2 2v15a1 1 0 0 1-1 1H6.5A1.5 1.5 0 0 1 5 19.5v-15Z" stroke="currentColor" stroke-width="1.6"/><path d="M5 17.5A1.5 1.5 0 0 1 6.5 16H20" stroke="currentColor" stroke-width="1.6"/>',
+        play:  '<path d="M7 5l11 7-11 7V5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
+        grid:  '<rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M3 9h18M9 3v18" stroke="currentColor" stroke-width="1.6"/>',
+        card:  '<rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3 10h18" stroke="currentColor" stroke-width="1.6"/>',
+        file:  '<path d="M6 3.5h8.5L19 8v11.5A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5v-14A1.5 1.5 0 0 1 6.5 4" stroke="currentColor" stroke-width="1.6"/>',
+        plus:  '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+        bell:  '<path d="M6 16V11a6 6 0 1 1 12 0v5l1.6 2H4.4L6 16Z" stroke="currentColor" stroke-width="1.6"/><path d="M10 21h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+        agent: '<circle cx="12" cy="9" r="3.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 19c1.4-3 4-4.5 7-4.5s5.6 1.5 7 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+      };
+
+      const renderCmdk = (q = '') => {
+        const filtered = cmds.filter((c) =>
+          c.title.toLowerCase().includes(q.toLowerCase()) ||
+          c.sub.toLowerCase().includes(q.toLowerCase()) ||
+          c.group.toLowerCase().includes(q.toLowerCase())
+        );
+        const grouped = {};
+        filtered.forEach((c) => { (grouped[c.group] = grouped[c.group] || []).push(c); });
+        let html = '';
+        let idx = 0;
+        Object.keys(grouped).forEach((g) => {
+          html += `<div class="cmdk__group">${g}</div>`;
+          grouped[g].forEach((c) => {
+            html += `<div class="cmdk__row" data-idx="${idx}" data-active="${idx === 0 ? 'true' : 'false'}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">${ICONS[c.icon] || ''}</svg>
+              <div><div class="cmdk__row-title">${c.title}</div><div class="cmdk__row-sub">${c.sub}</div></div>
+              <span class="cmdk__hint">${c.group}</span>
+            </div>`;
+            idx++;
+          });
+        });
+        if (filtered.length === 0) {
+          html = `<div style="padding: 24px; text-align: center; color: var(--muted); font-size: 0.9rem;">No matches for "${q}"</div>`;
+        }
+        cmdkList.innerHTML = html;
+        // wire row clicks
+        $$('.cmdk__row', cmdkList).forEach((row) => {
+          const i = parseInt(row.dataset.idx, 10);
+          row.addEventListener('click', () => { filtered[i].action(); closeCmdk(); });
+        });
+      };
+      const openCmdk = () => {
+        cmdkBackdrop.setAttribute('data-open', '');
+        cmdkInput.value = '';
+        renderCmdk('');
+        setTimeout(() => cmdkInput.focus(), 60);
+      };
+      const closeCmdk = () => cmdkBackdrop.removeAttribute('data-open');
+      $('#openCmdk')?.addEventListener('click', openCmdk);
+      cmdkInput?.addEventListener('input', (e) => renderCmdk(e.target.value));
+      cmdkBackdrop?.addEventListener('click', (e) => { if (e.target === cmdkBackdrop) closeCmdk(); });
+
+      let activeRow = 0;
+      cmdkInput?.addEventListener('keydown', (e) => {
+        const rows = $$('.cmdk__row', cmdkList);
+        if (!rows.length) return;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          activeRow = (activeRow + 1) % rows.length;
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          activeRow = (activeRow - 1 + rows.length) % rows.length;
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          rows[activeRow]?.click();
+          return;
+        } else {
+          activeRow = 0;
+        }
+        rows.forEach((r, i) => r.dataset.active = String(i === activeRow));
+        rows[activeRow]?.scrollIntoView({ block: 'nearest' });
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+          e.preventDefault();
+          cmdkBackdrop.hasAttribute('data-open') ? closeCmdk() : openCmdk();
+        } else if (e.key === 'Escape') {
+          closeCmdk();
+          closeConnect();
+          closeNotif();
+        }
+      });
+
+      /* ---------- Connect modal ---------- */
+      const connectBack = $('#connectBackdrop');
+      const openConnect  = () => connectBack.setAttribute('data-open', '');
+      const closeConnect = () => connectBack.removeAttribute('data-open');
+      $('#openConnect')?.addEventListener('click', openConnect);
+      $('#newRunBtn')?.addEventListener('click', openConnect);
+      $('#connectClose')?.addEventListener('click', closeConnect);
+      $('#connectCancel')?.addEventListener('click', closeConnect);
+      $$('[data-open-connect]').forEach((el) => el.addEventListener('click', openConnect));
+      connectBack?.addEventListener('click', (e) => { if (e.target === connectBack) closeConnect(); });
+
+      // repo-pick toggle
+      $$('.repo-pick__row').forEach((row) => {
+        row.addEventListener('click', () => {
+          row.dataset.on = row.dataset.on === 'true' ? 'false' : 'true';
+        });
+      });
+
+      /* ---------- Notifications ---------- */
+      const notifBack = $('#notifBackdrop');
+      const notifPanel = $('#notifPanel');
+      const openNotif  = () => { notifBack.setAttribute('data-open', ''); notifPanel.setAttribute('data-open', ''); };
+      const closeNotif = () => { notifBack.removeAttribute('data-open'); notifPanel.removeAttribute('data-open'); };
+      $('#openNotif')?.addEventListener('click', openNotif);
+      $('#notifClose')?.addEventListener('click', closeNotif);
+      notifBack?.addEventListener('click', closeNotif);
+    })();
+  </script>
 </body>
 </html>
