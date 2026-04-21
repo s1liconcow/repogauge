@@ -8,7 +8,9 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+source "$SCRIPT_DIR/lib/gauge_common.sh"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/codex-uv-cache}"
 OUT_DIR="$REPO_ROOT/out"
 # NOTE: --out must be a path inside the repo so that the export step can
@@ -37,67 +39,36 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-MINE_OUT="$OUT_DIR/mine"
-REVIEW_OUT="$OUT_DIR/review"
-EXPORT_OUT="$OUT_DIR/export"
-EVAL_OUT="$OUT_DIR/eval"
+mkdir -p "$OUT_DIR"
+OUT_DIR_ABS="$(realpath "$OUT_DIR")"
+REPO_ROOT_ABS="$(realpath "$REPO_ROOT")"
+rg_require_out_inside_repo "$OUT_DIR_ABS" "$REPO_ROOT_ABS"
 
-echo "==> mine: scanning up to $MAX_COMMITS commits"
-uv run repogauge mine "$REPO_ROOT" \
-    --out "$MINE_OUT" \
-    --max-commits "$MAX_COMMITS" \
-    --llm-mode off
+rg_run_mine_review_export "$REPO_ROOT_ABS" "$OUT_DIR_ABS" "$MAX_COMMITS" "$DECISIONS_FILE"
 
-echo "==> review: applying decisions"
-REVIEW_ARGS=(review "$MINE_OUT/candidates.jsonl" --out "$REVIEW_OUT" --llm-mode off)
-if [[ -n "$DECISIONS_FILE" ]]; then
-    REVIEW_ARGS+=(--decisions "$DECISIONS_FILE")
-fi
-uv run repogauge "${REVIEW_ARGS[@]}"
-
-echo "==> export: materializing dataset"
-uv run repogauge export "$REVIEW_OUT/reviewed.jsonl" \
-    --out "$EXPORT_OUT" \
-    --llm-mode off
+EXPORT_OUT="$OUT_DIR_ABS/export"
+EVAL_OUT="$OUT_DIR_ABS/eval"
 
 echo "==> eval: running gold evaluation"
-EVAL_ARGS=(
-    eval "$EXPORT_OUT"
-    --gold
-    --out "$EVAL_OUT"
-    --jobs "$JOBS"
-    --timeout "$EVAL_TIMEOUT"
-    --container-runtime "$EVAL_CONTAINER_RUNTIME"
-)
-if [[ -n "$EVAL_CONTAINER_HOST" ]]; then
-    EVAL_ARGS+=(--container-host "$EVAL_CONTAINER_HOST")
-fi
-if uv run repogauge "${EVAL_ARGS[@]}"; then
+if rg_run_eval_gold \
+    "$EXPORT_OUT" \
+    "$EVAL_OUT" \
+    "$JOBS" \
+    "$EVAL_TIMEOUT" \
+    "$EVAL_CONTAINER_RUNTIME" \
+    "$EVAL_CONTAINER_HOST"; then
     EVAL_OK=1
 else
     EVAL_OK=0
 fi
 
 echo ""
+rg_print_common_artifacts "$OUT_DIR_ABS"
 if [[ "$EVAL_OK" -eq 1 ]]; then
-    echo "Artifacts written to $OUT_DIR:"
-    echo "  mine/repo_profile.json"
-    echo "  mine/candidates.jsonl"
-    echo "  review/reviewed.jsonl"
-    echo "  review/review.html"
-    echo "  export/dataset/dataset.jsonl"
-    echo "  export/dataset/predictions.gold.jsonl"
     echo "  eval/dataset.resolved.jsonl"
     echo "  eval/predictions.resolved.jsonl"
     echo "  eval/validation.jsonl"
 else
-    echo "Artifacts written to $OUT_DIR:"
-    echo "  mine/repo_profile.json"
-    echo "  mine/candidates.jsonl"
-    echo "  review/reviewed.jsonl"
-    echo "  review/review.html"
-    echo "  export/dataset/dataset.jsonl"
-    echo "  export/dataset/predictions.gold.jsonl"
     echo ""
     echo "WARNING: eval step failed (swebench not installed — run 'pip install swebench' to enable harness evaluation)"
 fi

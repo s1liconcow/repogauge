@@ -12,6 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/gauge_common.sh"
 REPOGAUGE_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 CALLER_PWD="$PWD"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/codex-uv-cache}"
@@ -121,13 +122,8 @@ fi
 mkdir -p "$OUT_DIR"
 OUT_DIR_ABS="$(realpath "$OUT_DIR")"
 SAMPLE_REPO_ROOT_ABS="$(realpath "$SAMPLE_REPO_ROOT")"
-if [[ "$OUT_DIR_ABS" != "$SAMPLE_REPO_ROOT_ABS" && "$OUT_DIR_ABS" != "$SAMPLE_REPO_ROOT_ABS/"* ]]; then
-    echo "--out must live inside the sample repository root: $SAMPLE_REPO_ROOT_ABS" >&2
-    exit 1
-fi
+rg_require_out_inside_repo "$OUT_DIR_ABS" "$SAMPLE_REPO_ROOT_ABS"
 
-MINE_OUT="$OUT_DIR_ABS/mine"
-REVIEW_OUT="$OUT_DIR_ABS/review"
 EXPORT_OUT="$OUT_DIR_ABS/export"
 SAMPLE_DATASET_DIR="$OUT_DIR_ABS/sample_dataset"
 EVAL_OUT="$OUT_DIR_ABS/eval"
@@ -141,23 +137,7 @@ echo "==> out: $OUT_DIR_ABS"
 echo "==> matrix: $MATRIX_PATH"
 echo "==> max instances: $MAX_INSTANCES"
 
-echo "==> mine: scanning up to $MAX_COMMITS commits"
-uv run repogauge mine "$SAMPLE_REPO_ROOT_ABS" \
-    --out "$MINE_OUT" \
-    --max-commits "$MAX_COMMITS" \
-    --llm-mode off
-
-echo "==> review: applying decisions"
-REVIEW_ARGS=(review "$MINE_OUT/candidates.jsonl" --out "$REVIEW_OUT" --llm-mode off)
-if [[ -n "$DECISIONS_FILE" ]]; then
-    REVIEW_ARGS+=(--decisions "$DECISIONS_FILE")
-fi
-uv run repogauge "${REVIEW_ARGS[@]}"
-
-echo "==> export: materializing dataset"
-uv run repogauge export "$REVIEW_OUT/reviewed.jsonl" \
-    --out "$EXPORT_OUT" \
-    --llm-mode off
+rg_run_mine_review_export "$SAMPLE_REPO_ROOT_ABS" "$OUT_DIR_ABS" "$MAX_COMMITS" "$DECISIONS_FILE"
 
 echo "==> sample: selecting first $MAX_INSTANCES exported instance(s)"
 mkdir -p "$SAMPLE_DATASET_DIR"
@@ -212,19 +192,13 @@ PY
 echo "==> sample: selected $SELECTED_COUNT instance(s)"
 
 echo "==> eval: running gold evaluation"
-EVAL_ARGS=(
-    eval "$SAMPLE_DATASET_DIR"
-    --gold
-    --out "$EVAL_OUT"
-    --jobs "$JOBS"
-    --timeout "$EVAL_TIMEOUT"
-    --container-runtime "$EVAL_CONTAINER_RUNTIME"
-    --llm-mode off
-)
-if [[ -n "$EVAL_CONTAINER_HOST" ]]; then
-    EVAL_ARGS+=(--container-host "$EVAL_CONTAINER_HOST")
-fi
-uv run repogauge "${EVAL_ARGS[@]}"
+rg_run_eval_gold \
+    "$SAMPLE_DATASET_DIR" \
+    "$EVAL_OUT" \
+    "$JOBS" \
+    "$EVAL_TIMEOUT" \
+    "$EVAL_CONTAINER_RUNTIME" \
+    "$EVAL_CONTAINER_HOST"
 
 echo "==> run: executing solver matrix"
 RUN_ARGS=(
@@ -273,13 +247,7 @@ else
 fi
 
 echo ""
-echo "Artifacts written to $OUT_DIR_ABS:"
-echo "  mine/repo_profile.json"
-echo "  mine/candidates.jsonl"
-echo "  review/reviewed.jsonl"
-echo "  review/review.html"
-echo "  export/dataset/dataset.jsonl"
-echo "  export/dataset/predictions.gold.jsonl"
+rg_print_common_artifacts "$OUT_DIR_ABS"
 echo "  sample_dataset/dataset.jsonl"
 echo "  sample_dataset/predictions.gold.jsonl"
 echo "  eval/dataset.resolved.jsonl"
