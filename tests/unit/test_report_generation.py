@@ -358,6 +358,16 @@ def test_analysis_report_falls_back_to_attempt_exit_reason(tmp_path: Path) -> No
             attempt_state="invalid_patch",
             exit_reason="invalid patch: no unified diff found in model output",
             model_patch="",
+            metadata={
+                "telemetry": [
+                    {
+                        "error": {
+                            "name": "UnknownError",
+                            "data": {"message": "Model not found: example/model."},
+                        }
+                    }
+                ]
+            },
         ),
         _attempt_row(
             "solver-b",
@@ -391,11 +401,11 @@ def test_analysis_report_falls_back_to_attempt_exit_reason(tmp_path: Path) -> No
         metadata={"run_root": "/tmp/run"},
     )
 
-    assert report["failure_reason_breakdown"][0]["reason"] == "invalid_patch"
-    assert report["attempt_browser"]["instances"][0]["solvers"][0]["failure_reason"] in {
-        "",
-        "invalid_patch",
-    }
+    assert report["failure_reason_breakdown"][0]["reason"] == "model_not_found"
+    assert (
+        report["attempt_browser"]["instances"][0]["solvers"][0]["failure_reason"]
+        == "model_not_found"
+    )
 
     html_path = tmp_path / "report.html"
     write_summary_html(
@@ -406,7 +416,7 @@ def test_analysis_report_falls_back_to_attempt_exit_reason(tmp_path: Path) -> No
         report=report,
     )
     html = html_path.read_text(encoding="utf-8")
-    assert "invalid_patch" in html
+    assert "model_not_found" in html
     assert "invalid patch: no unified diff found in model output" in html
 
 

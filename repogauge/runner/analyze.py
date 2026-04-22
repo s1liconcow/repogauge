@@ -625,6 +625,21 @@ def _normalize_failure_reason_label(value: Any) -> str:
     return raw
 
 
+def _telemetry_failure_reason(row: Mapping[str, Any]) -> str:
+    for event in _telemetry_events(row):
+        error = event.get("error")
+        if not isinstance(error, Mapping):
+            continue
+        data = error.get("data")
+        message = ""
+        if isinstance(data, Mapping):
+            message = _coerce_str(data.get("message"))
+        reason = _normalize_failure_reason_label(message or error.get("name"))
+        if reason:
+            return reason
+    return ""
+
+
 def _row_failure_reason(row: Mapping[str, Any]) -> str:
     reason = _coerce_str(row.get("failure_reason"))
     if reason:
@@ -632,9 +647,14 @@ def _row_failure_reason(row: Mapping[str, Any]) -> str:
     reason = _coerce_str(row.get("reason"))
     if reason:
         return reason
+    telemetry_reason = _telemetry_failure_reason(row)
     exit_reason = _normalize_failure_reason_label(row.get("exit_reason"))
+    if telemetry_reason and exit_reason == "invalid_patch":
+        return telemetry_reason
     if exit_reason:
         return exit_reason
+    if telemetry_reason:
+        return telemetry_reason
     attempt_state = _coerce_str(row.get("attempt_state")).strip().lower()
     if attempt_state in {"failed", "invalid_patch", "timed_out"}:
         return _normalize_failure_reason_label(attempt_state)
