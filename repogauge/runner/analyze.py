@@ -608,12 +608,37 @@ def _row_outcome_label(row: Mapping[str, Any]) -> str:
     return "unknown"
 
 
+def _normalize_failure_reason_label(value: Any) -> str:
+    raw = _coerce_str(value).strip()
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    normalized = lowered.replace("-", "_").replace(" ", "_")
+    if lowered.startswith("invalid patch:") or normalized == "invalid_patch":
+        return "invalid_patch"
+    if "timeout" in lowered or normalized == "timed_out":
+        return "timeout"
+    if "hit your limit" in lowered or "rate limit" in lowered:
+        return "rate_limit"
+    if "model not found" in lowered:
+        return "model_not_found"
+    return raw
+
+
 def _row_failure_reason(row: Mapping[str, Any]) -> str:
     reason = _coerce_str(row.get("failure_reason"))
     if reason:
         return reason
     reason = _coerce_str(row.get("reason"))
-    return reason
+    if reason:
+        return reason
+    exit_reason = _normalize_failure_reason_label(row.get("exit_reason"))
+    if exit_reason:
+        return exit_reason
+    attempt_state = _coerce_str(row.get("attempt_state")).strip().lower()
+    if attempt_state in {"failed", "invalid_patch", "timed_out"}:
+        return _normalize_failure_reason_label(attempt_state)
+    return ""
 
 
 def _build_failure_breakdown(
@@ -910,6 +935,7 @@ def build_attempt_browser(
                 "solver_id": solver_id,
                 "attempt_id": _coerce_str(row.get("attempt_id")),
                 "attempt_state": _coerce_str(row.get("attempt_state")),
+                "exit_reason": _coerce_str(row.get("exit_reason")),
                 "resolved": bool(row.get("resolved")),
                 "harness_outcome": _row_outcome_label(row),
                 "failure_reason": _row_failure_reason(row),
@@ -1236,6 +1262,8 @@ def _resolution_summary_to_dict(
     ]
     payload["group_by"] = [dimension for dimension, _ in summary.group]
     payload["group_values"] = {dimension: value for dimension, value in summary.group}
+    for dimension, value in summary.group:
+        payload.setdefault(dimension, value)
     payload["group_json"] = json.dumps(payload["group"])
     return payload
 
@@ -1620,6 +1648,7 @@ def write_summary_html(
         max_cost = max(costs)
         min_rate = min(rates)
         max_rate = max(rates)
+        use_absolute_rate_scale = 0.0 <= min_rate and max_rate <= 1.0
         palette = (
             "#635bff",
             "#22d3ee",
@@ -1639,21 +1668,19 @@ def write_summary_html(
             )
 
         def y_pos(rate: float) -> float:
+            if use_absolute_rate_scale:
+                return margin_top + plot_height - (rate * plot_height)
             if max_rate == min_rate:
-                if 0.0 <= max_rate <= 1.0:
-                    return margin_top + plot_height - (rate * plot_height)
                 return margin_top + plot_height / 2
-            return (
-                margin_top
-                + plot_height
-                - (((rate - min_rate) / (max_rate - min_rate)) * plot_height)
+            return margin_top + plot_height - (
+                ((rate - min_rate) / (max_rate - min_rate)) * plot_height
             )
 
         y_ticks = []
         for step in range(0, 5):
             tick_rate = (
                 step / 4
-                if max_rate <= 1
+                if use_absolute_rate_scale
                 else min_rate + (((max_rate - min_rate) / 4) * step)
             )
             y = margin_top + plot_height - (plot_height / 4) * step
@@ -1909,6 +1936,7 @@ def write_summary_html(
                 harness = _row_outcome_label(solver)
                 attempt_state = _coerce_str(solver.get("attempt_state")) or "unknown"
                 failure_reason = _row_failure_reason(solver)
+                exit_reason = _coerce_str(solver.get("exit_reason")).strip()
                 meta_rows = [
                     ("Harness", harness),
                     ("Attempt State", attempt_state),
@@ -1920,6 +1948,8 @@ def write_summary_html(
                 ]
                 if failure_reason:
                     meta_rows.append(("Failure Reason", failure_reason))
+                if exit_reason and exit_reason != failure_reason:
+                    meta_rows.append(("Exit Detail", exit_reason.splitlines()[0]))
                 meta_html = "".join(
                     f"<div><dt>{html_escape(k)}</dt><dd>{html_escape(v)}</dd></div>"
                     for k, v in meta_rows

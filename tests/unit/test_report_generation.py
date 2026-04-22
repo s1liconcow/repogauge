@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 from repogauge.runner.analyze import (
     build_analysis_report,
@@ -344,3 +345,149 @@ def test_analysis_report_prefers_local_eval_reason_over_unknown(tmp_path: Path) 
     )
     html = html_path.read_text(encoding="utf-8")
     assert "no_fail_to_pass" in html
+
+
+def test_analysis_report_falls_back_to_attempt_exit_reason(tmp_path: Path) -> None:
+    attempts = [
+        _attempt_row(
+            "solver-a",
+            "inst-1",
+            duration_ms=10,
+            cost=0.0,
+            problem_statement="Attempt-side failure reason should surface.",
+            attempt_state="invalid_patch",
+            exit_reason="invalid patch: no unified diff found in model output",
+            model_patch="",
+        ),
+        _attempt_row(
+            "solver-b",
+            "inst-1",
+            duration_ms=10,
+            cost=1.0,
+            problem_statement="Control solver resolves the task.",
+            usage={"input_tokens": 100, "output_tokens": 10},
+            attempt_state="succeeded",
+            model_patch="diff --git a/a.py b/a.py\n+print('ok')\n",
+        ),
+    ]
+    instance_results = [
+        _eval_row("solver-a", "inst-1", harness_outcome="unknown", resolved=False),
+        _eval_row("solver-b", "inst-1", harness_outcome="resolved", resolved=True),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+    )
+    report = build_analysis_report(
+        attempts=attempts,
+        instance_results=instance_results,
+        grouped_summaries=summaries,
+        solver_summaries=summaries,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+        metadata={"run_root": "/tmp/run"},
+    )
+
+    assert report["failure_reason_breakdown"][0]["reason"] == "invalid_patch"
+    assert report["attempt_browser"]["instances"][0]["solvers"][0]["failure_reason"] in {
+        "",
+        "invalid_patch",
+    }
+
+    html_path = tmp_path / "report.html"
+    write_summary_html(
+        html_path,
+        summaries,
+        group_by=("solver_id",),
+        metadata={"run_root": "/tmp/run"},
+        report=report,
+    )
+    html = html_path.read_text(encoding="utf-8")
+    assert "invalid_patch" in html
+    assert "invalid patch: no unified diff found in model output" in html
+
+
+def test_solver_frontier_uses_absolute_percent_scale(tmp_path: Path) -> None:
+    attempts = [
+        _attempt_row(
+            "solver-high",
+            "inst-1",
+            duration_ms=10,
+            cost=1.0,
+            problem_statement="High solver resolves all tasks.",
+            usage={"input_tokens": 100, "output_tokens": 10},
+            attempt_state="succeeded",
+            model_patch="diff --git a/a.py b/a.py\n+print('high')\n",
+        ),
+        _attempt_row(
+            "solver-high",
+            "inst-2",
+            duration_ms=11,
+            cost=1.0,
+            problem_statement="High solver resolves all tasks.",
+            usage={"input_tokens": 110, "output_tokens": 12},
+            attempt_state="succeeded",
+            model_patch="diff --git a/b.py b/b.py\n+print('high-2')\n",
+        ),
+        _attempt_row(
+            "solver-mid",
+            "inst-1",
+            duration_ms=12,
+            cost=2.0,
+            problem_statement="Mid solver misses one task.",
+            usage={"input_tokens": 120, "output_tokens": 14},
+            attempt_state="succeeded",
+            model_patch="diff --git a/c.py b/c.py\n+print('mid')\n",
+        ),
+        _attempt_row(
+            "solver-mid",
+            "inst-2",
+            duration_ms=13,
+            cost=2.0,
+            problem_statement="Mid solver misses one task.",
+            attempt_state="failed",
+            exit_reason="rate limit reached",
+            model_patch="",
+        ),
+    ]
+    instance_results = [
+        _eval_row("solver-high", "inst-1", harness_outcome="resolved", resolved=True),
+        _eval_row("solver-high", "inst-2", harness_outcome="resolved", resolved=True),
+        _eval_row("solver-mid", "inst-1", harness_outcome="resolved", resolved=True),
+        _eval_row("solver-mid", "inst-2", harness_outcome="unknown", resolved=False),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+    )
+    report = build_analysis_report(
+        attempts=attempts,
+        instance_results=instance_results,
+        grouped_summaries=summaries,
+        solver_summaries=summaries,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+        metadata={"run_root": "/tmp/run"},
+    )
+
+    html_path = tmp_path / "report.html"
+    write_summary_html(
+        html_path,
+        summaries,
+        group_by=("solver_id",),
+        metadata={"run_root": "/tmp/run"},
+        report=report,
+    )
+    html = html_path.read_text(encoding="utf-8")
+    match = re.search(
+        r'<circle cx="[^"]+" cy="([^"]+)"[^>]*><title>solver-mid \| resolve 50\.0%',
+        html,
+    )
+    assert match is not None
+    assert float(match.group(1)) < 250.0
