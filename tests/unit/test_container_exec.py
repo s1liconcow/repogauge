@@ -88,7 +88,7 @@ def test_local_repo_setup_commands_strip_remote_clone_bootstrap() -> None:
         "git config --global --add safe.directory /testbed || true",
         "chmod -R a+rwX /testbed",
         "cd /testbed",
-        "pip install uv",
+        "command -v uv >/dev/null || pip install uv",
         "uv sync --active --all-groups",
     )
 
@@ -104,7 +104,7 @@ def test_adapter_setup_commands_install_uv_when_needed() -> None:
         "git config --global --add safe.directory /testbed || true",
         "chmod -R 777 /testbed || true",
         "cd /testbed",
-        "pip install uv",
+        "command -v uv >/dev/null || pip install uv",
         "uv sync --active --all-groups",
         "python -m pip install pytest",
     )

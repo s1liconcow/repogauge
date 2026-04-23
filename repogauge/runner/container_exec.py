@@ -272,6 +272,8 @@ def _local_repo_setup_commands(test_spec) -> tuple[str, ...]:
             continue
         if command == f"chmod -R 777 {DOCKER_WORKDIR}":
             command = f"chmod -R a+rwX {DOCKER_WORKDIR}"
+        if command == "pip install uv":
+            command = "command -v uv >/dev/null || pip install uv"
         commands.append(command)
     if not commands:
         return ()
@@ -618,7 +620,7 @@ def _adapter_setup_commands(adapter_spec: Mapping[str, object]) -> tuple[str, ..
 
     install_text = "\n".join([*pre_install, *install, *build])
     if "uv" in install_text and "pip install uv" not in pre_install:
-        pre_install = ["pip install uv", *pre_install]
+        pre_install = ["command -v uv >/dev/null || pip install uv", *pre_install]
 
     commands: list[str] = [
         f"git config --global --add safe.directory {shlex.quote(DOCKER_WORKDIR)} || true",
