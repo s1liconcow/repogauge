@@ -420,6 +420,80 @@ def test_analysis_report_falls_back_to_attempt_exit_reason(tmp_path: Path) -> No
     assert "invalid patch: no unified diff found in model output" in html
 
 
+def test_analysis_report_reclassifies_zero_token_error_only_attempts(
+    tmp_path: Path,
+) -> None:
+    attempts = [
+        _attempt_row(
+            "solver-a",
+            "inst-1",
+            duration_ms=10,
+            cost=0.0,
+            problem_statement="Provider-side model lookup failed before generation.",
+            raw_output=(
+                '{"type":"error","error":{"name":"UnknownError","data":'
+                '{"message":"Model not found: example/model."}}}\n'
+            ),
+            usage={"total_tokens": 0, "input_tokens": 0, "output_tokens": 0},
+            attempt_state="succeeded",
+            model_patch="diff --git a/generated.txt b/generated.txt\n+setup artifact\n",
+            metadata={
+                "telemetry": [
+                    {
+                        "type": "error",
+                        "error": {
+                            "name": "UnknownError",
+                            "data": {"message": "Model not found: example/model."},
+                        },
+                    }
+                ]
+            },
+        ),
+        _attempt_row(
+            "solver-b",
+            "inst-1",
+            duration_ms=10,
+            cost=1.0,
+            problem_statement="Control solver resolves the task.",
+            usage={"input_tokens": 100, "output_tokens": 10},
+            attempt_state="succeeded",
+            model_patch="diff --git a/a.py b/a.py\n+print('ok')\n",
+        ),
+    ]
+    instance_results = [
+        _eval_row(
+            "solver-a",
+            "inst-1",
+            harness_outcome="not_resolved",
+            resolved=False,
+            failure_reason="no_fail_to_pass",
+        ),
+        _eval_row("solver-b", "inst-1", harness_outcome="resolved", resolved=True),
+    ]
+
+    summaries = summarize_attempt_metrics(
+        attempts=attempts,
+        instance_results=instance_results,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+    )
+    report = build_analysis_report(
+        attempts=attempts,
+        instance_results=instance_results,
+        grouped_summaries=summaries,
+        solver_summaries=summaries,
+        group_by=("solver_id",),
+        expensive_cost_threshold=5.0,
+        metadata={"run_root": "/tmp/run"},
+    )
+
+    assert report["failure_reason_breakdown"][0]["reason"] == "model_not_found"
+    assert (
+        report["attempt_browser"]["instances"][0]["solvers"][0]["failure_reason"]
+        == "model_not_found"
+    )
+
+
 def test_solver_frontier_uses_absolute_percent_scale(tmp_path: Path) -> None:
     attempts = [
         _attempt_row(

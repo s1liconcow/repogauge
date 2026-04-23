@@ -484,6 +484,24 @@ def _extract_opencode_cli_metrics(
     return usage, usage_source, cost, cost_source, tool_calls
 
 
+def _extract_opencode_cli_error_message(events: list[dict[str, Any]]) -> str:
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        error = event.get("error")
+        if not isinstance(error, Mapping):
+            continue
+        data = error.get("data")
+        if isinstance(data, Mapping):
+            message = str(data.get("message") or "").strip()
+            if message:
+                return message
+        name = str(error.get("name") or "").strip()
+        if name:
+            return name
+    return ""
+
+
 def _required_instance_fields(instance_row: Mapping[str, Any] | None) -> dict[str, str]:
     if instance_row is None:
         raise SolverAdapterError("instance_row is required for solver execution")
@@ -1389,6 +1407,7 @@ class OpenCodeCLIAdapter(_BaseConcreteSolverAdapter):
             cost_source = opencode_cost_source
 
         text = _extract_structured_output_text(output)
+        error_message = _extract_opencode_cli_error_message(telemetry_events)
         cost, cost_source = _ensure_public_api_estimated_cost(
             model=self.model,
             usage=usage,
@@ -1430,6 +1449,21 @@ class OpenCodeCLIAdapter(_BaseConcreteSolverAdapter):
                     or command_result.stdout
                     or "command execution failed"
                 ),
+                usage_source=usage_source,
+                cost_source=cost_source,
+                usage=usage,
+                cost=cost,
+                metadata=metadata,
+            )
+
+        if error_message and not text.strip():
+            return SolverAdapterResult(
+                attempt_id=request.attempt_id,
+                status=SolverAttemptState.FAILED,
+                model_patch=None,
+                raw_output=output,
+                stderr_output=command_result.stderr,
+                exit_reason=error_message,
                 usage_source=usage_source,
                 cost_source=cost_source,
                 usage=usage,

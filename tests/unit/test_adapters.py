@@ -882,6 +882,38 @@ class TestAdapters(unittest.TestCase):
         self.assertEqual(result.cost, {"total_cost_usd": 0.0042})
         self.assertEqual(result.metadata["tool_calls"], 2)
 
+    def test_opencode_cli_adapter_fails_on_error_telemetry_without_output(self) -> None:
+        provider = self._opencode_provider("/bin/echo")
+        adapter = OpenCodeCLIAdapter(
+            solver_id="solver-a",
+            provider_id="opencode",
+            provider_config=provider.config,
+            behavior={"model": "fireworks-ai/accounts/fireworks/models/kimi-k2p6"},
+        )
+        request = self._opencode_request(adapter)
+        output = (
+            '{"type":"error","error":{"name":"UnknownError","data":'
+            '{"message":"Model not found: fireworks-ai/accounts/fireworks/models/'
+            'kimi-k2p6."}}}\n'
+        )
+        command_result = CommandResult(
+            command=["/bin/echo", "run", "--format", "json"],
+            returncode=0,
+            stdout=output,
+            stderr="ProviderModelNotFoundError",
+        )
+        with mock.patch(
+            "repogauge.runner.adapters.run_command", return_value=command_result
+        ):
+            result = adapter.execute_attempt(request)
+
+        self.assertEqual(result.status, SolverAttemptState.FAILED)
+        self.assertIsNone(result.model_patch)
+        self.assertEqual(
+            result.exit_reason,
+            "Model not found: fireworks-ai/accounts/fireworks/models/kimi-k2p6.",
+        )
+
     def test_opencode_cli_adapter_estimates_fireworks_cost_from_public_pricing(
         self,
     ) -> None:

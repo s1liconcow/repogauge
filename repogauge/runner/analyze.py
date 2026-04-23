@@ -640,17 +640,45 @@ def _telemetry_failure_reason(row: Mapping[str, Any]) -> str:
     return ""
 
 
+def _has_error_only_raw_output(row: Mapping[str, Any]) -> bool:
+    raw_output = _coerce_str(row.get("raw_output")).strip()
+    if not raw_output:
+        return False
+    payloads: list[Mapping[str, Any]] = []
+    for line in raw_output.splitlines():
+        payload = _safe_json_parse(line.strip())
+        if not isinstance(payload, Mapping):
+            return False
+        payloads.append(payload)
+    return bool(payloads) and all(
+        _coerce_str(payload.get("type")).strip().lower() == "error"
+        for payload in payloads
+    )
+
+
+def _should_prefer_telemetry_failure_reason(
+    row: Mapping[str, Any], telemetry_reason: str
+) -> bool:
+    if telemetry_reason == "model_not_found":
+        _, _, total_tokens = _read_usage_tokens(row)
+        tool_calls = _coerce_non_negative_int(row.get("tool_calls"))
+        if total_tokens == 0 and tool_calls == 0 and _has_error_only_raw_output(row):
+            return True
+    exit_reason = _normalize_failure_reason_label(row.get("exit_reason"))
+    return bool(telemetry_reason and exit_reason == "invalid_patch")
+
+
 def _row_failure_reason(row: Mapping[str, Any]) -> str:
+    telemetry_reason = _telemetry_failure_reason(row)
+    if _should_prefer_telemetry_failure_reason(row, telemetry_reason):
+        return telemetry_reason
     reason = _coerce_str(row.get("failure_reason"))
     if reason:
         return reason
     reason = _coerce_str(row.get("reason"))
     if reason:
         return reason
-    telemetry_reason = _telemetry_failure_reason(row)
     exit_reason = _normalize_failure_reason_label(row.get("exit_reason"))
-    if telemetry_reason and exit_reason == "invalid_patch":
-        return telemetry_reason
     if exit_reason:
         return exit_reason
     if telemetry_reason:
