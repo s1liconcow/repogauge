@@ -1,0 +1,1512 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#060913" />
+    <title>
+      RepoGauge Articles - Practical writing on coding agent evaluation
+    </title>
+    <meta
+      name="description"
+      content="Articles from RepoGauge on evaluating coding agents with reproducible benchmarks, real repository tasks, and cost-aware adoption decisions."
+    />
+    <meta property="og:title" content="RepoGauge Articles" />
+    <meta
+      property="og:description"
+      content="Practical writing for teams adopting coding agents: benchmarks, model selection, regression checks, and cost-aware evaluation."
+    />
+    <meta property="og:type" content="website" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    />
+
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #0a0c17;
+        --ink-soft: #1a1f33;
+        --body: #2a3145;
+        --muted: #5a6379;
+        --muted-2: #8892a6;
+        --line: rgba(10, 12, 23, 0.08);
+        --line-strong: rgba(10, 12, 23, 0.14);
+        --surface: #ffffff;
+        --surface-2: #f7f8fb;
+        --cream: #fafaf7;
+        --night: #06070f;
+        --night-2: #0b0e1c;
+        --night-3: #121733;
+        --night-line: rgba(255, 255, 255, 0.08);
+        --night-text: #e6ebf7;
+        --night-muted: #8892b3;
+        --accent: #635bff;
+        --accent-2: #22d3ee;
+        --accent-3: #f472b6;
+        --accent-glow: #a78bfa;
+        --amber: #fbbf24;
+        --emerald: #10b981;
+        --coral: #ff6a5b;
+        --r-sm: 14px;
+        --r-md: 18px;
+        --r-lg: 24px;
+        --r-xl: 32px;
+        --r-xxl: 44px;
+        --shadow-xs: 0 1px 2px rgba(15, 20, 40, 0.05);
+        --shadow-sm: 0 6px 18px rgba(15, 20, 40, 0.06);
+        --shadow-md: 0 14px 40px rgba(15, 20, 40, 0.08);
+        --shadow-lg: 0 32px 70px rgba(15, 20, 40, 0.12);
+        --shadow-glow: 0 20px 60px -12px rgba(99, 91, 255, 0.45);
+        --content: 1200px;
+        --nav-h: 72px;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          "Inter",
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        font-feature-settings: "ss01", "cv11", "cv02";
+        color: var(--body);
+        background: var(--cream);
+        line-height: 1.5;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        overflow-x: hidden;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      button {
+        cursor: pointer;
+        border: 0;
+        background: none;
+        padding: 0;
+        color: inherit;
+        font: inherit;
+      }
+
+      img,
+      svg {
+        display: block;
+        max-width: 100%;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4,
+      p {
+        margin: 0;
+      }
+
+      code,
+      pre {
+        font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+        border-radius: 6px;
+      }
+
+      ::selection {
+        background: rgba(99, 91, 255, 0.22);
+        color: var(--ink);
+      }
+
+      .container {
+        width: min(calc(100% - 48px), var(--content));
+        margin: 0 auto;
+      }
+
+      .page {
+        position: relative;
+        isolation: isolate;
+      }
+
+      .progress {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        z-index: 90;
+        pointer-events: none;
+      }
+
+      .progress__bar {
+        width: 0;
+        height: 100%;
+        background: linear-gradient(
+          90deg,
+          var(--accent-2),
+          var(--accent),
+          var(--accent-3)
+        );
+        box-shadow: 0 0 18px rgba(99, 91, 255, 0.55);
+        transform-origin: left;
+      }
+
+      .nav-wrap {
+        position: sticky;
+        top: 12px;
+        z-index: 70;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        height: var(--nav-h);
+        padding: 10px 14px 10px 18px;
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 999px;
+        box-shadow:
+          var(--shadow-sm),
+          inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        backdrop-filter: saturate(170%) blur(18px);
+        -webkit-backdrop-filter: saturate(170%) blur(18px);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        padding: 4px 8px 4px 4px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      .brand__mark {
+        width: 36px;
+        height: 36px;
+        border-radius: 11px;
+        background:
+          radial-gradient(
+            circle at 28% 22%,
+            rgba(255, 255, 255, 0.8),
+            transparent 36%
+          ),
+          conic-gradient(
+            from 210deg at 50% 50%,
+            #22d3ee,
+            #635bff,
+            #f472b6,
+            #22d3ee
+          );
+        display: grid;
+        place-items: center;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.35),
+          0 10px 22px -6px rgba(99, 91, 255, 0.55);
+        position: relative;
+        flex: 0 0 auto;
+      }
+
+      .brand__mark::after {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border-radius: 8px;
+        background: rgba(10, 12, 23, 0.82);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .brand__mark svg {
+        position: relative;
+        z-index: 1;
+      }
+
+      .brand__name {
+        font-size: 1rem;
+        color: var(--ink);
+      }
+
+      .brand__name em {
+        font-style: normal;
+        font-weight: 500;
+        color: var(--muted);
+        margin-left: 6px;
+        display: none;
+      }
+
+      @media (min-width: 960px) {
+        .brand__name em {
+          display: inline;
+        }
+      }
+
+      .nav-links {
+        display: none;
+        gap: 4px;
+        align-items: center;
+        font-weight: 500;
+        font-size: 0.92rem;
+        color: var(--body);
+      }
+
+      @media (min-width: 960px) {
+        .nav-links {
+          display: inline-flex;
+        }
+      }
+
+      .nav-links a {
+        padding: 8px 12px;
+        border-radius: 999px;
+        transition:
+          background 150ms ease,
+          color 150ms ease;
+      }
+
+      .nav-links a:hover,
+      .nav-links a[aria-current="page"] {
+        background: rgba(10, 12, 23, 0.05);
+        color: var(--ink);
+      }
+
+      .nav-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 0 18px;
+        border-radius: 999px;
+        font-weight: 600;
+        font-size: 0.94rem;
+        letter-spacing: -0.01em;
+        transition:
+          transform 150ms ease,
+          box-shadow 180ms ease,
+          background 180ms ease,
+          border-color 180ms ease,
+          color 180ms ease;
+        white-space: nowrap;
+      }
+
+      .btn svg {
+        transition: transform 180ms ease;
+      }
+
+      .btn:hover svg {
+        transform: translateX(2px);
+      }
+
+      .btn--primary {
+        background: var(--ink);
+        color: white;
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.15) inset,
+          0 8px 22px -6px rgba(10, 12, 23, 0.45);
+      }
+
+      .btn--primary:hover {
+        transform: translateY(-1px);
+        background: #000;
+        box-shadow: 0 12px 30px -8px rgba(10, 12, 23, 0.55);
+      }
+
+      .btn--accent {
+        background: linear-gradient(
+          135deg,
+          var(--accent) 0%,
+          #7c6bff 55%,
+          var(--accent-2) 120%
+        );
+        color: white;
+        box-shadow: var(--shadow-glow);
+      }
+
+      .btn--ghost {
+        background: transparent;
+        color: var(--ink);
+        border: 1px solid var(--line-strong);
+      }
+
+      .btn--ghost:hover {
+        background: rgba(10, 12, 23, 0.04);
+        border-color: rgba(10, 12, 23, 0.22);
+      }
+
+      .btn--on-dark {
+        background: rgba(255, 255, 255, 0.08);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+      }
+
+      .btn--on-dark:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+
+      .btn--sm {
+        min-height: 36px;
+        padding: 0 14px;
+        font-size: 0.88rem;
+      }
+
+      .hero {
+        position: relative;
+        color: white;
+        overflow: hidden;
+        padding: 28px 0 92px;
+        margin-top: -84px;
+        border-radius: 0 0 40px 40px;
+        background: var(--night);
+      }
+
+      .hero__aurora {
+        position: absolute;
+        inset: -20% -10% 0 -10%;
+        background:
+          radial-gradient(
+            40% 50% at 20% 22%,
+            rgba(34, 211, 238, 0.32),
+            transparent 70%
+          ),
+          radial-gradient(
+            45% 55% at 78% 18%,
+            rgba(244, 114, 182, 0.3),
+            transparent 70%
+          ),
+          radial-gradient(
+            60% 70% at 50% 88%,
+            rgba(99, 91, 255, 0.42),
+            transparent 70%
+          ),
+          radial-gradient(
+            30% 40% at 12% 78%,
+            rgba(251, 191, 36, 0.22),
+            transparent 70%
+          );
+        filter: blur(40px) saturate(135%);
+        opacity: 0.9;
+        animation: aurora 18s ease-in-out infinite alternate;
+        z-index: 0;
+        pointer-events: none;
+      }
+
+      @keyframes aurora {
+        0% {
+          transform: translate3d(0, 0, 0) scale(1);
+        }
+
+        50% {
+          transform: translate3d(-2%, -1%, 0) scale(1.04);
+        }
+
+        100% {
+          transform: translate3d(1%, 2%, 0) scale(1.02);
+        }
+      }
+
+      .hero__grid-bg {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+        background-size: 64px 64px;
+        mask-image: radial-gradient(
+          ellipse at 50% 40%,
+          black 30%,
+          transparent 80%
+        );
+        -webkit-mask-image: radial-gradient(
+          ellipse at 50% 40%,
+          black 30%,
+          transparent 80%
+        );
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .hero__inner {
+        position: relative;
+        z-index: 1;
+        padding-top: 136px;
+      }
+
+      .hero__layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(330px, 0.72fr);
+        gap: 48px;
+        align-items: end;
+      }
+
+      @media (max-width: 960px) {
+        .hero__layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .eyebrow,
+      .kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.74rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow {
+        padding: 7px 14px 7px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #cfd6ea;
+        backdrop-filter: blur(12px);
+      }
+
+      .eyebrow__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--emerald);
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+        animation: pulse 2.2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+        }
+
+        50% {
+          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.05);
+        }
+      }
+
+      .hero h1 {
+        margin-top: 22px;
+        font-size: clamp(3rem, 7vw, 5.4rem);
+        line-height: 0.98;
+        letter-spacing: -0.04em;
+        font-weight: 800;
+        max-width: 12ch;
+      }
+
+      .hero h1 span {
+        background: linear-gradient(
+          100deg,
+          #fff 0%,
+          #c8d0ff 40%,
+          #22d3ee 70%,
+          #f472b6 100%
+        );
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .hero__lede {
+        margin-top: 22px;
+        color: rgba(220, 226, 245, 0.76);
+        font-size: 1.08rem;
+        line-height: 1.66;
+        max-width: 62ch;
+      }
+
+      .hero__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 28px;
+      }
+
+      .editor-note {
+        padding: 24px;
+        border-radius: var(--r-xl);
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 28px 70px -36px rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(12px);
+      }
+
+      .editor-note h2 {
+        color: white;
+        font-size: 1.15rem;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+      }
+
+      .editor-note p {
+        margin-top: 12px;
+        color: rgba(220, 226, 245, 0.72);
+        line-height: 1.65;
+        font-size: 0.96rem;
+      }
+
+      .editor-note code {
+        color: #a5f3fc;
+        font-size: 0.88em;
+      }
+
+      .section {
+        padding: 96px 0;
+        position: relative;
+      }
+
+      .section--tight {
+        padding: 64px 0;
+      }
+
+      .section--dark {
+        background: var(--night);
+        color: var(--night-text);
+      }
+
+      .section-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 40px;
+        align-items: end;
+        margin-bottom: 56px;
+      }
+
+      @media (max-width: 860px) {
+        .section-head {
+          grid-template-columns: 1fr;
+          gap: 20px;
+        }
+      }
+
+      .kicker {
+        color: var(--accent);
+      }
+
+      .kicker::before {
+        content: "";
+        width: 18px;
+        height: 1px;
+        background: currentColor;
+        display: inline-block;
+      }
+
+      .section-head h2 {
+        margin-top: 14px;
+        font-size: clamp(2rem, 4vw, 3.4rem);
+        letter-spacing: -0.035em;
+        line-height: 1.02;
+        font-weight: 700;
+        color: var(--ink);
+        max-width: 22ch;
+      }
+
+      .section-head__deck {
+        font-size: 1.05rem;
+        line-height: 1.65;
+        color: var(--muted);
+        max-width: 52ch;
+      }
+
+      .article-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      @media (max-width: 960px) {
+        .article-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .article-card {
+        display: flex;
+        flex-direction: column;
+        min-height: 100%;
+        padding: 28px;
+        border-radius: var(--r-xl);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow-sm);
+        transition:
+          transform 220ms ease,
+          box-shadow 220ms ease,
+          border-color 220ms ease;
+      }
+
+      .article-card:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--shadow-lg);
+        border-color: var(--line-strong);
+      }
+
+      .article-card__meta,
+      .article__meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        color: var(--muted-2);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.74rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .article-card h3 {
+        margin-top: 18px;
+        color: var(--ink);
+        font-size: 1.25rem;
+        letter-spacing: -0.025em;
+        line-height: 1.15;
+      }
+
+      .article-card p {
+        margin-top: 12px;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 0.98rem;
+      }
+
+      .article-card__link {
+        margin-top: auto;
+        padding-top: 24px;
+        color: var(--accent);
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .article-card__link svg {
+        transition: transform 180ms ease;
+      }
+
+      .article-card:hover .article-card__link svg {
+        transform: translateX(3px);
+      }
+
+      .article-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+        gap: 44px;
+        align-items: start;
+        padding: 48px;
+        border-radius: var(--r-xxl);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow-md);
+      }
+
+      .article-shell + .article-shell {
+        margin-top: 28px;
+      }
+
+      @media (max-width: 960px) {
+        .article-shell {
+          grid-template-columns: 1fr;
+          padding: 30px;
+        }
+      }
+
+      .article h2 {
+        margin-top: 16px;
+        color: var(--ink);
+        font-size: clamp(1.85rem, 3.2vw, 3rem);
+        line-height: 1.04;
+        letter-spacing: -0.035em;
+        font-weight: 760;
+      }
+
+      .article__summary {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 1.04rem;
+        line-height: 1.65;
+      }
+
+      .article__body {
+        color: var(--body);
+        font-size: 1.02rem;
+        line-height: 1.78;
+      }
+
+      .article__body p + p,
+      .article__body p + h3,
+      .article__body ul + h3 {
+        margin-top: 24px;
+      }
+
+      .article__body h3 {
+        color: var(--ink);
+        font-size: 1.1rem;
+        letter-spacing: -0.015em;
+      }
+
+      .article__body ul {
+        display: grid;
+        gap: 10px;
+        margin: 16px 0 0;
+        padding: 0;
+      }
+
+      .article__body li {
+        list-style: none;
+        padding: 14px 16px;
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+      }
+
+      .article-callout {
+        margin-top: 24px;
+        padding: 18px;
+        border-radius: var(--r-lg);
+        background:
+          radial-gradient(
+            80% 90% at 100% 0%,
+            rgba(34, 211, 238, 0.16),
+            transparent 60%
+          ),
+          linear-gradient(180deg, #0c0f1f 0%, #080b17 100%);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .article-callout p {
+        color: rgba(220, 226, 245, 0.78);
+        line-height: 1.65;
+      }
+
+      .playbook {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(300px, 0.85fr);
+        gap: 18px;
+        padding: 32px;
+        border-radius: var(--r-xxl);
+        background:
+          radial-gradient(
+            70% 80% at 0% 0%,
+            rgba(99, 91, 255, 0.18),
+            transparent 60%
+          ),
+          var(--surface);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow-lg);
+      }
+
+      @media (max-width: 900px) {
+        .playbook {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .playbook h2 {
+        color: var(--ink);
+        font-size: clamp(2rem, 4vw, 3.1rem);
+        line-height: 1.04;
+        letter-spacing: -0.035em;
+      }
+
+      .playbook p {
+        margin-top: 16px;
+        color: var(--muted);
+        line-height: 1.68;
+        max-width: 64ch;
+      }
+
+      .playbook__list {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+      }
+
+      .playbook__list li {
+        list-style: none;
+        padding: 14px 16px;
+        border-radius: var(--r-md);
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid var(--line);
+        color: var(--body);
+      }
+
+      .footer {
+        padding: 48px 0 36px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .footer__inner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding-top: 26px;
+        border-top: 1px solid var(--line);
+      }
+
+      .footer__brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      .footer__links {
+        display: inline-flex;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+
+      .footer__links a:hover {
+        color: var(--ink);
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(20px);
+        transition:
+          opacity 620ms cubic-bezier(0.2, 0.7, 0.2, 1),
+          transform 620ms cubic-bezier(0.2, 0.7, 0.2, 1);
+      }
+
+      .reveal.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+          transition-duration: 0.001ms !important;
+        }
+
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .container {
+          width: min(calc(100% - 28px), var(--content));
+        }
+
+        .nav {
+          height: auto;
+          min-height: 62px;
+          padding: 8px;
+        }
+
+        .brand__name {
+          font-size: 0.95rem;
+        }
+
+        .nav-actions .btn--ghost {
+          display: none;
+        }
+
+        .hero {
+          padding-bottom: 72px;
+          border-radius: 0 0 28px 28px;
+        }
+
+        .hero__inner {
+          padding-top: 118px;
+        }
+
+        .hero h1 {
+          font-size: clamp(2.65rem, 15vw, 4rem);
+        }
+
+        .section {
+          padding: 72px 0;
+        }
+
+        .section--tight {
+          padding: 52px 0;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="page" id="top">
+      <div class="progress" aria-hidden="true">
+        <div class="progress__bar" id="scroll-progress"></div>
+      </div>
+
+      <div class="container nav-wrap">
+        <header class="nav" role="banner">
+          <a class="brand" href="index.html#top" aria-label="RepoGauge home">
+            <span class="brand__mark" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2.5 11.5 A6 6 0 1 1 13.5 8"
+                  stroke="white"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M8 8l3.2-1.9"
+                  stroke="white"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+                <circle cx="8" cy="8" r="1.3" fill="white" />
+              </svg>
+            </span>
+            <span class="brand__name"
+              >RepoGauge <em>agent evaluation, grounded in your repo.</em></span
+            >
+          </a>
+
+          <nav class="nav-links" aria-label="Primary">
+            <a href="index.html#why">Why</a>
+            <a href="index.html#pipeline">Pipeline</a>
+            <a href="index.html#questions">Answers</a>
+            <a href="index.html#quickstart">Quickstart</a>
+            <a href="articles.html" aria-current="page">Articles</a>
+            <a href="sample_report.html">Sample report</a>
+          </nav>
+
+          <div class="nav-actions">
+            <a
+              class="btn btn--ghost btn--sm"
+              href="https://github.com/s1liconcow/repogauge"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              GitHub
+            </a>
+            <a class="btn btn--primary btn--sm" href="mailto:hi@repogauge.org">
+              Contact
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M3.5 8h9M8.5 3l4 5-4 5"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </a>
+          </div>
+        </header>
+      </div>
+
+      <main>
+        <section class="hero">
+          <div class="hero__aurora" aria-hidden="true"></div>
+          <div class="hero__grid-bg" aria-hidden="true"></div>
+
+          <div class="container hero__inner">
+            <div class="hero__layout">
+              <div class="reveal">
+                <span class="eyebrow">
+                  <span class="eyebrow__dot" aria-hidden="true"></span>
+                  Practical field notes for agent adoption
+                </span>
+
+                <h1><span>Articles for teams choosing coding agents.</span></h1>
+
+                <p class="hero__lede">
+                  Use these pieces to explain why repo-grounded evaluation
+                  matters, help teams move past demo-driven selection, and
+                  create a steady publishing surface for RepoGauge adoption.
+                </p>
+
+                <div class="hero__actions">
+                  <a class="btn btn--accent" href="#featured">
+                    Browse articles
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M3.5 8h9M8.5 3l4 5-4 5"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </a>
+                  <a class="btn btn--on-dark" href="index.html#quickstart"
+                    >Run RepoGauge</a
+                  >
+                </div>
+              </div>
+
+              <aside class="editor-note reveal" aria-label="Editorial promise">
+                <h2>Editorial promise</h2>
+                <p>
+                  Each article is designed to lead with a concrete adoption
+                  pain, explain the operational risk, then point readers to a
+                  RepoGauge workflow they can run or inspect.
+                </p>
+                <p>
+                  The focus stays on measurable outcomes: pass rate, cost per
+                  solved task, latency, regression behavior, and the evidence
+                  trail behind each result.
+                </p>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="featured">
+          <div class="container">
+            <div class="section-head reveal">
+              <div>
+                <span class="kicker">Featured articles</span>
+                <h2>
+                  Adoption writing that starts with the buyer's real problem.
+                </h2>
+              </div>
+              <p class="section-head__deck">
+                These drafts are intentionally practical: they give engineering
+                leaders, platform teams, and budget owners a reason to evaluate
+                agents with evidence from their own codebase.
+              </p>
+            </div>
+
+            <div class="article-grid">
+              <a class="article-card reveal" href="#stop-vibes">
+                <div class="article-card__meta">
+                  <span>Strategy</span><span>6 min read</span>
+                </div>
+                <h3>Stop choosing coding agents from demos and vibes</h3>
+                <p>
+                  Why demo tasks are a poor proxy for production engineering
+                  work, and how a repo-grounded benchmark changes the decision.
+                </p>
+                <span class="article-card__link">
+                  Read article
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M3.5 8h9M8.5 3l4 5-4 5"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </span>
+              </a>
+
+              <a class="article-card reveal" href="#own-repo">
+                <div class="article-card__meta">
+                  <span>Evaluation</span><span>7 min read</span>
+                </div>
+                <h3>
+                  The only coding agent benchmark that matters is your repo
+                </h3>
+                <p>
+                  A simple framework for turning historical fixes into
+                  repeatable evaluation tasks with measurable pass rate, cost,
+                  and latency.
+                </p>
+                <span class="article-card__link">
+                  Read article
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M3.5 8h9M8.5 3l4 5-4 5"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </span>
+              </a>
+
+              <a class="article-card reveal" href="#regressions">
+                <div class="article-card__meta">
+                  <span>Operations</span><span>5 min read</span>
+                </div>
+                <h3>The hidden cost of agent regressions</h3>
+                <p>
+                  Agent adoption is not a one-time model choice. You need a way
+                  to notice when provider updates, prompts, and wrappers quietly
+                  change behavior.
+                </p>
+                <span class="article-card__link">
+                  Read article
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M3.5 8h9M8.5 3l4 5-4 5"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </span>
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section class="section section--tight" id="articles">
+          <div class="container">
+            <article class="article-shell article reveal" id="stop-vibes">
+              <div>
+                <div class="article__meta">
+                  <span>Strategy</span><span>6 min read</span>
+                </div>
+                <h2>Stop choosing coding agents from demos and vibes</h2>
+                <p class="article__summary">
+                  A coding agent can look exceptional in a polished demo and
+                  still fail the work your team actually needs it to do.
+                </p>
+                <div class="article-callout">
+                  <p>
+                    RepoGauge turns adoption from a taste contest into an
+                    artifact trail: the task, the attempted fix, the tests, the
+                    cost, the latency, and the final outcome.
+                  </p>
+                </div>
+              </div>
+              <div class="article__body">
+                <p>
+                  Most agent evaluations start in the wrong place. A team
+                  watches a model solve a tidy issue, compares a few provider
+                  claims, then tries to infer whether the agent will work inside
+                  a messy production codebase. That is not evaluation. It is a
+                  sales-assisted guess.
+                </p>
+                <p>
+                  The real question is narrower and more useful: which agent can
+                  solve the kinds of changes that have already mattered in your
+                  repository? That includes local test habits, odd abstractions,
+                  hidden coupling, dependency quirks, and the boring edge cases
+                  that never show up in a demo.
+                </p>
+                <h3>What changes when the benchmark comes from your code</h3>
+                <ul>
+                  <li>
+                    You compare agents on the same tasks instead of comparing
+                    different demo experiences.
+                  </li>
+                  <li>
+                    You get cost per solved task, not just token price or
+                    subscription cost.
+                  </li>
+                  <li>
+                    You can inspect failed attempts and see whether the failure
+                    mode matters in practice.
+                  </li>
+                  <li>
+                    You build a reusable baseline for future model, prompt, and
+                    wrapper changes.
+                  </li>
+                </ul>
+                <p>
+                  The result is a cleaner adoption conversation. Engineering can
+                  talk about reliability. Finance can talk about unit economics.
+                  Leadership can see a repeatable process instead of a
+                  collection of opinions.
+                </p>
+              </div>
+            </article>
+
+            <article class="article-shell article reveal" id="own-repo">
+              <div>
+                <div class="article__meta">
+                  <span>Evaluation</span><span>7 min read</span>
+                </div>
+                <h2>
+                  The only coding agent benchmark that matters is your repo
+                </h2>
+                <p class="article__summary">
+                  Generic benchmarks are useful for market shape. They are not
+                  enough to decide what belongs in your engineering workflow.
+                </p>
+                <div class="article-callout">
+                  <p>
+                    A repo-grounded benchmark gives every candidate agent the
+                    same starting point and the same pass/fail evidence.
+                  </p>
+                </div>
+              </div>
+              <div class="article__body">
+                <p>
+                  Public coding benchmarks are valuable because they make
+                  progress visible. They are also incomplete. Your team does not
+                  work in an average repository with average tests, average
+                  architecture, and average review standards.
+                </p>
+                <p>
+                  A better evaluation starts with your commit history.
+                  Historical fixes are useful because they already encode real
+                  engineering judgment: somebody found a problem, changed code,
+                  and landed a solution that the project accepted.
+                </p>
+                <h3>A practical evaluation loop</h3>
+                <ul>
+                  <li>
+                    Extract representative commits and turn them into
+                    reproducible tasks.
+                  </li>
+                  <li>Run each agent from the same baseline checkout.</li>
+                  <li>
+                    Grade outcomes with the tests and checks that matter for
+                    that task.
+                  </li>
+                  <li>
+                    Compare pass rate, cost per solved task, latency, and
+                    regression behavior.
+                  </li>
+                </ul>
+                <p>
+                  That loop does not need to be perfect to be valuable. It just
+                  needs to be consistent, inspectable, and tied to real work.
+                  Once it exists, each new provider claim can be tested against
+                  the same evidence.
+                </p>
+              </div>
+            </article>
+
+            <article class="article-shell article reveal" id="regressions">
+              <div>
+                <div class="article__meta">
+                  <span>Operations</span><span>5 min read</span>
+                </div>
+                <h2>The hidden cost of agent regressions</h2>
+                <p class="article__summary">
+                  Coding agent behavior changes under you. Adoption plans need a
+                  way to catch that before developers do.
+                </p>
+                <div class="article-callout">
+                  <p>
+                    RepoGauge gives teams a stable regression signal for agent
+                    upgrades, prompt edits, and provider changes.
+                  </p>
+                </div>
+              </div>
+              <div class="article__body">
+                <p>
+                  A coding agent stack has more moving parts than it first
+                  appears. The model changes. The prompt changes. Tool wrappers
+                  change. Sandboxes change. Even a small shift can turn
+                  yesterday's good result into tomorrow's confusing failure.
+                </p>
+                <p>
+                  Without a repeatable benchmark, these regressions show up as
+                  developer distrust. Someone notices that an agent feels worse,
+                  but the team has no clean way to prove what changed or whether
+                  it matters.
+                </p>
+                <h3>What a regression check should show</h3>
+                <ul>
+                  <li>Which previously solved tasks are now failing.</li>
+                  <li>
+                    Whether failures cluster around a model, provider, prompt,
+                    or tool change.
+                  </li>
+                  <li>How much the regression changes cost per solved task.</li>
+                  <li>
+                    Whether a cheaper model still clears the quality bar for
+                    specific work.
+                  </li>
+                </ul>
+                <p>
+                  This is where adoption becomes operational. The goal is not to
+                  pick a model once. The goal is to keep a durable measurement
+                  loop around the agents your engineers depend on.
+                </p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section section--tight">
+          <div class="container reveal">
+            <article class="playbook">
+              <div>
+                <span class="kicker">Writing queue</span>
+                <h2 style="margin-top: 14px">
+                  Next adoption pieces to publish.
+                </h2>
+                <p>
+                  This page now has a reusable content surface. The next posts
+                  should keep answering objections from engineering leaders who
+                  are agent-curious but need proof before changing workflow or
+                  budget.
+                </p>
+                <div class="hero__actions">
+                  <a class="btn btn--accent" href="mailto:hi@repogauge.org"
+                    >Pitch an article</a
+                  >
+                  <a class="btn btn--ghost" href="index.html#pipeline"
+                    >Inspect the workflow</a
+                  >
+                </div>
+              </div>
+              <ul class="playbook__list">
+                <li>
+                  How to compare hosted agent platforms without overfitting to
+                  one demo.
+                </li>
+                <li>
+                  Why cost per solved task beats token price as a buying metric.
+                </li>
+                <li>
+                  How platform teams can roll out coding agents with regression
+                  gates.
+                </li>
+                <li>
+                  What engineering leaders should ask before approving agent
+                  spend.
+                </li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="container footer__inner">
+          <div class="footer__brand">
+            <span
+              class="brand__mark"
+              aria-hidden="true"
+              style="width: 26px; height: 26px; border-radius: 8px"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2.5 11.5 A6 6 0 1 1 13.5 8"
+                  stroke="white"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M8 8l3.2-1.9"
+                  stroke="white"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+                <circle cx="8" cy="8" r="1.3" fill="white" />
+              </svg>
+            </span>
+            RepoGauge
+          </div>
+          <div class="footer__links">
+            <a href="index.html#pipeline">Pipeline</a>
+            <a href="index.html#quickstart">Quickstart</a>
+            <a href="articles.html">Articles</a>
+            <a href="sample_report.html">Sample report</a>
+            <a href="mailto:hi@repogauge.org">hi@repogauge.org</a>
+            <a
+              href="https://github.com/s1liconcow/repogauge"
+              target="_blank"
+              rel="noopener noreferrer"
+              >GitHub</a
+            >
+          </div>
+          <div>
+            Agent evaluation as an artifact pipeline with a stable paper trail.
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        const progress = document.getElementById("scroll-progress");
+        const updateProgress = () => {
+          const scrollable =
+            document.documentElement.scrollHeight - window.innerHeight;
+          const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
+          progress.style.width = `${Math.min(1, Math.max(0, ratio)) * 100}%`;
+        };
+        window.addEventListener("scroll", updateProgress, { passive: true });
+        window.addEventListener("resize", updateProgress);
+        updateProgress();
+
+        if ("IntersectionObserver" in window) {
+          const revealObserver = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add("visible");
+                  revealObserver.unobserve(entry.target);
+                }
+              });
+            },
+            { threshold: 0.16 },
+          );
+          document
+            .querySelectorAll(".reveal")
+            .forEach((el) => revealObserver.observe(el));
+        } else {
+          document
+            .querySelectorAll(".reveal")
+            .forEach((el) => el.classList.add("visible"));
+        }
+      })();
+    </script>
+  </body>
+</html>

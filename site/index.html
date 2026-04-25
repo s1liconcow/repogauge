@@ -2042,6 +2042,82 @@
       margin-top: 24px;
     }
 
+    /* --------- Articles preview --------- */
+    .articles-preview {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    @media (max-width: 960px) {
+      .articles-preview {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .article-teaser {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+      padding: 28px;
+      border-radius: var(--r-xl);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-sm);
+      transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+    }
+
+    .article-teaser:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-lg);
+      border-color: var(--line-strong);
+    }
+
+    .article-teaser__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.74rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .article-teaser h3 {
+      margin-top: 18px;
+      font-size: 1.25rem;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .article-teaser p {
+      margin-top: 12px;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 0.98rem;
+    }
+
+    .article-teaser__link {
+      margin-top: auto;
+      padding-top: 24px;
+      color: var(--accent);
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .article-teaser__link svg {
+      transition: transform 180ms ease;
+    }
+
+    .article-teaser:hover .article-teaser__link svg {
+      transform: translateX(3px);
+    }
+
     /* --------- Final CTA --------- */
     .cta {
       position: relative;
@@ -2450,6 +2526,7 @@
           <a href="#questions">Answers</a>
           <a href="#personas">Teams</a>
           <a href="#quickstart">Quickstart</a>
+          <a href="articles.html">Articles</a>
           <a href="sample_report.html">Sample report</a>
           <a href="mailto:hi@repogauge.org">Contact</a>
         </nav>
@@ -3794,6 +3871,72 @@
         </div>
       </section>
 
+      <!-- ========== ARTICLES ========== -->
+      <section class="section" id="articles-preview">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <span class="kicker">Articles</span>
+              <h2>Writing for teams trying to adopt coding agents without guessing.</h2>
+            </div>
+            <p class="section-head__deck">
+              Practical pieces you can publish and share with engineering leaders, platform teams, and budget owners who
+              need evidence before changing their workflow.
+            </p>
+          </div>
+
+          <div class="articles-preview">
+            <a class="article-teaser reveal" href="articles.html#stop-vibes">
+              <div class="article-teaser__meta"><span>Strategy</span><span>6 min read</span></div>
+              <h3>Stop choosing coding agents from demos and vibes</h3>
+              <p>
+                Why demo tasks are a poor proxy for production engineering work, and how a repo-grounded benchmark
+                changes the decision.
+              </p>
+              <span class="article-teaser__link">
+                Read article
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                    stroke-linejoin="round" />
+                </svg>
+              </span>
+            </a>
+
+            <a class="article-teaser reveal" href="articles.html#own-repo">
+              <div class="article-teaser__meta"><span>Evaluation</span><span>7 min read</span></div>
+              <h3>The only coding agent benchmark that matters is your repo</h3>
+              <p>
+                A framework for turning historical fixes into repeatable tasks with measurable pass rate, cost, and
+                latency.
+              </p>
+              <span class="article-teaser__link">
+                Read article
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                    stroke-linejoin="round" />
+                </svg>
+              </span>
+            </a>
+
+            <a class="article-teaser reveal" href="articles.html#regressions">
+              <div class="article-teaser__meta"><span>Operations</span><span>5 min read</span></div>
+              <h3>The hidden cost of agent regressions</h3>
+              <p>
+                Agent adoption is not a one-time model choice. You need to notice when provider updates and prompts
+                quietly change behavior.
+              </p>
+              <span class="article-teaser__link">
+                Read article
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8h9M8.5 3l4 5-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                    stroke-linejoin="round" />
+                </svg>
+              </span>
+            </a>
+          </div>
+        </div>
+      </section>
+
       <!-- ========== FINAL CTA ========== -->
       <section class="section section--tight">
         <div class="container reveal">
@@ -3846,6 +3989,7 @@
           <a href="#pipeline">Pipeline</a>
           <a href="#personas">Teams</a>
           <a href="#quickstart">Quickstart</a>
+          <a href="articles.html">Articles</a>
           <a href="sample_report.html">Sample report</a>
           <a href="mailto:hi@repogauge.org">hi@repogauge.org</a>
           <a href="https://github.com/s1liconcow/repogauge" target="_blank" rel="noopener noreferrer">GitHub</a>
