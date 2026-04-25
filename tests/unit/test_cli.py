@@ -1220,6 +1220,130 @@ solvers:
                 manifest_payload["metadata"]["run_retry"]["retry_job_count"], 2
             )
 
+    def test_run_retry_failures_includes_unresolved_instance_results(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            root = Path(workspace)
+            artifact_dir = root / "artifact"
+            artifact_dir.mkdir()
+            dataset_path = artifact_dir / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "foo",
+                        "repo": "owner/repo",
+                        "base_commit": "abc",
+                        "problem_statement": "fix foo",
+                        "version": "1",
+                        "patch": "diff --git a/x b/x\n+print('foo')",
+                        "test_patch": "",
+                        "FAIL_TO_PASS": [],
+                        "PASS_TO_PASS": [],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            matrix_path = root / "matrix.yaml"
+            matrix_path.write_text(
+                """
+run_id: unit-run
+dataset:
+  path: artifact/dataset.jsonl
+providers:
+  mock:
+    kind: local
+execution:
+  repeats: 2
+  seed: 7
+  shuffle: false
+solvers:
+  - id: solver-a
+    provider: mock
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            out = root / "out"
+            prior_run_root = out / "unit-run"
+            (prior_run_root / "eval").mkdir(parents=True)
+            (prior_run_root / "run_jobs.jsonl").write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            "job_id": "unit-run:foo:solver-a:7",
+                            "instance_id": "foo",
+                            "solver_id": "solver-a",
+                            "status": "succeeded",
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "job_id": "unit-run:foo:solver-a:8",
+                            "instance_id": "foo",
+                            "solver_id": "solver-a",
+                            "status": "succeeded",
+                        }
+                    )
+                    + "\n"
+                ),
+                encoding="utf-8",
+            )
+            (prior_run_root / "eval" / "instance_results.jsonl").write_text(
+                json.dumps(
+                    {
+                        "instance_id": "foo",
+                        "solver_id": "solver-a",
+                        "status": "not_resolved",
+                        "resolved": False,
+                        "harness_outcome": "not_resolved",
+                        "failure_reason": "model_not_found",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = main(
+                [
+                    "run",
+                    str(matrix_path),
+                    "--out",
+                    str(out),
+                    "--retry-failures-from",
+                    str(prior_run_root),
+                ]
+            )
+            self.assertEqual(result, 0)
+
+            retry_run_root = out / "unit-run-retry"
+            jobs = [
+                json.loads(line)
+                for line in (retry_run_root / "jobs.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(jobs), 2)
+            self.assertEqual(
+                {(row["instance_id"], row["solver_id"], row["seed"]) for row in jobs},
+                {("foo", "solver-a", 7), ("foo", "solver-a", 8)},
+            )
+
+            manifest_payload = json.loads(
+                (out / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                manifest_payload["metadata"]["run_retry"]["source_instance_results"],
+                str(prior_run_root / "eval" / "instance_results.jsonl"),
+            )
+
     def test_run_rejects_unknown_solver_provider(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             root = Path(workspace)
@@ -2081,6 +2205,146 @@ solvers:
                 [str(run_root), str(retry_root)],
             )
             self.assertEqual(summary["summary"][0]["resolved_instance_count"], 1)
+
+    def test_analyze_merge_retries_partial_eval_writes_fresh_eval_under_analyze_out(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            parent = Path(workspace) / "run"
+            run_root = parent / "unit-run"
+            retry_root = parent / "unit-run-retry"
+            run_root.mkdir(parents=True)
+            retry_root.mkdir(parents=True)
+            dataset_path = parent / "dataset.jsonl"
+            dataset_path.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-1",
+                        "repo": "owner/repo",
+                        "base_commit": "abc",
+                        "problem_statement": "Fix the parser regression.",
+                        "version": "1",
+                        "patch": "diff --git a/x b/x\n+print('gold')",
+                        "test_patch": "",
+                        "FAIL_TO_PASS": [],
+                        "PASS_TO_PASS": [],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (run_root / "attempts.jsonl").write_text(
+                json.dumps(
+                    {
+                        "attempt_id": "unit-run:inst-1:solver-a:7:attempt-1",
+                        "job_id": "unit-run:inst-1:solver-a:7",
+                        "solver_id": "solver-a",
+                        "instance_id": "inst-1",
+                        "duration_ms": 100,
+                        "cost": {"total_cost": 2.0},
+                        "attempt_state": "invalid_patch",
+                        "dataset_path": str(dataset_path),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (retry_root / "attempts.jsonl").write_text(
+                json.dumps(
+                    {
+                        "attempt_id": "unit-run-retry:inst-1:solver-a:7:attempt-1",
+                        "job_id": "unit-run-retry:inst-1:solver-a:7",
+                        "solver_id": "solver-a",
+                        "instance_id": "inst-1",
+                        "duration_ms": 50,
+                        "cost": {"total_cost": 1.0},
+                        "attempt_state": "succeeded",
+                        "model_patch": "diff --git a/x b/x\n+print('ok')",
+                        "dataset_path": str(dataset_path),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (run_root / "eval").mkdir()
+            (run_root / "eval" / "instance_results.jsonl").write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-1",
+                        "solver_id": "solver-a",
+                        "status": "not_resolved",
+                        "resolved": False,
+                        "harness_outcome": "not_resolved",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            def _fake_eval(**kwargs):
+                eval_out = kwargs["out_root"]
+                instance_results_path = eval_out / "instance_results.jsonl"
+                eval_out.mkdir(parents=True, exist_ok=True)
+                instance_results_path.write_text(
+                    json.dumps(
+                        {
+                            "instance_id": "inst-1",
+                            "solver_id": "solver-a",
+                            "status": "resolved",
+                            "resolved": True,
+                            "harness_outcome": "resolved",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                return EvalRunSummary(
+                    validation_path=str(eval_out / "validation.jsonl"),
+                    total=1,
+                    resolved=1,
+                    not_resolved=0,
+                    error=0,
+                    skipped=0,
+                    resolve_rate=1.0,
+                    instance_results_path=str(instance_results_path),
+                    dataset_path=str(dataset_path),
+                    predictions_path=str(kwargs["predictions_path"]),
+                )
+
+            with patch("repogauge.cli._run_containerized_eval") as mock_eval:
+                mock_eval.side_effect = _fake_eval
+                result = main(
+                    [
+                        "analyze",
+                        str(run_root),
+                        "--merge-retries",
+                        "--dataset",
+                        str(dataset_path),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                mock_eval.call_args.kwargs["out_root"], run_root / "analyze" / "eval"
+            )
+            self.assertEqual(
+                mock_eval.call_args.kwargs["predictions_path"],
+                run_root / "analyze" / "predictions.jsonl",
+            )
+
+            manifest = json.loads(
+                (run_root / "analyze" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                Path(manifest["artifact_paths"]["analyze_instance_results"]),
+                run_root / "analyze" / "eval" / "instance_results.jsonl",
+            )
+            self.assertEqual(
+                manifest["metadata"]["analyze"]["retry_merge"][
+                    "missing_instance_result_run_roots"
+                ],
+                [str(retry_root)],
+            )
 
     def test_analyze_judge_diffs_writes_artifact_and_report_block(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

@@ -82,8 +82,9 @@ DRY_RUN_HELP = (
     "Validate inputs and render intended commands without mutating artifacts."
 )
 RETRY_FAILURES_FROM_HELP = (
-    "Path to a prior run root or run_jobs.jsonl. Retries only the jobs whose "
-    "final prior status was unsuccessful."
+    "Path to a prior run root or run_jobs.jsonl. Retries jobs whose final prior "
+    "status was unsuccessful, plus unresolved eval rows when instance_results "
+    "artifacts are available."
 )
 LLM_MODE_HELP = (
     "Control advisory triage model usage: off/local_only/allow_remote. "
@@ -645,7 +646,29 @@ def _job_seed_from_job_id(job_id: str) -> str:
     return seed.strip()
 
 
-def _load_retry_failure_keys(run_jobs_path: Path) -> set[tuple[str, str, str]]:
+def _instance_result_is_unsuccessful(row: Mapping[str, Any]) -> bool:
+    resolved = row.get("resolved")
+    if isinstance(resolved, bool):
+        return not resolved
+
+    status = str(row.get("status", "")).strip().lower()
+    if status in {"resolved", "passed", "pass"}:
+        return False
+    if status:
+        return True
+
+    return bool(
+        _coerce_str(row.get("reason"))
+        or _coerce_str(row.get("failure_reason"))
+        or _coerce_str(row.get("error"))
+    )
+
+
+def _load_retry_failure_keys(
+    run_jobs_path: Path,
+    *,
+    instance_results_path: Path | None = None,
+) -> set[tuple[str, str, str]]:
     final_status_by_key: dict[tuple[str, str, str], str] = {}
     try:
         for raw_line in run_jobs_path.read_text(encoding="utf-8").splitlines():
@@ -668,11 +691,32 @@ def _load_retry_failure_keys(run_jobs_path: Path) -> set[tuple[str, str, str]]:
             f"retry source is not valid JSONL: {run_jobs_path}"
         ) from exc
 
-    return {
+    failure_keys = {
         key
         for key, status in final_status_by_key.items()
         if status in _RETRYABLE_RUN_JOB_STATUSES
     }
+
+    if instance_results_path is None or not instance_results_path.exists():
+        return failure_keys
+
+    unresolved_pairs: set[tuple[str, str]] = set()
+    for row in load_instance_result_rows(instance_results_path):
+        instance_id = str(row.get("instance_id", "")).strip()
+        solver_id = str(row.get("solver_id", "")).strip()
+        if not instance_id or not solver_id:
+            continue
+        if _instance_result_is_unsuccessful(row):
+            unresolved_pairs.add((instance_id, solver_id))
+
+    if not unresolved_pairs:
+        return failure_keys
+
+    for key in final_status_by_key:
+        if (key[0], key[1]) in unresolved_pairs:
+            failure_keys.add(key)
+
+    return failure_keys
 
 
 def _format_unexpected_error(exc: Exception) -> str:
@@ -894,6 +938,11 @@ def _merge_retry_family_artifacts(
     )
 
     merged_instance_results_output: Path | None = None
+    missing_instance_result_run_roots = [
+        str(run_root)
+        for run_root, path in zip(run_roots, instance_result_paths, strict=False)
+        if path is None
+    ]
     if instance_result_paths and all(
         path is not None for path in instance_result_paths
     ):
@@ -915,6 +964,7 @@ def _merge_retry_family_artifacts(
             "merged_retry_instance_result_rows": len(merged_instance_results)
             if merged_instance_results_output is not None
             else 0,
+            "missing_instance_result_run_roots": missing_instance_result_run_roots,
         },
     )
 
@@ -2108,8 +2158,14 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     )
 
             if auto_eval_error is None and dataset_path is not None:
-                eval_out_root = analyze_root / "eval"
-                predictions_path = analyze_root / "predictions.jsonl"
+                auto_eval_root = (
+                    out_root
+                    if analyze_merge_metadata is not None
+                    and instance_results_path is None
+                    else analyze_root
+                )
+                eval_out_root = auto_eval_root / "eval"
+                predictions_path = auto_eval_root / "predictions.jsonl"
                 print(
                     f"repogauge analyze: building predictions from {attempts_path}",
                     file=sys.stderr,
@@ -2699,6 +2755,7 @@ def _run_command(namespace: argparse.Namespace) -> int:
         )
         try:
             retry_run_jobs_path: Path | None = None
+            retry_instance_results_path: Path | None = None
             retry_run_root: Path | None = None
             retry_failure_keys: set[tuple[str, str, str]] | None = None
             effective_run_id = namespace.run_id or None
@@ -2707,10 +2764,17 @@ def _run_command(namespace: argparse.Namespace) -> int:
                     namespace.retry_failures_from
                 )
                 retry_run_root = retry_run_jobs_path.parent
-                retry_failure_keys = _load_retry_failure_keys(retry_run_jobs_path)
+                retry_instance_results_path = _instance_results_artifact_for_run_root(
+                    retry_run_root
+                )
+                retry_failure_keys = _load_retry_failure_keys(
+                    retry_run_jobs_path,
+                    instance_results_path=retry_instance_results_path,
+                )
                 if not retry_failure_keys:
                     raise SolverSchedulerError(
-                        f"retry source has no unsuccessful jobs: {retry_run_jobs_path}"
+                        "retry source has no unsuccessful jobs or unresolved "
+                        f"instance results: {retry_run_jobs_path}"
                     )
                 if not effective_run_id:
                     effective_run_id = f"{retry_run_root.name}-retry"
@@ -2931,6 +2995,11 @@ def _run_command(namespace: argparse.Namespace) -> int:
             if retry_run_jobs_path is not None:
                 manifest.metadata["run_retry"] = {
                     "source_run_jobs": str(retry_run_jobs_path),
+                    "source_instance_results": (
+                        str(retry_instance_results_path)
+                        if retry_instance_results_path is not None
+                        else None
+                    ),
                     "retry_job_count": len(jobs),
                     "retry_statuses": sorted(_RETRYABLE_RUN_JOB_STATUSES),
                 }

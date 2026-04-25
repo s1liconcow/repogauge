@@ -3,9 +3,12 @@ __pycache__/
 *.egg-info/
 .repogauge
 out/
+out2/
+golang/
 logs/
 .e2e_tmp/
 **/__pycache__
+site/.codex
 
 # bv (beads viewer) local config and caches
 .bv/
