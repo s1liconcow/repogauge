@@ -1,0 +1,56 @@
+run_id: repogauge-cli-compare
+dataset:
+  path: ../out/eval/dataset.resolved.jsonl
+providers:
+  codex:
+    kind: codex_cli
+    command: codex
+execution:
+  repeats: 1
+  seed: 13
+solvers:
+  - id: codex-cli-55
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.5
+    timeout_seconds: 300
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
+  - id: codex-cli-54
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.4
+    timeout_seconds: 300
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
+  - id: codex-cli-mini
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.4-mini
+    timeout_seconds: 300
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
+  - id: codex-cli-spark
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.3-codex
+    timeout_seconds: 300
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
+  - id: codex-cli-spark
+    provider: codex
+    adapter: codex_cli
+    model: gpt-5.3-codex-spark
+    timeout_seconds: 300
+    prompt_policy:
+      template: concise
+    tool_policy:
+      safe: true
