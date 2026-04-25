@@ -154,10 +154,10 @@ def _normalize_provider(value: Any) -> str:
 
 
 def _default_model_name(provider: str) -> str:
-    if provider in _ANTHROPIC_PROVIDERS:
-        return "claude-sonnet-4.6"
     if provider in {"codex", "codex-cli"}:
-        return "gpt-5.4"
+        return "gpt-5.5"
+    if provider in _ANTHROPIC_PROVIDERS:
+        return "opus-4.6"
     if provider in LOCAL_ONLY_PROVIDERS:
         return "local-judge"
     if provider in _OPENAI_COMPATIBLE_PROVIDERS:
