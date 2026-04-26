@@ -432,9 +432,9 @@ def test_run_diff_judge_defaults_to_codex_cli_provider(tmp_path: Path) -> None:
     command = call.args[0]
     assert command[:4] == ["codex", "--ask-for-approval", "never", "exec"]
     assert "--model" in command
-    assert command[command.index("--model") + 1] == "gpt-5.4"
+    assert command[command.index("--model") + 1] == "gpt-5.5"
     assert result.model["provider"] == "codex"
-    assert result.model["model_name"] == "gpt-5.4"
+    assert result.model["model_name"] == "gpt-5.5"
     assert result.rows[0]["overall_label"] == "better"
     assert result.rows[0]["metadata"]["judge_status"] == "scored"
     assert (tmp_path / ".repogauge" / "judge-codex-home" / ".codex").exists()
