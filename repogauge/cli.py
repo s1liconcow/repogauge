@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from repogauge.cloud_bundle import package_cloud_bundle
 from repogauge.export import run_export, run_materialization
 from repogauge.review import run_review
 
@@ -112,6 +113,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "run",
         "analyze",
         "train-router",
+        "cloud-bundle",
         "cleanup",
     ]:
         cmd = subparsers.add_parser(name, help=f"{name} command")
@@ -330,6 +332,19 @@ def _build_parser() -> argparse.ArgumentParser:
                 type=int,
                 help="Maximum tree depth for the supervised router baseline.",
             )
+        if name == "cloud-bundle":
+            cmd.add_argument(
+                "--bundle",
+                help="Output bundle archive path (defaults to <out>/repogauge-bundle.zip).",
+            )
+            cmd.add_argument(
+                "--manifest",
+                help="Output manifest JSON path (defaults beside the bundle archive).",
+            )
+            cmd.add_argument(
+                "--repo-display-name",
+                help="Source-free repository label to include in the bundle manifest.",
+            )
         if name == "cleanup":
             cmd.add_argument(
                 "--container-runtime",
@@ -403,6 +418,15 @@ def _inputs_hash(command: str, namespace: argparse.Namespace) -> str:
         "container_host": (
             getattr(namespace, "container_host", "")
             if command in {"eval", "run", "analyze", "cleanup"}
+            else ""
+        ),
+        "bundle": getattr(namespace, "bundle", "") if command == "cloud-bundle" else "",
+        "manifest": (
+            getattr(namespace, "manifest", "") if command == "cloud-bundle" else ""
+        ),
+        "repo_display_name": (
+            getattr(namespace, "repo_display_name", "")
+            if command == "cloud-bundle"
             else ""
         ),
     }
@@ -1081,6 +1105,108 @@ def _run_command(namespace: argparse.Namespace) -> int:
                 + "Z",
             },
             events_path,
+        )
+        return 0
+
+    if command == "cloud-bundle":
+        manifest.mark_step(
+            "inspect", ManifestStepStatus.RUNNING, started_at=command_timestamp
+        )
+        try:
+            bundle_path = (
+                Path(namespace.bundle).resolve()
+                if namespace.bundle
+                else out_root / "repogauge-bundle.zip"
+            )
+            cloud_manifest_path = (
+                Path(namespace.manifest).resolve() if namespace.manifest else None
+            )
+            result = package_cloud_bundle(
+                source,
+                bundle_path=bundle_path,
+                manifest_path=cloud_manifest_path,
+                repo_display_name=namespace.repo_display_name,
+            )
+            for warning in result.warnings:
+                print(f"warning: {warning}", file=sys.stderr)
+
+            manifest.mark_step("inspect", ManifestStepStatus.SUCCEEDED)
+            manifest.mark_step(
+                "execute",
+                ManifestStepStatus.SUCCEEDED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.artifact_paths["cloud_bundle"] = str(result.bundle_path)
+            manifest.artifact_paths["cloud_bundle_manifest"] = str(result.manifest_path)
+            manifest.metadata["cloud_bundle"] = {
+                "bundle_id": result.bundle_id,
+                "bundle_sha256": result.bundle_sha256,
+                "artifact_count": len(result.artifacts),
+                "warnings": list(result.warnings),
+            }
+        except Exception as exc:
+            manifest.mark_step(
+                "inspect",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.mark_step("execute", ManifestStepStatus.SKIPPED)
+            manifest.finish(
+                status="failed",
+                metadata={"reason": "cloud_bundle_failed", "error": str(exc)},
+            )
+            manifest.mark_step(
+                "finish",
+                ManifestStepStatus.FAILED,
+                ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                + "Z",
+            )
+            manifest.write(manifest_path)
+            log_event(
+                {
+                    "event": "command.finish",
+                    "command": command,
+                    "status": manifest.status,
+                    "timestamp": manifest.ended_at,
+                    "error": str(exc),
+                },
+                events_path,
+            )
+            print(f"repogauge cloud-bundle: error: {exc}", file=sys.stderr)
+            return 1
+
+        manifest.mark_step(
+            "finish",
+            ManifestStepStatus.SUCCEEDED,
+            ended_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+        )
+        manifest.finish(
+            status="succeeded",
+            metadata={"reason": "cloud_bundle_complete", "path": namespace.path},
+        )
+        manifest.write(manifest_path)
+        log_event(
+            {
+                "event": "command.finish",
+                "command": command,
+                "status": manifest.status,
+                "timestamp": manifest.ended_at,
+                "bundle_id": result.bundle_id,
+            },
+            events_path,
+        )
+        print(
+            "packaged source-safe cloud bundle "
+            f"{result.bundle_id} with {len(result.artifacts)} artifacts: "
+            f"{result.bundle_path}",
+            file=sys.stderr,
+        )
+        print(
+            "Review warnings before upload. Source-adjacent artifacts are explicitly "
+            "listed in the manifest allowlist; raw source and secrets are not included.",
+            file=sys.stderr,
         )
         return 0
 

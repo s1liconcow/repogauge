@@ -164,6 +164,19 @@ uv run repogauge train-router ./out/run/<run_id>
 Fits a small decision-tree router on `router_train.parquet` so future runs
 can pick the cheapest solver likely to succeed on each task.
 
+### 8. Package a source-safe cloud bundle
+
+```bash
+uv run repogauge cloud-bundle ./out/run/<run_id>/analyze --out ./out/cloud
+```
+
+`cloud-bundle` packages an existing local report directory into a deterministic
+`.zip` archive with a top-level `manifest.json` compatible with RepoGauge Cloud
+uploads. The source directory must contain `analysis_report.json` and at least
+one of `attempts.jsonl` or `instance_results.jsonl`. The command includes only
+approved report artifacts, prints warnings for absolute-path-like or
+source-snippet-like text, and never mutates the original run directory.
+
 ## What you can answer with this
 
 Concrete questions that go from "hand-wave" to "here's the parquet":
@@ -250,6 +263,7 @@ Planned follow-on work after the current multi-language v1 includes:
 | `repogauge run MATRIX` | Execute a solver matrix |
 | `repogauge analyze RUN` | Produce per-solver cost/quality reports |
 | `repogauge train-router RUN` | Fit a cost-aware solver router |
+| `repogauge cloud-bundle RUN_ANALYZE_DIR` | Package a source-safe cloud upload bundle |
 
 Global flags on every command:
 
@@ -317,6 +331,7 @@ command-specific outputs:
 | `eval` | `dataset.resolved.jsonl`, `predictions.resolved.jsonl`, `validation.jsonl`, `instance_results.jsonl` |
 | `run` | `matrix.yaml`, `jobs.jsonl`, `attempts.jsonl`, `attempts.parquet`, `attempt_logs/`, `attempt_workspaces/`, `run_summary.json` |
 | `analyze` | `router_train.parquet`, `summary.json`, `analysis_report.json` |
+| `cloud-bundle` | `repogauge-bundle.zip`, `repogauge-bundle.manifest.json` |
 
 ## Docs and examples
 

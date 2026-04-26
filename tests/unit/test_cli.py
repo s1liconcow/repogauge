@@ -8,6 +8,7 @@ from contextlib import redirect_stderr
 from unittest.mock import Mock, patch
 import tempfile
 from pathlib import Path
+import zipfile
 import yaml
 from repogauge.runner.scheduler import SolverJobProgress, SolverScheduleResult
 from repogauge.validation.validate import EvalRunSummary
@@ -30,6 +31,7 @@ class TestCliSurface(unittest.TestCase):
             "run",
             "analyze",
             "train-router",
+            "cloud-bundle",
             "cleanup",
         ):
             args = [cmd]
@@ -155,6 +157,164 @@ class TestCliSurface(unittest.TestCase):
         )
         self.assertEqual(namespace.container_runtime, "docker")
         self.assertEqual(namespace.container_host, "unix:///tmp/docker.sock")
+        namespace = self.parser.parse_args(
+            [
+                "cloud-bundle",
+                "./out/analyze",
+                "--bundle",
+                "./bundle.zip",
+                "--manifest",
+                "./bundle.manifest.json",
+                "--repo-display-name",
+                "Example Repo",
+            ]
+        )
+        self.assertEqual(namespace.bundle, "./bundle.zip")
+        self.assertEqual(namespace.manifest, "./bundle.manifest.json")
+        self.assertEqual(namespace.repo_display_name, "Example Repo")
+
+    def test_cloud_bundle_packages_source_safe_manifest_and_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            source = Path(workspace) / "analyze"
+            source.mkdir()
+            (source / "analysis_report.json").write_text(
+                json.dumps({"totals": {"passed": 1}}) + "\n",
+                encoding="utf-8",
+            )
+            (source / "attempts.jsonl").write_text(
+                json.dumps({"instance_id": "task-1", "cost_usd": 0.01}) + "\n",
+                encoding="utf-8",
+            )
+            (source / "report.html").write_text("<html>ok</html>\n", encoding="utf-8")
+
+            out = Path(workspace) / "cloud"
+            result = main(
+                [
+                    "cloud-bundle",
+                    str(source),
+                    "--out",
+                    str(out),
+                    "--repo-display-name",
+                    "Example Repo",
+                ]
+            )
+
+            self.assertEqual(result, 0)
+            bundle_path = out / "repogauge-bundle.zip"
+            cloud_manifest_path = out / "repogauge-bundle.manifest.json"
+            self.assertTrue(bundle_path.exists())
+            self.assertTrue(cloud_manifest_path.exists())
+
+            manifest = json.loads(cloud_manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], "2026-04-24.1")
+            self.assertEqual(manifest["repo_display_name"], "Example Repo")
+            self.assertEqual(manifest["created_at"], "1970-01-01T00:00:00Z")
+            self.assertFalse(manifest["source_policy"]["contains_raw_source"])
+            self.assertEqual(
+                manifest["source_policy"]["allowed_source_adjacent_artifacts"],
+                ["attempts.jsonl", "report.html"],
+            )
+            self.assertEqual(
+                [artifact["path"] for artifact in manifest["artifacts"]],
+                ["analysis_report.json", "attempts.jsonl", "report.html"],
+            )
+            self.assertEqual(
+                {artifact["path"]: artifact["class"] for artifact in manifest["artifacts"]},
+                {
+                    "analysis_report.json": "A_SOURCE_FREE_METRIC",
+                    "attempts.jsonl": "B_SOURCE_ADJACENT",
+                    "report.html": "B_SOURCE_ADJACENT",
+                },
+            )
+
+            with zipfile.ZipFile(bundle_path) as archive:
+                self.assertEqual(
+                    archive.namelist(),
+                    [
+                        "manifest.json",
+                        "analysis_report.json",
+                        "attempts.jsonl",
+                        "report.html",
+                    ],
+                )
+                archived_manifest = json.loads(
+                    archive.read("manifest.json").decode("utf-8")
+                )
+                self.assertEqual(archived_manifest, manifest)
+
+            cli_manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(cli_manifest["artifact_paths"]["cloud_bundle"], str(bundle_path))
+            self.assertEqual(
+                cli_manifest["artifact_paths"]["cloud_bundle_manifest"],
+                str(cloud_manifest_path),
+            )
+            self.assertEqual(
+                cli_manifest["metadata"]["cloud_bundle"]["artifact_count"], 3
+            )
+
+    def test_cloud_bundle_is_deterministic_for_identical_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            source = Path(workspace) / "analyze"
+            source.mkdir()
+            (source / "analysis_report.json").write_text("{}", encoding="utf-8")
+            (source / "instance_results.jsonl").write_text(
+                json.dumps({"instance_id": "task-1", "resolved": True}) + "\n",
+                encoding="utf-8",
+            )
+
+            first = Path(workspace) / "first"
+            second = Path(workspace) / "second"
+            self.assertEqual(main(["cloud-bundle", str(source), "--out", str(first)]), 0)
+            self.assertEqual(main(["cloud-bundle", str(source), "--out", str(second)]), 0)
+
+            self.assertEqual(
+                (first / "repogauge-bundle.zip").read_bytes(),
+                (second / "repogauge-bundle.zip").read_bytes(),
+            )
+
+    def test_cloud_bundle_requires_report_and_result_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            source = Path(workspace) / "analyze"
+            source.mkdir()
+            (source / "analysis_report.json").write_text("{}", encoding="utf-8")
+
+            out = Path(workspace) / "cloud"
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                result = main(["cloud-bundle", str(source), "--out", str(out)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("requires at least one of attempts.jsonl", stderr.getvalue())
+
+    def test_cloud_bundle_warns_about_path_and_source_like_content(self) -> None:
+        with tempfile.TemporaryDirectory() as workspace:
+            source = Path(workspace) / "analyze"
+            source.mkdir()
+            (source / "analysis_report.json").write_text(
+                json.dumps({"log": "/home/david/project"}) + "\n",
+                encoding="utf-8",
+            )
+            (source / "attempts.jsonl").write_text(
+                json.dumps({"prompt": "def unsafe_example(): pass"}) + "\n",
+                encoding="utf-8",
+            )
+
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                result = main(
+                    ["cloud-bundle", str(source), "--out", str(Path(workspace) / "out")]
+                )
+
+            self.assertEqual(result, 0)
+            warning_output = stderr.getvalue()
+            self.assertIn(
+                "warning: analysis_report.json: contains absolute-path-like text",
+                warning_output,
+            )
+            self.assertIn(
+                "warning: attempts.jsonl: contains source-snippet-like text",
+                warning_output,
+            )
 
     def test_llm_mode_help_notes_review_and_analyze_behavior(self) -> None:
         subparsers_action = next(
