@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The HTTP/2 window guard for nginx at /usr/sbin/nginx. gen_offsets.py
+# reads the offset of the guard from that binary at bpm build, on the
+# operator host.
+
+[package]
+name = "nginx2shell-h2-window-guard"
+description = "Kills an nginx worker whose HTTP/2 connection window passes NGX_HTTP_V2_MAX_WINDOW, NGINX2Shell CVE-2026-123007"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[files]]
+source = "gen_offsets.py"
+
+[[files]]
+source = "nginx2shell-h2-window-guard.bpf.c"
+
+[[upatches]]
+source = "nginx2shell-h2-window-guard.bpf.c"
+
+[[upatches.rodata]]
+symbol = "nginx_h2c_send_window"
+input = "nginx2shell-h2-window-guard.bpf.c"
+generator = ["python3", "gen_offsets.py"]
+update = ["python3", "gen_offsets.py"]
+
+[upatches.tree]
+id = "nginx2shell-h2-window-guard"
+fixes = ["CVE-2026-123007"]
+
+[upatches.tree.selector]
+architecture = ["x86_64"]
+
+[upatches.tree.selector.kconfig]
+CONFIG_UPROBE_EVENTS = ["y"]

@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The guard for Ruby 3.3 under /usr/local.
+
+[package]
+name = "ruby2shell-casemap-guard-3.3"
+description = "Kills a Ruby process before a case mapping overruns its buffer, Ruby2Shell CVE-2026-132825"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[upatches]]
+source = "ruby2shell-casemap-guard-3.3.bpf.c"
+
+[upatches.tree]
+id = "ruby2shell-casemap-guard-3.3"
+fixes = ["CVE-2026-132825", "GHSA-34m4-m9fh-gqp5", "GHSA-87fm-7w84-j2px"]
+
+[upatches.tree.selector]
+architecture = ["x86_64"]
+
+[upatches.tree.selector.kconfig]
+CONFIG_UPROBE_EVENTS = ["y"]

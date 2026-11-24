@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The guard for Ruby 4.0 under /usr/local. ruby-3.4.bee and ruby-3.3.bee
+# build the guards for Ruby 3.4 and 3.3 (shirudo bpm build --file
+# <file>).
+
+[package]
+name = "ruby2shell-casemap-guard-4.0"
+description = "Kills a Ruby process before a case mapping overruns its buffer, Ruby2Shell CVE-2026-132825"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[upatches]]
+source = "ruby2shell-casemap-guard-4.0.bpf.c"
+
+[upatches.tree]
+id = "ruby2shell-casemap-guard-4.0"
+fixes = ["CVE-2026-132825", "GHSA-34m4-m9fh-gqp5", "GHSA-87fm-7w84-j2px"]
+
+[upatches.tree.selector]
+architecture = ["x86_64"]
+
+[upatches.tree.selector.kconfig]
+CONFIG_UPROBE_EVENTS = ["y"]
