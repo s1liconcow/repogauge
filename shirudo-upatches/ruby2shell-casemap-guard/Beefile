@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# The guard for Ruby 4.0 under /usr/local. ruby-3.4.bee and ruby-3.3.bee
-# build the guards for Ruby 3.4 and 3.3 (shirudo bpm build --file
-# <file>).
+# The guard for Ruby 4.0 under /usr/local. ruby-3.4.bee, ruby-3.3.bee and
+# ruby-3.2.bee build the guards for Ruby 3.4, 3.3 and 3.2 (shirudo bpm
+# build --file <file>).
 
 [package]
 name = "ruby2shell-casemap-guard-4.0"

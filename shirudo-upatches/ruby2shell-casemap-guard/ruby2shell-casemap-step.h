@@ -12,7 +12,7 @@
 #ifndef RUBY2SHELL_CASEMAP_STEP_H
 #define RUBY2SHELL_CASEMAP_STEP_H
 
-/* include/ruby/onigmo.h, Ruby 3.3 to 4.0. */
+/* include/ruby/onigmo.h, Ruby 3.2 to 4.0. */
 #define ONIGENC_CASE_UPCASE	(1U << 13)
 #define ONIGENC_CASE_DOWNCASE	(1U << 14)
 #define ONIGENC_CASE_TITLECASE	(1U << 15)

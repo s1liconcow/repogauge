@@ -117,10 +117,10 @@ on the order of 3% of a CPU at 10,000 HTTP/2 requests a second.
 
 - The guard turns the corruption into a crash of a worker; an HTTP/2
   client can still crash workers.
-- It covers CVE-2026-123007 only. The other four NGINX2Root CVEs, the
-  HTTP/2 upstream use-after-free CVE-2026-123633, the resolver
-  CVE-2026-123634, HTTP/3 CVE-2026-121810 and the mail proxy
-  CVE-2026-113425, have no guard here; `2shell-sandbox` contains what a
+- It covers CVE-2026-123007 only. `nginx2root-h2-drain-guard` covers
+  the HTTP/2 upstream use-after-free of the set, CVE-2026-123633. The
+  resolver CVE-2026-123634, HTTP/3 CVE-2026-121810 and the mail proxy
+  CVE-2026-113425 have no guard here; `2shell-sandbox` contains what a
   compromised worker does next, and `nginx2root-sctp-block` the kernel
   bug the set uses to reach root.
 - A nested `ngx_http_v2_close_stream()` on one thread overwrites the

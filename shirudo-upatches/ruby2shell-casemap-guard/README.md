@@ -4,7 +4,8 @@ The `ruby2shell-casemap-guard-*` packages install a upatch that kills a
 Ruby process with `SIGKILL` before a case mapping (`upcase`,
 `downcase(:fold)`, `capitalize`, `swapcase` and their `!` forms) writes
 past its buffer. That is Ruby2Shell, CVE-2026-132825
-(GHSA-34m4-m9fh-gqp5), in Ruby before 3.3.14, 3.4.13 and 4.0.10. The
+(GHSA-34m4-m9fh-gqp5), in Ruby before 3.3.14, 3.4.13 and 4.0.10, and in
+every Ruby 3.2, which is past its end of life and gets no fix. The
 guard also refuses the case-mapping buffers beyond `INT_MAX` of
 GHSA-87fm-7w84-j2px, fixed in the same releases, for these encodings.
 
@@ -48,9 +49,13 @@ is restarted by its supervisor. The request is lost.
 | `Beefile` | `ruby2shell-casemap-guard-4.0` | `/usr/local/lib/ruby/4.0.0/x86_64-linux/enc` |
 | `ruby-3.4.bee` | `ruby2shell-casemap-guard-3.4` | `/usr/local/lib/ruby/3.4.0/x86_64-linux/enc` |
 | `ruby-3.3.bee` | `ruby2shell-casemap-guard-3.3` | `/usr/local/lib/ruby/3.3.0/x86_64-linux/enc` |
+| `ruby-3.2.bee` | `ruby2shell-casemap-guard-3.2` | `/usr/local/lib/ruby/3.2.0/x86_64-linux/enc` |
 
 These are the directories of a Ruby built from source with the default
-prefix and of the official `ruby` images. Each package has fourteen
+prefix and of the official `ruby` images, which build with `make
+install` and do not strip, so `case_map` keeps its symbol. Ruby 3.2's
+fourteen `case_map()` functions and case flags are those of 3.3 to 4.0
+(checked on v3_2_9). Each package has fourteen
 programs, one per `.so`; the builder records each file's build ID, so
 it loads only with those same files installed. For rbenv, asdf, mise or
 rvm, copy a source and point `RUBY2SHELL_ENC_DIR` at

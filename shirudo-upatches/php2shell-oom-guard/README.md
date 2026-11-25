@@ -15,15 +15,20 @@ Before php-src 506e87fa7d ("Avoid state corruption via bailout"),
 `zend_bailout()`ed out of the allocation, from wherever in the engine
 it ran, leaving the structures being built half initialized for the
 shutdown code and the next request. A request that drives PHP to its
-`memory_limit` at the right place corrupts the worker. The fix unwinds
-with an `UnwindExit` exception instead of the bailout.
+`memory_limit` at the right place corrupts the worker. The size checks
+of the allocator (`zend_alloc.c`, `zend_multiply.h`) and of hash tables
+(`zend_hash.c`) bailed out the same way, with "Possible integer
+overflow in memory allocation (…)". The fix records all of these errors
+and unwinds with an `UnwindExit` exception instead of the bailout.
 
 The upatch's one program is a sleepable uprobe at the entry of
 `zend_error_noreturn()`, which every PHP since 7.0 exports. It reads the
 error type and the first bytes of the format, and for `E_ERROR` with a
-format that starts with `Allowed memory size of ` or `Out of memory` it
-sends `SIGKILL` to the process. The worker dies before any code runs on
-the half-built state. Every other error goes on.
+format that starts with `Allowed memory size of `, `Out of memory` or
+`Possible integer overflow in memory allocation`, the three the fix
+stops bailing out with, it sends `SIGKILL` to the process. The worker
+dies before any code runs on the half-built state. Every other error
+goes on.
 
 What user space sees:
 
@@ -99,19 +104,25 @@ with an atomic add. It is right on every preemption model.
 `zend_error_noreturn()` runs on fatal errors only, so the uprobe costs
 nothing on the paths a request normally takes. On PHP 7.0 it runs on
 every `zend_error()` call, warnings and notices included: one uprobe
-hit, a type compare and, for `E_ERROR`, a 13-byte copy.
+hit, a type compare and, for `E_ERROR`, a 13-byte copy, and a second of
+up to 46 bytes when those match the start of a prefix.
 
 ## Limits
 
-- The guard closes the path of the two CVEs as the fix describes it,
-  every bailout out of the memory manager; it does not stop a request
-  from exhausting `memory_limit`, which an attacker can still use to
-  kill workers one at a time.
+- The guard closes the path of the two CVEs as the fix describes it:
+  every bailout the fix turns into a delayed error, out of the memory
+  manager and out of the allocation size checks. The formats come from
+  the fix's diff, every `zend_mm_safe_error()` and
+  `zend_error_noreturn(E_ERROR, "Possible integer overflow in memory
+  allocation …")` it removes. It does not stop a request from
+  exhausting `memory_limit`, which an attacker can still use to kill
+  workers one at a time.
 - A binary must export `zend_error_noreturn`; every PHP 7 and 8 build
   does, as extensions link against it.
 - Validated here: the sources compile with shirudo's compiler flags,
-  and `zend_error_noreturn` resolves in Ubuntu 24.04's `php-fpm8.3`,
-  `php8.3` and `libphp8.3.so`, all stripped. Not yet done: a load in
+  `zend_error_noreturn` resolves in Ubuntu 24.04's `php-fpm8.3`,
+  `php8.3` and `libphp8.3.so`, all stripped, and the three prefixes are
+  the start of the format strings in `php-fpm8.3`. Not yet done: a load in
   shirudo's test VM and a run against a PHP that exceeds its
   `memory_limit`.
 - Upgrade PHP. `2shell-sandbox` contains what a compromised worker does

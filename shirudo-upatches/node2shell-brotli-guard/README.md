@@ -38,8 +38,13 @@ denial of service an attacker can repeat, in place of memory corruption.
 
 | Beefile | Package | For |
 |---|---|---|
-| `Beefile` | `node2shell-brotli-guard` | official Node.js 22 and 26 builds, checked on v22.23.3 and v26.12.0 |
+| `Beefile` | `node2shell-brotli-guard` | official Node.js 20, 22 and 26 builds, checked on v20.20.2, v22.23.3 and v26.12.0 |
 | `v24.bee` | `node2shell-brotli-guard-v24` | official Node.js 24 builds, checked on v24.22.0 |
+
+Node.js 20 reached its end of life in April 2026 and gets no fix: its
+last build, v20.20.2, bundles the vulnerable decoder, names the same six
+functions and has `num_block_types` at the same offset, so the guard is
+its only mitigation short of moving to a fixed line.
 
 Both name `/usr/local/bin/node`, where the official images and a release
 tarball unpacked into `/usr/local` put it. In v24.22.0, GCC cloned the
@@ -126,9 +131,11 @@ much per symbol.
   fails with "uprobe function … not found".
 - Validated here: the sources compile with shirudo's compiler flags,
   all six functions resolve to one address each in the official
-  v22.23.3, v24.22.0 and v26.12.0 linux-x64 binaries, and
+  v20.20.2, v22.23.3, v24.22.0 and v26.12.0 linux-x64 binaries, and
   `gen_offsets.py` reads `0x138`/`0x140`/`0x148` from each of them,
   which their disassembly confirms (`mov 0x138(%rdi),%r8; cmp $0x1,%r8`
-  at the start of `DecodeLiteralBlockSwitch`). Not yet done: a load in
-  shirudo's test VM.
+  at the start of `DecodeLiteralBlockSwitch`). On `num_block_types <=
+  1`, `SafeDecodeLiteralBlockSwitch` returns 0, "need more input", in
+  v20.20.2 and v22.23.3, and -17, `BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH`,
+  in the fixed v22.23.5. Not yet done: a load in shirudo's test VM.
 - Upgrade Node.js.

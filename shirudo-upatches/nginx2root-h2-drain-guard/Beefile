@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The HTTP/2 drain guard for nginx at /usr/sbin/nginx. It reads no
+# struct offsets: the uprobes name two exported functions.
+
+[package]
+name = "nginx2root-h2-drain-guard"
+description = "Kills an nginx worker before a connection drain closes HTTP/2 streams, NGINX2Root CVE-2026-123633"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[upatches]]
+source = "nginx2root-h2-drain-guard.bpf.c"
+
+[upatches.tree]
+id = "nginx2root-h2-drain-guard"
+fixes = ["CVE-2026-123633"]
+
+[upatches.tree.selector]
+architecture = ["x86_64"]
+
+[upatches.tree.selector.kconfig]
+CONFIG_UPROBE_EVENTS = ["y"]

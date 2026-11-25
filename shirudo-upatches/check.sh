@@ -4,7 +4,8 @@
 # Compile every upatch source of this tree the way shirudo build does
 # (tools/shirudo-build/compile.c: clang -target bpf -mcpu=v4
 # -fno-jump-tables -O2 -g), list the program sections of each object,
-# and run the host tests of tests/.
+# and run the host tests of tests/, which also build the Java agent of
+# java2shell-base64-guard and run it in the JDKs they find.
 #
 #   SHIRUDO_SRC=<shirudo checkout> shirudo-upatches/check.sh
 #
