@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The rules of each sandbox the Beefile declares as a policy. README.md
+# describes the keys and what each sandbox breaks.
+
+[networks]
+localnet = [
+	"127.0.0.0/8",
+	"10.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
+	"169.254.0.0/16",
+	"::1/128",
+	"fc00::/7",
+	"fe80::/10",
+]
+
+# app-sandbox's sandboxes, unchanged.
+[sandbox.apache]
+exec = []
+network = ["@localnet"]
+
+[sandbox.apache.deny]
+create = ["*.php"]
+rename = ["*.php"]
+write = ["*.php"]
+
+[sandbox.php-fpm]
+exec = []
+network = ["@localnet"]
+
+[sandbox.php-fpm.deny]
+create = ["*.php", "*.phar", "*.phtml", "*.pht", "*.php?"]
+rename = ["*.php", "*.phar", "*.phtml", "*.pht", "*.php?"]
+write = ["*.php", "*.phar", "*.phtml", "*.pht", "*.php?"]
+
+# NGINX2Root: a worker runs no other program (the master re-executes
+# nginx itself on a binary upgrade, which its own label allows) and
+# writes no file a PHP or CGI backend or the dynamic loader would run.
+# No network rule: nginx proxies to upstreams, resolves names and
+# fetches OCSP responses wherever its configuration says.
+[sandbox.nginx]
+exec = []
+
+[sandbox.nginx.deny]
+create = ["*.php", "*.phar", "*.phtml", "*.pht", "*.php?", "*.so", "*.sh", "*.cgi"]
+rename = ["*.php", "*.phar", "*.phtml", "*.pht", "*.php?", "*.so", "*.sh", "*.cgi"]
+write = ["*.php", "*.phar", "*.phtml", "*.pht", "*.php?", "*.so", "*.sh", "*.cgi"]
+
+# Plex2Shell ends in a codec library the server writes and the
+# transcoder then loads, and in miners and proxies the server starts.
+# The Plex programs start only each other, and write no shared object
+# or script: codec downloads fail while this is loaded. No network
+# rule: the server talks to plex.tv and metadata providers.
+[sandbox.plex]
+exec = []
+
+[sandbox.plex.deny]
+create = ["*.so", "*.py", "*.sh"]
+rename = ["*.so", "*.py", "*.sh"]
+write = ["*.so", "*.py", "*.sh"]

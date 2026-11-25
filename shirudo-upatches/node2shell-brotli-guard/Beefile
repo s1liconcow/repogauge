@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The guard for official Node.js 22 and 26 builds at
+# /usr/local/bin/node; v24.bee builds the one for Node.js 24 (shirudo
+# bpm build --file v24.bee).
+# gen_offsets.py reads the offsets of the guard from the node binary the
+# source names, at bpm build, on the operator host.
+
+[package]
+name = "node2shell-brotli-guard"
+description = "Kills a Node.js process before its bundled Brotli decoder switches a tree of one block type, Node2Shell CVE-2026-111497"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[files]]
+source = "gen_offsets.py"
+
+[[files]]
+source = "node2shell-brotli-guard.bpf.c"
+
+[[upatches]]
+source = "node2shell-brotli-guard.bpf.c"
+
+[[upatches.rodata]]
+symbol = "brotli_num_block_types"
+input = "node2shell-brotli-guard.bpf.c"
+generator = ["python3", "gen_offsets.py"]
+update = ["python3", "gen_offsets.py"]
+
+[upatches.tree]
+id = "node2shell-brotli-guard"
+fixes = ["CVE-2026-111497"]
+
+[upatches.tree.selector]
+architecture = ["x86_64"]
+
+[upatches.tree.selector.kconfig]
+CONFIG_UPROBE_EVENTS = ["y"]

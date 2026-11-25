@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+[package]
+name = "nginx2root-sctp-block"
+description = "Refuses SCTP sockets to user space, the kernel half of the NGINX2Root chain"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[upatches]]
+source = "nginx2root-sctp-block.bpf.c"
+
+# The SCTP use-after-free has no CVE yet: no fixes key until it has one.
+[upatches.tree]
+id = "nginx2root-sctp-block"
+
+[upatches.tree.selector.kconfig]
+CONFIG_IP_SCTP = ["y", "m"]

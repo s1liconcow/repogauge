@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# app-sandbox of shirudo with sandboxes for the servers of the 2shell
+# advisories. 2shell-sandbox.bpf.c and gen_policy.py are app-
+# sandbox.bpf.c
+# and gen_policy.py of shirudo, unchanged; README.md names the commit.
+# apache and php-fpm keep the IDs and bits of app-sandbox, so this
+# package replaces it on a node: load one or the other.
+
+[package]
+name = "2shell-sandbox"
+description = "Sandboxes Apache, PHP-FPM, nginx and Plex Media Server: no other programs, no new code files, for the 2shell advisories"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[files]]
+source = "sandbox.toml"
+
+[[files]]
+source = "gen_policy.py"
+
+[[upatches]]
+source = "2shell-sandbox.bpf.c"
+
+[[upatches.rodata]]
+symbol = "sandbox_policy"
+input = "sandbox.toml"
+generator = ["python3", "gen_policy.py"]
+update = ["python3", "gen_policy.py"]
+
+# One table per sandbox: sandbox.toml gives the rules of the tasks that
+# execute one of its paths.
+[[upatches.policy]]
+id = "apache"
+bit = 0x1
+paths = ["/usr/sbin/apache2", "/usr/sbin/httpd", "/usr/local/apache2/bin/httpd"]
+
+[[upatches.policy]]
+id = "php-fpm"
+bit = 0x2
+paths = ["/usr/sbin/php-fpm*", "/usr/local/sbin/php-fpm"]
+
+[[upatches.policy]]
+id = "nginx"
+bit = 0x4
+paths = ["/usr/sbin/nginx", "/usr/local/nginx/sbin/nginx", "/usr/local/openresty/nginx/sbin/nginx"]
+
+# Every "Plex ..." program of the server: Plex Media Server, Plex
+# Transcoder, Plex Media Scanner, Plex Script Host, Plex Tuner Service
+# and the others.
+[[upatches.policy]]
+id = "plex"
+bit = 0x8
+paths = ["/usr/lib/plexmediaserver/Plex*"]
+
+# The sandboxes contain these advisories rather than close them: code an
+# attacker runs in the server cannot start another program or leave a
+# code file behind. README.md says which guard closes which.
+[upatches.tree]
+id = "2shell-sandbox"
+fixes = ["CVE-2026-109618", "CVE-2026-109619", "CVE-2026-123007", "CVE-2026-123633", "CVE-2026-123634", "CVE-2026-121810", "CVE-2026-113425", "CVE-2026-96652", "CVE-2026-96654", "CVE-2026-96655", "CVE-2026-96656"]

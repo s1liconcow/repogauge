@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The guard for PHP-FPM at /usr/local/sbin/php-fpm. cli.bee and
+# apache.bee build the guards for the CLI and for mod_php (shirudo bpm
+# build --file <file>).
+
+[package]
+name = "php2shell-oom-guard-fpm"
+description = "Kills a PHP process before an out-of-memory bailout, PHP2Shell CVE-2026-109618 and CVE-2026-109619"
+license = "GPL-2.0 OR BSD-2-Clause"
+authors = ["shirudo-upatches contributors"]
+
+[[upatches]]
+source = "php2shell-oom-guard-fpm.bpf.c"
+
+[upatches.tree]
+id = "php2shell-oom-guard-fpm"
+fixes = ["CVE-2026-109618", "CVE-2026-109619"]
+
+[upatches.tree.selector]
+architecture = ["x86_64"]
+
+[upatches.tree.selector.kconfig]
+CONFIG_UPROBE_EVENTS = ["y"]
